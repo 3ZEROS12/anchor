@@ -2,13 +2,13 @@
 
 <p align="center">
   <strong>The Zero-Pollution, Context-Aware, Self-Evicting Task Protocol for AI Coding Agents.</strong><br>
-  <em>Stop polluting your AGENTS.md. Never forget across sessions; never rot inside context.</em>
+  <em>Clean up bloated AGENTS.md. Maintain cross-session intent without polluting your context window.</em>
 </p>
 
 <p align="center">
   <a href="README_zh.md">🇨🇳 简体中文</a> •
-  <a href="#-the-fatal-flaw-of-existing-solutions">💡 Why Anchor</a> •
-  <a href="#-three-core-mechanisms">✨ Core Mechanisms</a> •
+  <a href="#-problem-statement">💡 Problem Statement</a> •
+  <a href="#-core-mechanisms">✨ Core Mechanisms</a> •
   <a href="#-architecture--storage">🛠️ Architecture</a> •
   <a href="#-comparison">📊 Comparison</a> •
   <a href="#-quick-start">🚀 Quick Start</a>
@@ -24,19 +24,19 @@
 
 ---
 
-## 💡 The Fatal Flaw of Existing Solutions
+## 💡 Problem Statement
 
-Every software engineer working daily with AI coding agents (Claude Code, Pi, Cursor, Aider) suffers from three inescapable dilemmas:
+Engineers using autonomous CLI agents (Claude Code, Pi, Cursor, Aider) encounter three persistent frictions:
 
-1. **The Alzheimer's Void**: Press `Ctrl+C` or restart your terminal, and your agent forgets yesterday's crucial multi-turn commitments and architectural refactoring goals.
-2. **The Markdown Rot Trap**: To prevent forgetting, developers stuff tasks into `AGENTS.md`, `CLAUDE.md`, or `TODO.md`. Two weeks later, it festers into 800 lines of obsolete debris, burning thousands of precious context tokens on every single turn.
-3. **The Completion Paradox**: Unit tests only cover a fraction of real-world tasks (e.g., refactoring logic, reviewing design, triaging tech debt). Expecting humans to remember to manually tick checkboxes in a markdown file is a psychological impossibility.
+1. **Session State Loss**: Pressing `Ctrl+C` or exiting the terminal resets conversational state, discarding multi-turn refactoring goals and active commitments.
+2. **Context Bloat**: Persisting tasks into `AGENTS.md` or `TODO.md` leads to hundreds of lines of obsolete markdown over time, wasting tokens on every request.
+3. **Manual Verification Failure**: Non-trivial refactoring tasks often lack single-command automated test suites. Relying on developers to manually locate and edit markdown checkboxes leaves tasks unresolved indefinitely.
 
-**Anchor treats tasks not as static todo lists, but as short-term commercial promissory notes (Settlement Contracts): backed by evidence, resurfaced upon touch, closed face-to-face at session exit, and naturally decayed if abandoned.**
+Anchor models cross-session tasks as evidence-backed settlement contracts: linked to concrete file paths, resurfaced when related files are touched, verified at session exit, and naturally decayed when abandoned.
 
 ---
 
-## ✨ Three Core Mechanisms
+## ✨ Core Mechanisms
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -66,8 +66,10 @@ Every software engineer working daily with AI coding agents (Claude Code, Pi, Cu
 └──────────────────────────────┘            └─────────────────────────────────┘
 ```
 
-### 1. 🚪 One-Tap Exit Settlement (贴脸一键结案)
-When you finish coding and exit the session (typing `/exit` or pressing `Ctrl+C`), Anchor observes the files modified during the turn (e.g., via `tool_call` interception and `git status`). If modified files correlate with an active anchor, Anchor prompts a direct one-tap dialog:
+### 1. One-Tap Exit Settlement
+Developers rarely inspect task files after completing code changes.
+When Anchor intercepts a session shutdown or exit signal, it reads files modified during the turn. If changes intersect with an active anchor, it renders an inline settlement prompt:
+
 ```text
 ───────────────────────────────────────────────────────────────────
 ⚓ Anchor Settlement Proposal
@@ -76,17 +78,17 @@ When you finish coding and exit the session (typing `/exit` or pressing `Ctrl+C`
    [Enter Confirm Settle & Evict]  /  [Tab Keep Pending]
 ───────────────────────────────────────────────────────────────────
 ```
-No manual commands to remember. You hit **Enter** at the peak moment of completion, and the task is closed, archived, and evicted from context.
+Pressing Enter at session exit confirms task resolution, archives the entry, and frees prompt context immediately.
 
-### 2. ⚡ Context-Aware Resurface (意图触碰唤醒)
-Active tasks remain silent and never flood the prompt. When you or the agent touch a related directory (e.g., calling `read` on `src/auth/`), Anchor gently pulses an awareness indicator on the footer status line:
-> `💡 Anchor: Touched auth module. Anchor #anc-1 (JWT migration) is active. Press Tab to view.`
+### 2. Context-Aware Resurface
+Inactive anchors remain detached from system prompts. When an agent touches associated paths (such as `read` on `src/auth/`), Anchor surfaces a non-intrusive status line notice:
+> `💡 Anchor: Inspected auth directory. Anchor #anc-1 is active. Press Tab to view.`
 
-### 3. ⏳ Half-Life Decay & Auto-Sweep (遗忘半衰期自净)
-Tasks that you abandon never rot inside your agent's instructions:
-* **Days 0–3 (Active)**: Visible on footer status capsule; injected as a 2-line minimal tag.
-* **Days 4–7 (Sleeping)**: Automatically silenced from System Prompt. **Consumes exactly 0 tokens.**
-* **Day 14+ (Graveyard)**: Auto-swept into `.anchor/graveyard.jsonl` without manual intervention.
+### 3. Half-Life Decay & Auto-Sweep
+Tasks that receive no ongoing progress automatically transition through decay tiers:
+* **Days 0 to 3 (Active)**: Visible on status capsule; injected as a two-line structured reference.
+* **Days 4 to 7 (Sleeping)**: Excluded from the system prompt, consuming zero tokens.
+* **Day 14+ (Graveyard)**: Auto-swept into `.anchor/graveyard.jsonl` to keep active storage bounded.
 
 ---
 
@@ -94,64 +96,45 @@ Tasks that you abandon never rot inside your agent's instructions:
 
 | Dimension | `gastownhall/beads` (27k ⭐) | `engram` (6.7k ⭐) | `AGENTS.md` / `TODO.md` | **Anchor ⚓ (Ours)** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Philosophy** | Distributed SQL Graph | Passive Knowledge Brain | Static text checklist | **Auto-evicting promissory notes** |
-| **Dependencies** | Heavy (200MB Dolt DB) | Go binary + SQLite | None | **Zero runtime dependencies (pure TS/Node)** |
-| **Context Overhead**| Medium (requires `bd prime`) | High (injects facts) | Severe (>500 lines of rot) | **Ultra-compact (2 lines active, 0 lines sleeping)** |
-| **Exit Settlement** | ❌ None (must manually close) | ❌ No task lifecycle | ❌ None (manual delete) | **✅ Yes (One-Tap prompt on exit)** |
-| **Decay / Auto-Sweep**| ❌ No (manual prune) | ❌ No decay | ❌ No (rots permanently) | **✅ Built-in 3/7/14-day half-life machine** |
-| **TUI Experience** | Basic CLI output | Catppuccin TUI | Plain text | **Footer capsule + interactive Cockpit modal** |
+| **Data Model** | Distributed SQL Graph | Passive Knowledge Store | Static text checklist | **Auto-evicting promissory notes** |
+| **Dependencies** | Dolt database binary (200MB) | Go binary + SQLite | None | **Zero runtime dependencies (pure TS/Node)** |
+| **Token Overhead**| Medium (requires graph payload)| High (injects historical facts)| Severe (accumulates stale text) | **Compact (2 lines active, 0 lines sleeping)** |
+| **Exit Settlement** | Manual close command | No task lifecycle tracking | Manual markdown deletion | **Inline single-key confirmation at exit** |
+| **Decay Management**| Manual pruning | No decay transition | Retained permanently | **Built-in 3/7/14-day automated decay** |
+| **TUI Integration** | Standard CLI output | Catppuccin TUI | Plain text | **Status capsule + interactive modal cockpit** |
 
 ---
 
 ## 🛠️ Architecture & Storage
 
-Anchor uses atomic file-replacement writes (`state.json.tmp.<pid>` ➔ `renameSync`) guaranteeing zero JSON corruption even if the terminal is abruptly killed.
+Anchor uses atomic file-replacement writes (`state.json.tmp.<pid>` renamed over `state.json`), ensuring consistent JSON structure across abrupt terminal exits.
 
 ```
 .anchor/
-├── state.json           # Live state (active & sleeping anchors, < 5KB)
-├── archive.jsonl        # Append-only history of settled contracts
-└── graveyard.jsonl      # Append-only records of expired & swept items
+├── state.json           # Live active and sleeping states (< 5KB)
+├── archive.jsonl        # Append-only ledger of settled contracts
+└── graveyard.jsonl      # Append-only records of expired items
 ```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Pi Native Extension)
 
-### For Pi Coding Agent (Native Extension)
-
-1. Clone or copy into your Pi extension directory:
+Copy the package into your Pi extension directory:
 ```bash
-# Link to global Pi extensions
 cp -r projects/anchor ~/.pi/agent/extensions/anchor
 ```
 
-2. Open any project and use native commands:
+Invoke through standard terminal commands:
 ```bash
-/anchor                # Open the interactive Cockpit dashboard
-/pin "Fix auth bug"    # Instantly anchor a commitment
-/anchor sweep          # Manually trigger decay sweep
-```
-
-### Standalone Node Usage
-
-```typescript
-import { AnchorStore, evaluateAnchorDecay } from '@3zeros12/anchor';
-
-const store = new AnchorStore('./my-project');
-const anchor = store.create({
-  title: 'Optimize memory leak in export worker',
-  priority: 'p0',
-  files: ['src/worker/export.ts']
-});
-
-// Settle with evidence
-store.settle(anchor.id, { settledBy: 'one-tap-settlement' });
+/anchor               # Open interactive dashboard
+/pin "Fix auth bug"   # Create a persistent anchor
+/anchor sweep         # Trigger manual decay sweep
 ```
 
 ---
 
-## 🧪 Rigorous Automated Tests
+## 🧪 Automated Test Suite
 
 Engineered with 100% standard library test coverage using Node.js native test runner:
 
@@ -161,20 +144,20 @@ npm test
 ```
 
 ```text
-✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens (107ms)
-✔ AnchorDecay - status evaluation transitions (1.4ms)
-✔ AnchorDecay - sweepStore transitions and graveyard eviction (149ms)
-✔ AnchorMatcher - exact, prefix, and tag matching (2.6ms)
+✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens (96ms)
+✔ AnchorDecay - status evaluation transitions (1.6ms)
+✔ AnchorDecay - sweepStore transitions and graveyard eviction (139ms)
+✔ AnchorMatcher - exact, prefix, and tag matching (2.0ms)
 ✔ AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority (0.5ms)
 ✔ SessionTouchObserver - records read, edit, write and commits (1.6ms)
-✔ AnchorStore - basic CRUD & atomic writes (76ms)
-✔ AnchorStore - corrupt state recovery (4.5ms)
+✔ AnchorStore - basic CRUD & atomic writes (80ms)
+✔ AnchorStore - corrupt state recovery (19ms)
 
-ℹ pass 8, fail 0 (363ms total)
+ℹ pass 8, fail 0 (360ms total)
 ```
 
 ---
 
 ## 📄 License
 
-MIT © [Jason Song](https://github.com/3ZEROS12)
+MIT License © [Jason Song](https://github.com/3ZEROS12)
