@@ -1,0 +1,28 @@
+{
+  "name": "@3zeros12/anchor",
+  "version": "0.1.0",
+  "description": "The zero-pollution, context-aware, self-evicting task protocol for AI coding agents",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "test": "node --experimental-strip-types --test tests/**/*.test.ts",
+    "check": "node --experimental-strip-types -e \"import('./src/index.ts').then(() => console.log('Anchor module verified.'))\""
+  },
+  "keywords": [
+    "ai-agent",
+    "coding-agent",
+    "task-management",
+    "memory",
+    "context-window",
+    "zero-pollution",
+    "pi-extension"
+  ],
+  "author": "Jason Song <jiaxinsong312@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
