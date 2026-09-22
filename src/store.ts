@@ -27,7 +27,9 @@ export class AnchorStore {
 
   private ensureDirs(): void {
     if (!fs.existsSync(this.anchorDir)) {
-      fs.mkdirSync(this.anchorDir, { recursive: true });
+      try {
+        fs.mkdirSync(this.anchorDir, { recursive: true });
+      } catch {}
     }
   }
 

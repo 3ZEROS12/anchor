@@ -5,6 +5,11 @@
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
+  "pi": {
+    "extensions": [
+      "src/extension.ts"
+    ]
+  },
   "scripts": {
     "test": "node --experimental-strip-types --test tests/**/*.test.ts",
     "check": "node --experimental-strip-types -e \"import('./src/index.ts').then(() => console.log('Anchor module verified.'))\""

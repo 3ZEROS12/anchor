@@ -12,14 +12,11 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
   const active = store.list({ status: 'active' });
   const sleeping = store.list({ status: 'sleeping' });
 
-  if (active.length === 0 && sleeping.length === 0) {
-    ctx.ui.setStatus('anchor', undefined);
-    return;
-  }
-
   const parts: string[] = [];
   if (active.length > 0) {
     parts.push(`⚓ ● ${active.length} active`);
+  } else {
+    parts.push('⚓ 0 active');
   }
   if (sleeping.length > 0) {
     parts.push(`💤 ${sleeping.length} sleep`);
@@ -34,14 +31,17 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
 export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorStore): Promise<void> {
   if (!ctx.ui?.hasUI) return;
 
+  const OPT_ADD_EMPTY = '➕ 新建跨会话锚点';
+  const OPT_EXIT_EMPTY = '✕ 退出看板';
+
   const all = store.list();
   if (all.length === 0) {
     const action = await ctx.ui.select('⚓ Anchor 任务锚点看板 (空空如也)', [
-      { label: '➕ 新建跨会话锚点', value: 'add' },
-      { label: '✕ 退出看板', value: 'exit' }
+      OPT_ADD_EMPTY,
+      OPT_EXIT_EMPTY
     ]);
 
-    if (action === 'add') {
+    if (action === OPT_ADD_EMPTY) {
       const title = await ctx.ui.input('落锚新建', '请输入任务标题与承兑承诺:');
       if (title && title.trim()) {
         const created = store.create({ title: title.trim() });
@@ -52,27 +52,31 @@ export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorSt
     return;
   }
 
-  const options = all.map(a => {
+  const OPT_ADD = '➕ 新增任务锚点...';
+  const OPT_EXIT = '✕ 关闭看板';
+
+  const itemMap = new Map<string, string>();
+  const displayOptions: string[] = [];
+
+  for (const a of all) {
     const decay = evaluateAnchorDecay(a);
     const badge = a.status === 'active' ? '🟢 活跃' : '💤 休眠';
     const prio = `[${a.priority.toUpperCase()}]`;
     const daysInfo = a.status === 'active'
       ? `(活跃剩余 ${decay.remainingActiveDays}天)`
       : `(离脱落剩余 ${decay.remainingSleepDays}天)`;
+    const label = `${badge} #${a.id} ${prio} ${a.title} ${daysInfo}`;
+    itemMap.set(label, a.id);
+    displayOptions.push(label);
+  }
 
-    return {
-      label: `${badge} #${a.id} ${prio} ${a.title} ${daysInfo}`,
-      value: a.id
-    };
-  });
+  displayOptions.push(OPT_ADD);
+  displayOptions.push(OPT_EXIT);
 
-  options.push({ label: '➕ 新增任务锚点...', value: 'add' });
-  options.push({ label: '✕ 关闭看板', value: 'exit' });
+  const selected = await ctx.ui.select('⚓ Anchor 任务锚点驾驶舱', displayOptions);
+  if (!selected || selected === OPT_EXIT) return;
 
-  const selected = await ctx.ui.select('⚓ Anchor 任务锚点驾驶舱', options);
-  if (!selected || selected === 'exit') return;
-
-  if (selected === 'add') {
+  if (selected === OPT_ADD) {
     const title = await ctx.ui.input('落锚新建', '请输入任务标题:');
     if (title && title.trim()) {
       const created = store.create({ title: title.trim() });
@@ -82,24 +86,32 @@ export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorSt
     return;
   }
 
-  const anchor = store.get(selected);
+  const anchorId = itemMap.get(selected);
+  if (!anchorId) return;
+
+  const anchor = store.get(anchorId);
   if (!anchor) return;
+
+  const ACT_SETTLE = '✓ 确认结案归档 (Settle & Evict)';
+  const ACT_TOUCH = '⚡ 触碰激活 (Touch & Refresh TTL)';
+  const ACT_GRAVEYARD = '🗑 移入墓园 (Drop to Graveyard)';
+  const ACT_BACK = '← 返回';
 
   // Actions for selected anchor
   const action = await ctx.ui.select(`管理任务 #${anchor.id}: ${anchor.title}`, [
-    { label: '✓ 确认结案归档 (Settle & Evict)', value: 'settle' },
-    { label: '⚡ 触碰激活 (Touch & Refresh TTL)', value: 'touch' },
-    { label: '🗑 移入墓园 (Drop to Graveyard)', value: 'graveyard' },
-    { label: '← 返回', value: 'back' }
+    ACT_SETTLE,
+    ACT_TOUCH,
+    ACT_GRAVEYARD,
+    ACT_BACK
   ]);
 
-  if (action === 'settle') {
+  if (action === ACT_SETTLE) {
     store.settle(anchor.id, { settledBy: 'manual-command' });
     ctx.ui.notify(`⚓ 任务 #${anchor.id} 已结案归档！`, 'info');
-  } else if (action === 'touch') {
+  } else if (action === ACT_TOUCH) {
     store.touch(anchor.id);
     ctx.ui.notify(`⚓ 任务 #${anchor.id} 活跃半衰期已刷新！`, 'info');
-  } else if (action === 'graveyard') {
+  } else if (action === ACT_GRAVEYARD) {
     store.dropToGraveyard(anchor.id, 'Manually dropped from dashboard');
     ctx.ui.notify(`⚓ 任务 #${anchor.id} 已移入墓园档案。`, 'info');
   }

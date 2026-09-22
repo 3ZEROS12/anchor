@@ -53,7 +53,12 @@ export default function (pi: ExtensionAPI) {
 
     // Opportunistically scan git modified files
     try {
-      const gitStatus = execSync('git status --porcelain', { cwd: ctx.cwd, encoding: 'utf-8', timeout: 3000 });
+      const gitStatus = execSync('git status --porcelain', {
+        cwd: ctx.cwd,
+        encoding: 'utf-8',
+        timeout: 3000,
+        stdio: ['ignore', 'pipe', 'ignore']
+      });
       const changed = gitStatus
         .split('\n')
         .map(l => l.slice(3).trim())
