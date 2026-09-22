@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { Type } from '@sinclair/typebox';
 import { AnchorStore } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
 import { renderActiveAnchorsContext } from './context_injector.ts';
@@ -92,7 +93,103 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 5. Register /anchor command (with interactive TUI dashboard fallback)
+  // 5. Register LLM Tool: anchor
+  pi.registerTool({
+    name: 'anchor',
+    label: 'Anchor (Cross-session Task Protocol)',
+    description:
+      'Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup).',
+    promptSnippet: 'Anchor cross-session task contracts that survive terminal restarts and auto-evict',
+    promptGuidelines: [
+      'Use `anchor` when the user asks to retain a goal across sessions, e.g. "保留这个任务直到完成" or "记住明天优化X".',
+      'Never put cross-session tasks into AGENTS.md or TODO.md; use `anchor` instead to prevent context rot.',
+      'When code for an anchor is completed and verified, call `anchor` with action "settle" to archive it and free context.',
+      'Active anchors are automatically injected into future sessions in an ultra-compact block.'
+    ],
+    parameters: Type.Object({
+      action: Type.Union([
+        Type.Literal('pin'),
+        Type.Literal('list'),
+        Type.Literal('settle'),
+        Type.Literal('touch'),
+        Type.Literal('sweep')
+      ]),
+      title: Type.Optional(Type.String({ description: 'Short imperative task title (for pin)' })),
+      priority: Type.Optional(Type.Union([Type.Literal('p0'), Type.Literal('p1'), Type.Literal('p2')])),
+      files: Type.Optional(Type.Array(Type.String(), { description: 'Associated file paths or directory prefixes' })),
+      tags: Type.Optional(Type.Array(Type.String(), { description: 'Domain tags' })),
+      id: Type.Optional(Type.String({ description: 'Anchor ID, e.g. anc-1 (for settle or touch)' }))
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const s = getStore(ctx.cwd);
+      if (params.action === 'pin') {
+        if (!params.title) {
+          return { content: [{ type: 'text', text: 'Error: title is required for pin action' }], isError: true };
+        }
+        const anc = s.create({
+          title: params.title,
+          priority: params.priority || 'p1',
+          files: params.files || [],
+          tags: params.tags || []
+        });
+        updateAnchorStatusBar(ctx, s);
+        return {
+          content: [{
+            type: 'text',
+            text: `Successfully pinned cross-session anchor #${anc.id}: "${anc.title}". This contract will survive terminal restarts and will be tracked until settled.`
+          }],
+          isError: false
+        };
+      }
+
+      if (params.action === 'list') {
+        const active = s.list({ status: 'active' });
+        const sleeping = s.list({ status: 'sleeping' });
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ active, sleeping }, null, 2)
+          }],
+          isError: false
+        };
+      }
+
+      if (params.action === 'settle') {
+        if (!params.id) {
+          return { content: [{ type: 'text', text: 'Error: id is required for settle action' }], isError: true };
+        }
+        try {
+          const settled = s.settle(params.id, { settledBy: 'verification-test' });
+          updateAnchorStatusBar(ctx, s);
+          return {
+            content: [{
+              type: 'text',
+              text: `Anchor #${settled.id} successfully settled and evicted from active context. Stored in archive.jsonl.`
+            }],
+            isError: false
+          };
+        } catch (err: any) {
+          return { content: [{ type: 'text', text: err.message }], isError: true };
+        }
+      }
+
+      if (params.action === 'sweep') {
+        const res = sweepStore(s);
+        updateAnchorStatusBar(ctx, s);
+        return {
+          content: [{
+            type: 'text',
+            text: `Sweep complete: ${res.transitionedToSleeping.length} sleeping, ${res.evictedToGraveyard.length} evicted to graveyard.`
+          }],
+          isError: false
+        };
+      }
+
+      return { content: [{ type: 'text', text: 'Unknown action' }], isError: true };
+    }
+  });
+
+  // 6. Register /anchor command (with interactive TUI dashboard fallback)
   pi.registerCommand('anchor', {
     description: '跨会话任务锚点管理与驾驶舱',
     handler: async (args, ctx) => {
@@ -143,7 +240,15 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (sub === 'list' || sub === 'ls') {
-        await openAnchorDashboard(ctx, s);
+        const active = s.list({ status: 'active' });
+        const sleeping = s.list({ status: 'sleeping' });
+        const activeText = active.map(a => `• #${a.id} [${a.priority.toUpperCase()}] ${a.title}`).join('\n');
+        const sleepText = sleeping.map(a => `• #${a.id} (休眠) ${a.title}`).join('\n');
+
+        ctx.ui.notify(
+          `⚓ 【任务锚点总览】\n活跃中 (${active.length}):\n${activeText || '无'}\n\n休眠中 (${sleeping.length}):\n${sleepText || '无'}`,
+          'info'
+        );
         return;
       }
 

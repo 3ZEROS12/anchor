@@ -7,7 +7,7 @@ import { evaluateAnchorDecay } from './decay.ts';
  * Uses clean Cupertino / Minimalist dot aesthetic
  */
 export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore): void {
-  if (!ctx.ui?.hasUI) return;
+  if (!ctx.hasUI || !ctx.ui) return;
 
   const active = store.list({ status: 'active' });
   const sleeping = store.list({ status: 'sleeping' });
@@ -29,7 +29,7 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
  * Open the interactive Anchor Cockpit via native select dialog
  */
 export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorStore): Promise<void> {
-  if (!ctx.ui?.hasUI) return;
+  if (!ctx.hasUI || !ctx.ui) return;
 
   const OPT_ADD_EMPTY = '➕ 新建跨会话锚点';
   const OPT_EXIT_EMPTY = '✕ 退出看板';

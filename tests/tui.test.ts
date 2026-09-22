@@ -18,8 +18,8 @@ test('AnchorTUI - status bar reflects active and sleeping state correctly', () =
     let currentStatus: string | undefined;
 
     const mockCtx = {
+      hasUI: true,
       ui: {
-        hasUI: true,
         setStatus: (_key: string, text: string | undefined) => {
           currentStatus = text;
         }
@@ -59,8 +59,8 @@ test('AnchorTUI - openAnchorDashboard uses string[] options exclusively and exec
     let notifyMsg = '';
 
     const mockCtx = {
+      hasUI: true,
       ui: {
-        hasUI: true,
         select: async (title: string, options: string[]) => {
           selectTitle = title;
           selectOptions = options;
