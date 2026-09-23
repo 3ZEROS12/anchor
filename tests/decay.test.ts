@@ -72,7 +72,7 @@ test('AnchorDecay - sweepStore transitions and graveyard eviction', () => {
     assert.strictEqual(store.get(a3.id), undefined);
 
     // Graveyard file should have a3 recorded
-    const graveyardFile = path.join(tempDir, '.anchor', 'graveyard.jsonl');
+    const graveyardFile = path.join(tempDir, 'graveyard.jsonl');
     assert.ok(fs.existsSync(graveyardFile));
     const content = fs.readFileSync(graveyardFile, 'utf-8');
     assert.ok(content.includes('Task expired (20 days)'));

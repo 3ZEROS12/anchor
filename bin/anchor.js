@@ -5,21 +5,22 @@
  * Direct command-line interface for the Anchor cross-session task protocol.
  */
 
-import { DualAnchorStore } from '../src/store.ts';
+import { AnchorStore } from '../src/store.ts';
 import { evaluateAnchorDecay, sweepStore } from '../src/decay.ts';
 import { runPhysicalVerification } from '../src/settlement.ts';
+import path from 'node:path';
 
 const args = process.argv.slice(2);
 const command = args[0] || 'list';
-const store = new DualAnchorStore(process.cwd());
+const store = new AnchorStore(); // Global source of truth in ~/.pi/agent/anchors/
 
 function printHelp() {
   console.log(`
 ⚓ Anchor - Cross-session task protocol for AI coding agents
 
 Usage:
-  anchor list [-g|--global]           List active and sleeping anchors
-  anchor pin [-g|--global] <title>    Create a new task anchor
+  anchor list [-a|--all]              List anchors (default: current project, -a for all)
+  anchor pin <title>                  Create a new task anchor in current project
   anchor settle <id>                  Settle and archive a task
   anchor verify <id>                  Run physical verification command
   anchor show <id>                    Show detailed anchor metadata
@@ -28,21 +29,21 @@ Usage:
   anchor help                         Display this help message
 
 Options:
-  -g, --global   Target user-global space (~/.pi/agent/anchors/) instead of local (.anchor/)
+  -a, --all    Display anchors across all projects instead of only the current workspace
 `);
 }
 
 switch (command) {
   case 'list':
   case 'ls': {
-    const isGlobalOnly = args.includes('-g') || args.includes('--global');
-    const scopeFilter = isGlobalOnly ? 'global' : 'all';
-    const active = store.list({ status: 'active', scope: scopeFilter });
-    const sleeping = store.list({ status: 'sleeping', scope: scopeFilter });
+    const showAll = args.includes('-a') || args.includes('--all');
+    const active = store.list({ status: 'active', cwd: showAll ? undefined : process.cwd(), all: showAll });
+    const sleeping = store.list({ status: 'sleeping', cwd: showAll ? undefined : process.cwd(), all: showAll });
 
-    console.log('\n⚓ [Anchor Task Ledger]');
+    const scopeTitle = showAll ? 'ALL WORKSPACES' : (path.basename(process.cwd()) || 'CURRENT WORKSPACE');
+    console.log(`\n⚓ [Anchor Task Ledger · ${scopeTitle}]`);
     if (active.length === 0 && sleeping.length === 0) {
-      console.log('  No active anchors found. Use `anchor pin <task>` to create one.\n');
+      console.log(`  No active anchors found. Use \`anchor pin <task>\` to create one.\n`);
       break;
     }
 
@@ -51,10 +52,10 @@ switch (command) {
       for (const a of active) {
         const decay = evaluateAnchorDecay(a);
         const prio = `[${a.priority.toUpperCase()}]`;
-        const scope = a.scope === 'global' ? '[global]' : '[project]';
+        const proj = a.cwd ? `[${a.project}]` : '[global]';
         const files = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(', ')})` : '';
         const verify = a.verifyCommand ? ` [verify: ${a.verifyCommand}]` : '';
-        console.log(`    #${a.id} ${scope} ${prio} ${a.title}${files}${verify} · ${decay.remainingActiveDays}d left`);
+        console.log(`    #${a.id} ${proj} ${prio} ${a.title}${files}${verify} · ${decay.remainingActiveDays}d left`);
       }
     }
 
@@ -62,8 +63,8 @@ switch (command) {
       console.log('\n  SLEEPING (0 context tokens):');
       for (const a of sleeping) {
         const decay = evaluateAnchorDecay(a);
-        const scope = a.scope === 'global' ? '[global]' : '[project]';
-        console.log(`    #${a.id} ${scope} ${a.title} · ${decay.remainingSleepDays}d until graveyard`);
+        const proj = a.cwd ? `[${a.project}]` : '[global]';
+        console.log(`    #${a.id} ${proj} ${a.title} · ${decay.remainingSleepDays}d until graveyard`);
       }
     }
     console.log();
@@ -72,8 +73,7 @@ switch (command) {
 
   case 'pin':
   case 'add': {
-    const isGlobal = args.includes('-g') || args.includes('--global');
-    const cleanArgs = args.slice(1).filter(a => a !== '-g' && a !== '--global');
+    const cleanArgs = args.slice(1);
     const title = cleanArgs.join(' ').trim();
 
     if (!title) {
@@ -83,11 +83,11 @@ switch (command) {
 
     const anc = store.create({
       title,
-      scope: isGlobal ? 'global' : 'project'
+      cwd: process.cwd()
     });
 
-    console.log(`\n⚓ Pinned [${anc.scope.toUpperCase()}] anchor #${anc.id}: "${anc.title}"`);
-    console.log(`   Location: ${anc.scope === 'global' ? '~/.pi/agent/anchors/' : '.anchor/'}\n`);
+    console.log(`\n⚓ Pinned anchor #${anc.id}: "${anc.title}" [${anc.project}]`);
+    console.log(`   Global Ledger: ~/.pi/agent/anchors/ (0 workspace git clutter)\n`);
     break;
   }
 
@@ -116,26 +116,26 @@ switch (command) {
       process.exit(1);
     }
 
-    const item = store.get(id);
-    if (!item) {
+    const a = store.get(id);
+    if (!a) {
       console.error(`Error: anchor ${id} not found`);
       process.exit(1);
     }
 
-    if (!item.anchor.verifyCommand) {
-      console.log(`Anchor #${item.anchor.id} has no verification command configured.`);
+    if (!a.verifyCommand) {
+      console.log(`Anchor #${a.id} has no verification command configured.`);
       break;
     }
 
-    console.log(`Running verification for #${item.anchor.id}: ${item.anchor.verifyCommand}...`);
-    const res = runPhysicalVerification(item.anchor, process.cwd());
+    console.log(`Running verification for #${a.id}: ${a.verifyCommand}...`);
+    const res = runPhysicalVerification(a, process.cwd());
     if (res.success) {
       console.log(`✓ Verification passed! Settling anchor...`);
-      store.settle(item.anchor.id, {
+      store.settle(a.id, {
         settledBy: 'verification-test',
-        summary: `CLI verification passed: ${item.anchor.verifyCommand}`
+        summary: `CLI verification passed: ${a.verifyCommand}`
       });
-      console.log(`⚓ Anchor #${item.anchor.id} successfully settled and archived.`);
+      console.log(`⚓ Anchor #${a.id} successfully settled and archived.`);
     } else {
       console.error(`✗ Verification failed:\n${res.output}`);
       process.exit(1);
@@ -150,19 +150,18 @@ switch (command) {
       process.exit(1);
     }
 
-    const item = store.get(id);
-    if (!item) {
+    const a = store.get(id);
+    if (!a) {
       console.error(`Error: anchor ${id} not found`);
       process.exit(1);
     }
 
-    const a = item.anchor;
     const decay = evaluateAnchorDecay(a);
     console.log(`
 ⚓ Anchor #${a.id}
   Title:         ${a.title}
   Status:        ${a.status.toUpperCase()}
-  Scope:         ${a.scope} (${item.store.anchorDir})
+  Project:       ${a.project} (Workspace: ${a.cwd || 'system-global'})
   Priority:      ${a.priority.toUpperCase()}
   Created:       ${new Date(a.createdAt).toLocaleString()}
   Last Touched:  ${new Date(a.lastTouchedAt).toLocaleString()}
@@ -175,16 +174,16 @@ switch (command) {
   }
 
   case 'log': {
-    const archive = store.getArchive();
+    const archive = store.getArchive({ cwd: process.cwd() });
     console.log(`\n⚓ [Settled Anchor History] (${archive.length} records)`);
     if (archive.length === 0) {
-      console.log('  No settled anchors recorded yet.\n');
+      console.log('  No settled anchors recorded for current workspace.\n');
       break;
     }
 
     for (const a of archive.slice(-10).reverse()) {
       const settledDate = a.evidence?.settledAt ? new Date(a.evidence.settledAt).toLocaleDateString() : '';
-      console.log(`  ✓ #${a.id} [${a.scope}] ${a.title} (${settledDate}) [by ${a.evidence?.settledBy || 'unknown'}]`);
+      console.log(`  ✓ #${a.id} [${a.project}] ${a.title} (${settledDate}) [by ${a.evidence?.settledBy || 'unknown'}]`);
     }
     console.log();
     break;

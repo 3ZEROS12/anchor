@@ -5,6 +5,7 @@ import type { Anchor, TouchMatchResult } from './types.ts';
  * Normalize path separators to POSIX forward slashes
  */
 export function normalizePath(filePath: string): string {
+  if (typeof filePath !== 'string') return '';
   return filePath.trim().replace(/\\/g, '/').replace(/^\.\//, '');
 }
 

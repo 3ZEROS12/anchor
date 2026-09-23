@@ -1,11 +1,10 @@
 /**
  * Anchor Data Contracts & Type Definitions
- * Designed for zero-pollution, evidence-based cross-session task lifecycle.
+ * Single Global Source of Truth with Zero Workspace Contamination.
  */
 
 export type AnchorStatus = 'active' | 'sleeping' | 'settled' | 'graveyard';
 export type AnchorPriority = 'p0' | 'p1' | 'p2';
-export type AnchorScope = 'project' | 'global';
 
 export interface AnchorDecayPolicy {
   /** Days before an untouched active anchor transitions to sleeping (default: 3) */
@@ -25,7 +24,7 @@ export interface AnchorEvidence {
 }
 
 export interface Anchor {
-  /** Unique identifier, e.g., 'anc-1' or 'anc-a8f2' */
+  /** Unique sequential identifier, e.g., 'anc-1' */
   id: string;
   /** Short imperative title of the task */
   title: string;
@@ -35,8 +34,10 @@ export interface Anchor {
   priority: AnchorPriority;
   /** Current lifecycle status */
   status: AnchorStatus;
-  /** Storage scope: project-local or user-global */
-  scope: AnchorScope;
+  /** Canonical project name (e.g. 'PPT', 'X', or 'global') */
+  project: string;
+  /** Canonical root directory where the task was anchored (empty string for global tasks) */
+  cwd: string;
   /** Creation timestamp in ms */
   createdAt: number;
   /** Last update timestamp in ms */

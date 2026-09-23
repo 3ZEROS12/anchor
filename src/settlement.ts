@@ -1,4 +1,4 @@
-import type { AnchorStore, DualAnchorStore } from './store.ts';
+import type { AnchorStore } from './store.ts';
 import { findMatchedAnchors } from './matcher.ts';
 import type { Anchor, SettlementProposal } from './types.ts';
 import { execSync } from 'node:child_process';
@@ -28,10 +28,12 @@ export function runPhysicalVerification(anchor: Anchor, cwd: string): { success:
  * Generate settlement candidates based on files touched during the session
  */
 export function generateSettlementProposals(
-  store: AnchorStore | DualAnchorStore,
-  touchedFiles: string[]
+  store: AnchorStore,
+  touchedFiles: string[],
+  cwd?: string
 ): SettlementProposal[] {
-  const activeAndSleeping = store.list().filter(a => a.status === 'active' || a.status === 'sleeping');
+  // Only match active/sleeping anchors belonging to current workspace
+  const activeAndSleeping = store.list({ cwd }).filter(a => a.status === 'active' || a.status === 'sleeping');
   const matches = findMatchedAnchors(activeAndSleeping, touchedFiles);
 
   const proposals: SettlementProposal[] = [];

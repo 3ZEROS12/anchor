@@ -5,44 +5,40 @@ import type {
   Anchor,
   AnchorEvidence,
   AnchorPriority,
-  AnchorScope,
   AnchorStatus,
   AnchorStoreState
 } from './types.ts';
 import { DEFAULT_DECAY_POLICY } from './types.ts';
+import { normalizePath } from './matcher.ts';
 
 export class AnchorStore {
-  public readonly rootDir: string;
-  public readonly scope: AnchorScope;
-  public readonly anchorDir: string;
+  public readonly storageDir: string;
   public readonly statePath: string;
   public readonly archivePath: string;
   public readonly graveyardPath: string;
 
-  constructor(rootDir: string = process.cwd(), scope: AnchorScope = 'project', customGlobalDir?: string) {
-    this.rootDir = path.resolve(rootDir);
-    this.scope = scope;
-    if (scope === 'global') {
-      this.anchorDir = customGlobalDir || path.join(os.homedir(), '.pi', 'agent', 'anchors');
+  constructor(customStorageDir?: string) {
+    if (customStorageDir) {
+      this.storageDir = path.resolve(customStorageDir);
     } else {
-      this.anchorDir = path.join(this.rootDir, '.anchor');
+      this.storageDir = path.join(os.homedir(), '.pi', 'agent', 'anchors');
     }
-    this.statePath = path.join(this.anchorDir, 'state.json');
-    this.archivePath = path.join(this.anchorDir, 'archive.jsonl');
-    this.graveyardPath = path.join(this.anchorDir, 'graveyard.jsonl');
+    this.statePath = path.join(this.storageDir, 'state.json');
+    this.archivePath = path.join(this.storageDir, 'archive.jsonl');
+    this.graveyardPath = path.join(this.storageDir, 'graveyard.jsonl');
     this.ensureDirs();
   }
 
   private ensureDirs(): void {
-    if (!fs.existsSync(this.anchorDir)) {
+    if (!fs.existsSync(this.storageDir)) {
       try {
-        fs.mkdirSync(this.anchorDir, { recursive: true });
+        fs.mkdirSync(this.storageDir, { recursive: true });
       } catch {}
     }
   }
 
   /**
-   * Load current store state. If non-existent or corrupted, returns clean default.
+   * Load store state. If corrupt or missing, returns safe default.
    */
   public loadState(): AnchorStoreState {
     this.ensureDirs();
@@ -58,12 +54,11 @@ export class AnchorStore {
       const raw = fs.readFileSync(this.statePath, 'utf-8');
       const data = JSON.parse(raw);
       if (!Array.isArray(data.anchors)) {
-        throw new Error('Invalid state structure: anchors must be an array');
+        throw new Error('Invalid state: anchors must be array');
       }
       return data as AnchorStoreState;
-    } catch (err) {
-      // Backup corrupted file for forensic safety and initialize clean slate
-      const backupPath = path.join(this.anchorDir, `state.corrupt.${Date.now()}.json`);
+    } catch {
+      const backupPath = path.join(this.storageDir, `state.corrupt.${Date.now()}.json`);
       try {
         fs.renameSync(this.statePath, backupPath);
       } catch {}
@@ -80,43 +75,43 @@ export class AnchorStore {
    */
   public saveState(state: AnchorStoreState): void {
     this.ensureDirs();
-    const tempPath = path.join(this.anchorDir, `state.tmp.${process.pid}.${Date.now()}`);
-    const serialized = JSON.stringify(state, null, 2);
-    fs.writeFileSync(tempPath, serialized, 'utf-8');
+    const tempPath = path.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}`);
+    fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8');
     fs.renameSync(tempPath, this.statePath);
   }
 
-  /**
-   * Generate next sequential ID, e.g. 'anc-1', 'anc-2'
-   */
   private generateId(existingAnchors: Anchor[]): string {
-    const prefix = this.scope === 'global' ? 'anc-g' : 'anc-';
-    const regex = new RegExp(`^${prefix}(\\d+)$`);
     const numbers = existingAnchors
       .map(a => {
-        const match = a.id.match(regex);
+        const match = a.id.match(/^anc-(\d+)$/);
         return match ? parseInt(match[1], 10) : 0;
       })
       .filter(n => n > 0);
     const nextNum = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
-    return `${prefix}${nextNum}`;
+    return `anc-${nextNum}`;
   }
 
   /**
-   * Create a new Anchor
+   * Create a new Anchor with automatic project and cwd tagging
    */
   public create(input: {
     title: string;
     description?: string;
     priority?: AnchorPriority;
+    cwd?: string;
+    project?: string;
     files?: string[];
     tags?: string[];
-    scope?: AnchorScope;
     verifyCommand?: string;
   }): Anchor {
     const state = this.loadState();
     const now = Date.now();
     const id = this.generateId(state.anchors);
+
+    const cwd = input.cwd ? normalizePath(input.cwd) : '';
+    const projectName = input.project
+      ? input.project.trim()
+      : (cwd ? path.basename(cwd) : 'global');
 
     const anchor: Anchor = {
       id,
@@ -124,11 +119,12 @@ export class AnchorStore {
       description: input.description?.trim(),
       priority: input.priority || 'p1',
       status: 'active',
-      scope: input.scope || this.scope,
+      project: projectName,
+      cwd,
       createdAt: now,
       updatedAt: now,
       lastTouchedAt: now,
-      files: (input.files || []).map(f => f.trim().replace(/\\/g, '/')).filter(Boolean),
+      files: (input.files || []).map(f => normalizePath(f)).filter(Boolean),
       tags: (input.tags || []).map(t => t.trim()).filter(Boolean),
       verifyCommand: input.verifyCommand?.trim() || undefined,
       decay: { ...DEFAULT_DECAY_POLICY }
@@ -148,13 +144,30 @@ export class AnchorStore {
   }
 
   /**
-   * List anchors with optional status/priority filtering
+   * List anchors. By default, if cwd is provided, only returns anchors
+   * belonging to this cwd or marked as global (''). Pass all: true for global view.
    */
-  public list(filter?: { status?: AnchorStatus; priority?: AnchorPriority }): Anchor[] {
+  public list(filter?: {
+    status?: AnchorStatus;
+    priority?: AnchorPriority;
+    cwd?: string;
+    all?: boolean;
+  }): Anchor[] {
     const state = this.loadState();
+    const targetCwd = filter?.cwd ? normalizePath(filter.cwd) : null;
+
     return state.anchors.filter(a => {
       if (filter?.status && a.status !== filter.status) return false;
       if (filter?.priority && a.priority !== filter.priority) return false;
+
+      // Project context filtering
+      if (!filter?.all && targetCwd) {
+        // Return if matches current cwd, or is a system-wide global anchor (cwd === '')
+        if (a.cwd && a.cwd !== targetCwd) {
+          return false;
+        }
+      }
+
       return true;
     });
   }
@@ -177,7 +190,7 @@ export class AnchorStore {
     };
 
     if (patch.files) {
-      updated.files = patch.files.map(f => f.trim().replace(/\\/g, '/')).filter(Boolean);
+      updated.files = patch.files.map(f => normalizePath(f)).filter(Boolean);
     }
 
     state.anchors[idx] = updated;
@@ -186,7 +199,7 @@ export class AnchorStore {
   }
 
   /**
-   * Touch an anchor to refresh its decay window and reactivate sleeping anchor
+   * Touch an anchor to refresh its decay window and reactivate sleeping state
    */
   public touch(id: string, timestamp: number = Date.now()): Anchor {
     const state = this.loadState();
@@ -199,7 +212,7 @@ export class AnchorStore {
     current.lastTouchedAt = timestamp;
     current.updatedAt = timestamp;
     if (current.status === 'sleeping') {
-      current.status = 'active'; // Wake up upon file touch
+      current.status = 'active';
     }
 
     state.anchors[idx] = current;
@@ -208,7 +221,7 @@ export class AnchorStore {
   }
 
   /**
-   * Settle and archive an anchor (closing the contract)
+   * Settle and archive an anchor
    */
   public settle(id: string, evidence: AnchorEvidence = {}): Anchor {
     const state = this.loadState();
@@ -226,11 +239,8 @@ export class AnchorStore {
       settledBy: evidence.settledBy || 'manual-command'
     };
 
-    // 1. Append to archive.jsonl
     this.ensureDirs();
     fs.appendFileSync(this.archivePath, JSON.stringify(anchor) + '\n', 'utf-8');
-
-    // 2. Save active state without this anchor
     this.saveState(state);
     return anchor;
   }
@@ -259,106 +269,29 @@ export class AnchorStore {
     return anchor;
   }
 
-  public getArchive(): Anchor[] {
+  public getArchive(filter?: { cwd?: string; all?: boolean }): Anchor[] {
     if (!fs.existsSync(this.archivePath)) return [];
     try {
       const raw = fs.readFileSync(this.archivePath, 'utf-8');
-      return raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+      const all: Anchor[] = raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+      if (filter?.all || !filter?.cwd) return all;
+      const targetCwd = normalizePath(filter.cwd);
+      return all.filter(a => !a.cwd || a.cwd === targetCwd);
     } catch {
       return [];
     }
   }
 
-  public getGraveyard(): Anchor[] {
+  public getGraveyard(filter?: { cwd?: string; all?: boolean }): Anchor[] {
     if (!fs.existsSync(this.graveyardPath)) return [];
     try {
       const raw = fs.readFileSync(this.graveyardPath, 'utf-8');
-      return raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+      const all: Anchor[] = raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+      if (filter?.all || !filter?.cwd) return all;
+      const targetCwd = normalizePath(filter.cwd);
+      return all.filter(a => !a.cwd || a.cwd === targetCwd);
     } catch {
       return [];
     }
-  }
-}
-
-/**
- * Multi-scope store manager handling both Project-local (.anchor/) and User-global (~/.pi/agent/anchors/)
- */
-export class DualAnchorStore {
-  public readonly projectStore: AnchorStore;
-  public readonly globalStore: AnchorStore;
-
-  constructor(cwd: string = process.cwd(), customGlobalDir?: string) {
-    this.projectStore = new AnchorStore(cwd, 'project');
-    this.globalStore = new AnchorStore(cwd, 'global', customGlobalDir);
-  }
-
-  public getStoreForScope(scope: AnchorScope): AnchorStore {
-    return scope === 'global' ? this.globalStore : this.projectStore;
-  }
-
-  public get(id: string): { anchor: Anchor; store: AnchorStore } | undefined {
-    const inProj = this.projectStore.get(id);
-    if (inProj) return { anchor: inProj, store: this.projectStore };
-    const inGlob = this.globalStore.get(id);
-    if (inGlob) return { anchor: inGlob, store: this.globalStore };
-    return undefined;
-  }
-
-  public list(filter?: { status?: AnchorStatus; priority?: AnchorPriority; scope?: AnchorScope | 'all' }): Anchor[] {
-    const targetScope = filter?.scope || 'all';
-    let res: Anchor[] = [];
-    if (targetScope === 'all' || targetScope === 'project') {
-      res = res.concat(this.projectStore.list(filter));
-    }
-    if (targetScope === 'all' || targetScope === 'global') {
-      res = res.concat(this.globalStore.list(filter));
-    }
-    return res;
-  }
-
-  public create(input: {
-    title: string;
-    description?: string;
-    priority?: AnchorPriority;
-    files?: string[];
-    tags?: string[];
-    scope?: AnchorScope;
-    verifyCommand?: string;
-  }): Anchor {
-    const targetScope = input.scope || 'project';
-    const store = this.getStoreForScope(targetScope);
-    return store.create(input);
-  }
-
-  public getArchive(scope: AnchorScope | 'all' = 'all'): Anchor[] {
-    let res: Anchor[] = [];
-    if (scope === 'all' || scope === 'project') res = res.concat(this.projectStore.getArchive());
-    if (scope === 'all' || scope === 'global') res = res.concat(this.globalStore.getArchive());
-    return res;
-  }
-
-  public getGraveyard(scope: AnchorScope | 'all' = 'all'): Anchor[] {
-    let res: Anchor[] = [];
-    if (scope === 'all' || scope === 'project') res = res.concat(this.projectStore.getGraveyard());
-    if (scope === 'all' || scope === 'global') res = res.concat(this.globalStore.getGraveyard());
-    return res;
-  }
-
-  public settle(id: string, evidence?: AnchorEvidence): Anchor {
-    const item = this.get(id);
-    if (!item) throw new Error(`Anchor not found: ${id}`);
-    return item.store.settle(id, evidence);
-  }
-
-  public touch(id: string, timestamp?: number): Anchor {
-    const item = this.get(id);
-    if (!item) throw new Error(`Anchor not found: ${id}`);
-    return item.store.touch(id, timestamp);
-  }
-
-  public dropToGraveyard(id: string, reason: string): Anchor {
-    const item = this.get(id);
-    if (!item) throw new Error(`Anchor not found: ${id}`);
-    return item.store.dropToGraveyard(id, reason);
   }
 }

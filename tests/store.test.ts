@@ -31,7 +31,7 @@ test('AnchorStore - basic CRUD & atomic writes', () => {
     assert.deepStrictEqual(anc1.files, ['src/auth/login.ts', 'src/auth/session.ts']);
 
     // 3. Verify state persisted on disk
-    const stateFile = path.join(tempDir, '.anchor', 'state.json');
+    const stateFile = path.join(tempDir, 'state.json');
     assert.ok(fs.existsSync(stateFile));
 
     // 4. Reload from disk
@@ -57,7 +57,7 @@ test('AnchorStore - basic CRUD & atomic writes', () => {
     assert.strictEqual(store.list().length, 0); // Removed from active state
 
     // 8. Verify archive.jsonl
-    const archiveFile = path.join(tempDir, '.anchor', 'archive.jsonl');
+    const archiveFile = path.join(tempDir, 'archive.jsonl');
     assert.ok(fs.existsSync(archiveFile));
     const archiveContent = fs.readFileSync(archiveFile, 'utf-8');
     assert.ok(archiveContent.includes('Fix auth session regression'));
@@ -78,7 +78,7 @@ test('AnchorStore - corrupt state recovery', () => {
     const state = store.loadState();
     assert.strictEqual(state.anchors.length, 0);
 
-    const files = fs.readdirSync(store.anchorDir);
+    const files = fs.readdirSync(store.storageDir);
     assert.ok(files.some(f => f.startsWith('state.corrupt.')));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { DualAnchorStore } from './store.ts';
+import { AnchorStore } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
 import { renderActiveAnchorsContext } from './context_injector.ts';
 import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
@@ -9,27 +9,20 @@ import { updateAnchorStatusBar, openAnchorDashboard } from './tui.ts';
 import { execSync } from 'node:child_process';
 
 export default function (pi: ExtensionAPI) {
-  let store: DualAnchorStore | null = null;
+  // Global authoritative store in ~/.pi/agent/anchors/ (0 workspace clutter)
+  const store = new AnchorStore();
   const observer = new SessionTouchObserver();
 
-  function getStore(cwd: string): DualAnchorStore {
-    if (!store || store.projectStore.rootDir !== cwd) {
-      store = new DualAnchorStore(cwd);
-    }
-    return store;
-  }
-
-  // 1. Session start: sweep stale tasks and update TUI status bar
+  // 1. Session start: sweep stale tasks and update TUI status bar for current workspace
   pi.on('session_start', async (_event, ctx) => {
-    const s = getStore(ctx.cwd);
     observer.clear();
-    const sweep = sweepStore(s);
+    const sweep = sweepStore(store);
 
     if (sweep.transitionedToSleeping.length > 0) {
       ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} 个非活跃任务已进入休眠`, 'info');
     }
 
-    updateAnchorStatusBar(ctx, s);
+    updateAnchorStatusBar(ctx, store);
   });
 
   // 2. Track touched files across all tool calls
@@ -37,10 +30,9 @@ export default function (pi: ExtensionAPI) {
     observer.recordToolCall(event.toolName, event.input || {});
   });
 
-  // 3. Ultra-compact context injection (only active anchors, sleeping consume 0 tokens)
+  // 3. Ultra-compact context injection (only active anchors matching current cwd, 0 token overhead elsewhere)
   pi.on('before_agent_start', async (event, ctx) => {
-    const s = getStore(ctx.cwd);
-    const contextSnippet = renderActiveAnchorsContext(s);
+    const contextSnippet = renderActiveAnchorsContext(store, ctx.cwd);
     if (contextSnippet) {
       return {
         systemPrompt: `${event.systemPrompt}\n\n${contextSnippet}`
@@ -48,10 +40,8 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 4. Session shutdown: One-tap settlement check
+  // 4. Session shutdown: One-tap settlement check scoped to current workspace
   pi.on('session_shutdown', async (_event, ctx) => {
-    const s = getStore(ctx.cwd);
-
     // Opportunistically scan git modified files
     try {
       const gitStatus = execSync('git status --porcelain', {
@@ -72,7 +62,7 @@ export default function (pi: ExtensionAPI) {
     const touched = observer.getTouchedFiles();
     if (touched.length === 0) return;
 
-    const proposals = generateSettlementProposals(s, touched);
+    const proposals = generateSettlementProposals(store, touched, ctx.cwd);
     if (proposals.length === 0) return;
 
     // Check proposals for automated verification or one-tap settlement
@@ -83,7 +73,7 @@ export default function (pi: ExtensionAPI) {
       if (a.verifyCommand) {
         const verifyRes = runPhysicalVerification(a, ctx.cwd);
         if (verifyRes.success) {
-          s.settle(a.id, {
+          store.settle(a.id, {
             settledBy: 'verification-test',
             summary: `Automated test passed: ${a.verifyCommand}`,
             touchedFiles: prop.matchedFiles
@@ -99,7 +89,7 @@ export default function (pi: ExtensionAPI) {
       );
 
       if (ok) {
-        s.settle(a.id, {
+        store.settle(a.id, {
           settledBy: 'one-tap-settlement',
           touchedFiles: prop.matchedFiles
         });
@@ -113,11 +103,11 @@ export default function (pi: ExtensionAPI) {
     name: 'anchor',
     label: 'Anchor (Cross-session Task Protocol)',
     description:
-      'Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Scope can be "project" (default, stored in .anchor/) or "global" (stored in ~/.pi/agent/anchors/).',
+      'Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Stored in the global ledger (~/.pi/agent/anchors/) with zero project repository pollution.',
     promptSnippet: 'Anchor cross-session task contracts that survive terminal restarts and auto-evict',
     promptGuidelines: [
       'Use `anchor` when the user asks to retain a goal across sessions, e.g. "保留这个任务直到完成" or "记住明天优化X".',
-      'Choose scope: "global" for system/agent-wide tasks (e.g. Pi updates, user habits), "project" for repo-specific coding tasks.',
+      'Tasks are automatically scoped to the current project context without cluttering the project git repository.',
       'Never put cross-session tasks into AGENTS.md or TODO.md; use `anchor` instead to prevent context rot.',
       'When code for an anchor is completed and verified, call `anchor` with action "settle" to archive it and free context.',
       'Active anchors are automatically injected into future sessions in an ultra-compact block.'
@@ -132,37 +122,37 @@ export default function (pi: ExtensionAPI) {
       ]),
       title: Type.Optional(Type.String({ description: 'Short imperative task title (for pin)' })),
       priority: Type.Optional(Type.Union([Type.Literal('p0'), Type.Literal('p1'), Type.Literal('p2')])),
-      scope: Type.Optional(Type.Union([Type.Literal('project'), Type.Literal('global')], { description: 'Storage scope: project-local (.anchor/) or user-global (~/.pi/agent/anchors/)' })),
       files: Type.Optional(Type.Array(Type.String(), { description: 'Associated file paths or directory prefixes' })),
       tags: Type.Optional(Type.Array(Type.String(), { description: 'Domain tags' })),
-      id: Type.Optional(Type.String({ description: 'Anchor ID, e.g. anc-1 or anc-g1 (for settle or touch)' }))
+      verifyCommand: Type.Optional(Type.String({ description: 'Optional shell command for automated physical verification' })),
+      id: Type.Optional(Type.String({ description: 'Anchor ID, e.g. anc-1 (for settle or touch)' }))
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const s = getStore(ctx.cwd);
       if (params.action === 'pin') {
         if (!params.title) {
           return { content: [{ type: 'text', text: 'Error: title is required for pin action' }], isError: true };
         }
-        const anc = s.create({
+        const anc = store.create({
           title: params.title,
           priority: params.priority || 'p1',
-          scope: params.scope || 'project',
+          cwd: ctx.cwd,
           files: params.files || [],
-          tags: params.tags || []
+          tags: params.tags || [],
+          verifyCommand: params.verifyCommand
         });
-        updateAnchorStatusBar(ctx, s);
+        updateAnchorStatusBar(ctx, store);
         return {
           content: [{
             type: 'text',
-            text: `Successfully pinned [${anc.scope.toUpperCase()}] anchor #${anc.id}: "${anc.title}". Stored in ${anc.scope === 'global' ? '~/.pi/agent/anchors/' : '.anchor/'}.`
+            text: `Successfully anchored task #${anc.id}: "${anc.title}" [${anc.project}]. Stored in global ledger (~/.pi/agent/anchors/).`
           }],
           isError: false
         };
       }
 
       if (params.action === 'list') {
-        const active = s.list({ status: 'active', scope: params.scope || 'all' });
-        const sleeping = s.list({ status: 'sleeping', scope: params.scope || 'all' });
+        const active = store.list({ status: 'active', cwd: ctx.cwd });
+        const sleeping = store.list({ status: 'sleeping', cwd: ctx.cwd });
         return {
           content: [{
             type: 'text',
@@ -177,8 +167,8 @@ export default function (pi: ExtensionAPI) {
           return { content: [{ type: 'text', text: 'Error: id is required for settle action' }], isError: true };
         }
         try {
-          const settled = s.settle(params.id, { settledBy: 'verification-test' });
-          updateAnchorStatusBar(ctx, s);
+          const settled = store.settle(params.id, { settledBy: 'verification-test' });
+          updateAnchorStatusBar(ctx, store);
           return {
             content: [{
               type: 'text',
@@ -192,8 +182,8 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (params.action === 'sweep') {
-        const res = sweepStore(s);
-        updateAnchorStatusBar(ctx, s);
+        const res = sweepStore(store);
+        updateAnchorStatusBar(ctx, store);
         return {
           content: [{
             type: 'text',
@@ -207,32 +197,31 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 6. Register /anchor command (with interactive ToolFlow-style TUI cockpit)
+  // 6. Register /anchor command
   pi.registerCommand('anchor', {
-    description: '跨会话任务锚点管理与驾驶舱',
+    description: '跨会话任务锚点管理 (支持 /anchor 或 /anchor all)',
     handler: async (args, ctx) => {
-      const s = getStore(ctx.cwd);
       const sub = (args || '').trim();
 
       if (!sub) {
-        await openAnchorDashboard(ctx, s);
+        openAnchorDashboard(ctx, store, { showAll: false });
+        return;
+      }
+
+      if (sub === 'all' || sub === '-a') {
+        openAnchorDashboard(ctx, store, { showAll: true });
         return;
       }
 
       if (sub.startsWith('add ')) {
-        let title = sub.slice(4).trim();
-        let scope: 'project' | 'global' = 'project';
-        if (title.startsWith('-g ') || title.startsWith('--global ')) {
-          scope = 'global';
-          title = title.replace(/^(-g|--global)\s+/, '').trim();
-        }
+        const title = sub.slice(4).trim();
         if (!title) {
-          ctx.ui.notify('Usage: /anchor add [-g] <task>', 'warning');
+          ctx.ui.notify('Usage: /anchor add <task>', 'warning');
           return;
         }
-        const anc = s.create({ title, scope });
-        ctx.ui.notify(`Anchor: pinned [${scope.toUpperCase()}] #${anc.id} "${anc.title}"`, 'info');
-        updateAnchorStatusBar(ctx, s);
+        const anc = store.create({ title, cwd: ctx.cwd });
+        ctx.ui.notify(`Anchor: pinned #${anc.id} "${anc.title}" [${anc.project}]`, 'info');
+        updateAnchorStatusBar(ctx, store);
         return;
       }
 
@@ -243,9 +232,9 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         try {
-          s.settle(id, { settledBy: 'manual-command' });
+          store.settle(id, { settledBy: 'manual-command' });
           ctx.ui.notify(`Anchor: settled #${id}`, 'info');
-          updateAnchorStatusBar(ctx, s);
+          updateAnchorStatusBar(ctx, store);
         } catch (err: any) {
           ctx.ui.notify(`Settlement error: ${err.message}`, 'error');
         }
@@ -253,42 +242,36 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (sub === 'sweep') {
-        const res = sweepStore(s);
+        const res = sweepStore(store);
         ctx.ui.notify(
           `Anchor: sweep complete (${res.transitionedToSleeping.length} sleeping, ${res.evictedToGraveyard.length} swept)`,
           'info'
         );
-        updateAnchorStatusBar(ctx, s);
+        updateAnchorStatusBar(ctx, store);
         return;
       }
 
       if (sub === 'list' || sub === 'ls') {
-        await openAnchorDashboard(ctx, s);
+        openAnchorDashboard(ctx, store, { showAll: false });
         return;
       }
 
-      ctx.ui.notify('Usage: /anchor (open cockpit), /anchor add [-g] <task>, /anchor close <id>, /anchor sweep', 'info');
+      ctx.ui.notify('Usage: /anchor (current project), /anchor all (all projects), /anchor add <task>, /anchor close <id>, /anchor sweep', 'info');
     }
   });
 
   // Alias /pin to quick-add
   pi.registerCommand('pin', {
-    description: '快速挂锚 (支持 -g / --global 全局作用域)',
+    description: '快速挂锚至当前项目上下文',
     handler: async (args, ctx) => {
-      const s = getStore(ctx.cwd);
-      let text = (args || '').trim();
-      if (!text) {
-        await openAnchorDashboard(ctx, s);
+      const title = (args || '').trim();
+      if (!title) {
+        openAnchorDashboard(ctx, store, { showAll: false });
         return;
       }
-      let scope: 'project' | 'global' = 'project';
-      if (text.startsWith('-g ') || text.startsWith('--global ')) {
-        scope = 'global';
-        text = text.replace(/^(-g|--global)\s+/, '').trim();
-      }
-      const anc = s.create({ title: text, scope });
-      ctx.ui.notify(`Anchor: pinned [${scope.toUpperCase()}] #${anc.id} "${anc.title}"`, 'info');
-      updateAnchorStatusBar(ctx, s);
+      const anc = store.create({ title, cwd: ctx.cwd });
+      ctx.ui.notify(`Anchor: pinned #${anc.id} "${anc.title}" [${anc.project}]`, 'info');
+      updateAnchorStatusBar(ctx, store);
     }
   });
 }
