@@ -155,9 +155,10 @@ export default function (pi: ExtensionAPI) {
       'Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Stored in the global ledger (~/.pi/agent/anchors/) with zero project repository pollution.',
     promptSnippet: 'Anchor cross-session task contracts that survive terminal restarts and auto-evict',
     promptGuidelines: [
-      'Use `anchor` when the user asks to retain a goal across sessions, e.g. "保留这个任务直到完成" or "记住明天优化X".',
+      'Use `anchor` when the user asks to retain a goal across sessions or record a reminder for later/tonight/tomorrow (e.g. "晚上清理垃圾", "明天优化X", "保留任务直到完成").',
+      'BOUNDARY WITH TODO: `todo` is strictly for intra-session active work breakdown (step 1, step 2, step 3 right now). For future reminders or cross-session goals, ONLY use `anchor`. NEVER duplicate a cross-session reminder into both `todo` and `anchor`.',
+      'DO NOT over-engineer or assume automated scheduled tasks unless the user explicitly requests Windows Task Scheduler or cron.',
       'Tasks are automatically scoped to the current project context without cluttering the project git repository.',
-      'Never put cross-session tasks into AGENTS.md or TODO.md; use `anchor` instead to prevent context rot.',
       'When code for an anchor is completed and verified, call `anchor` with action "settle" to archive it and free context.',
       'Active anchors are automatically injected into future sessions in an ultra-compact block.'
     ],
@@ -256,9 +257,9 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const input = (args || '').trim();
 
-      // Case 1: 查看待办
+      // Case 1: 查看待办 (打开极简原生交互面板)
       if (!input || input === 'list' || input === 'ls') {
-        openAnchorDashboard(ctx, store, { showAll: false });
+        await openAnchorDashboard(ctx, store, { showAll: false });
         return;
       }
 
@@ -274,9 +275,9 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Case 3: 查看全部项目
+      // Case 3: 查看全部项目 (打开全盘交互面板)
       if (input === 'all' || input === '-a') {
-        openAnchorDashboard(ctx, store, { showAll: true });
+        await openAnchorDashboard(ctx, store, { showAll: true });
         return;
       }
 
