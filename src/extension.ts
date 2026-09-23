@@ -246,21 +246,27 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 6. Register /anchor command
+  // 6. Register /anchor command:
+  //    /anchor             -> 查看当前项目待办
+  //    /anchor <id>        -> 直接划掉完成 (如 /anchor anc-1)
+  //    /anchor undo        -> 逆向撤销
+  //    /anchor all         -> 查看全盘待办
   pi.registerCommand('anchor', {
-    description: '跨会话任务锚点管理 (支持 /anchor 或 /anchor all)',
+    description: '查看或划掉跨会话任务锚点',
     handler: async (args, ctx) => {
-      const sub = (args || '').trim();
+      const input = (args || '').trim();
 
-      if (!sub) {
+      // Case 1: 查看待办
+      if (!input || input === 'list' || input === 'ls') {
         openAnchorDashboard(ctx, store, { showAll: false });
         return;
       }
 
-      if (sub === 'undo') {
+      // Case 2: 撤销结案
+      if (input === 'undo') {
         try {
           const restored = store.undoSettle();
-          ctx.ui.notify(`Anchor: 已撤销结案，任务 #${restored.id} "${restored.title}" 恢复为活跃状态！`, 'info');
+          ctx.ui.notify(`⚓ 已撤销结案，任务 #${restored.id} "${restored.title}" 恢复为活跃状态`, 'info');
           updateAnchorStatusBar(ctx, store);
         } catch (err: any) {
           ctx.ui.notify(`撤销失败: ${err.message}`, 'error');
@@ -268,61 +274,32 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      if (sub === 'all' || sub === '-a') {
+      // Case 3: 查看全部项目
+      if (input === 'all' || input === '-a') {
         openAnchorDashboard(ctx, store, { showAll: true });
         return;
       }
 
-      if (sub.startsWith('add ')) {
-        const title = sub.slice(4).trim();
-        if (!title) {
-          ctx.ui.notify('Usage: /anchor add <task>', 'warning');
-          return;
-        }
-        const anc = store.create({ title, cwd: ctx.cwd });
-        ctx.ui.notify(`Anchor: pinned #${anc.id} "${anc.title}" [${anc.project}]`, 'info');
+      // Case 4: 直接输 ID 划掉结案 (如 /anchor anc-1 或 /anchor #anc-1)
+      const targetId = input.startsWith('#') ? input.slice(1) : input;
+      const item = store.get(targetId);
+      if (item) {
+        store.settle(targetId, { settledBy: 'manual-command' });
+        ctx.ui.notify(`⚓ 已完成并清除 #${targetId}: "${item.title}"`, 'info');
         updateAnchorStatusBar(ctx, store);
         return;
       }
 
-      if (sub.startsWith('close ') || sub.startsWith('settle ')) {
-        const id = sub.split(' ')[1]?.trim();
-        if (!id) {
-          ctx.ui.notify('Usage: /anchor close <id>', 'warning');
-          return;
-        }
-        try {
-          store.settle(id, { settledBy: 'manual-command' });
-          ctx.ui.notify(`Anchor: settled #${id}`, 'info');
-          updateAnchorStatusBar(ctx, store);
-        } catch (err: any) {
-          ctx.ui.notify(`Settlement error: ${err.message}`, 'error');
-        }
-        return;
-      }
-
-      if (sub === 'sweep') {
-        const res = sweepStore(store);
-        ctx.ui.notify(
-          `Anchor: sweep complete (${res.transitionedToSleeping.length} sleeping, ${res.evictedToGraveyard.length} swept)`,
-          'info'
-        );
-        updateAnchorStatusBar(ctx, store);
-        return;
-      }
-
-      if (sub === 'list' || sub === 'ls') {
-        openAnchorDashboard(ctx, store, { showAll: false });
-        return;
-      }
-
-      ctx.ui.notify('Usage: /anchor (current project), /anchor all (all projects), /anchor add <task>, /anchor close <id>, /anchor sweep', 'info');
+      // Case 5: 随手输入一段文字直接当作 pin 记录
+      const anc = store.create({ title: input, cwd: ctx.cwd });
+      ctx.ui.notify(`⚓ 已记录 #${anc.id}: "${anc.title}"`, 'info');
+      updateAnchorStatusBar(ctx, store);
     }
   });
 
-  // Alias /pin to quick-add
+  // Alias /pin to instant-add
   pi.registerCommand('pin', {
-    description: '快速挂锚至当前项目上下文',
+    description: '快速记录跨会话长期任务',
     handler: async (args, ctx) => {
       const title = (args || '').trim();
       if (!title) {
@@ -330,7 +307,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const anc = store.create({ title, cwd: ctx.cwd });
-      ctx.ui.notify(`Anchor: pinned #${anc.id} "${anc.title}" [${anc.project}]`, 'info');
+      ctx.ui.notify(`⚓ 已记录 #${anc.id}: "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, store);
     }
   });

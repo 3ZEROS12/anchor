@@ -11,7 +11,7 @@ function createTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-simple-tui-test-'));
 }
 
-test('AnchorTUI - status bar reflects active and sleeping state cleanly with original anchor icon', () => {
+test('AnchorTUI - status bar reflects active state cleanly with [⚓ N]', () => {
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
@@ -27,20 +27,19 @@ test('AnchorTUI - status bar reflects active and sleeping state cleanly with ori
       }
     } as unknown as ExtensionContext;
 
-    // 1. Zero active, zero sleeping -> must be undefined (completely invisible)
+    // 1. Zero active -> undefined (completely invisible)
     updateAnchorStatusBar(mockCtx, store);
     assert.strictEqual(currentStatus, undefined);
 
-    // 2. One active anchor matching cwd -> [⚓ 1 active]
+    // 2. One active anchor matching cwd -> [⚓ 1]
     store.create({ title: 'Task Alpha', cwd: '/workspace/project-a' });
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '[⚓ 1 active]');
+    assert.strictEqual(currentStatus, '[⚓ 1]');
 
-    // 3. One active and one sleeping -> [⚓ 1 active, 1 sleep]
-    const a2 = store.create({ title: 'Task Beta', cwd: '/workspace/project-a' });
-    store.update(a2.id, { status: 'sleeping' });
+    // 3. Two active anchors -> [⚓ 2]
+    store.create({ title: 'Task Beta', cwd: '/workspace/project-a' });
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '[⚓ 1 active, 1 sleep]');
+    assert.strictEqual(currentStatus, '[⚓ 2]');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -65,14 +64,14 @@ test('AnchorTUI - openAnchorDashboard renders fast, simple text notification wit
 
     // 1. Empty ledger
     openAnchorDashboard(mockCtx, store);
-    assert.ok(notifyMsg.includes('暂无活跃锚点'));
+    assert.ok(notifyMsg.includes('暂无待办任务'));
 
-    // 2. Ledger with active project and global items
+    // 2. Ledger with active items
     store.create({ title: 'Refactor auth', priority: 'p0', files: ['src/auth/jwt.ts'], cwd: '/workspace/project-a' });
     store.create({ title: 'Global task', priority: 'p1' });
 
     openAnchorDashboard(mockCtx, store);
-    assert.ok(notifyMsg.includes('[⚓ Anchor 任务清单'));
+    assert.ok(notifyMsg.includes('[⚓ 待办锚点]'));
     assert.ok(notifyMsg.includes('Refactor auth'));
     assert.ok(notifyMsg.includes('Global task'));
   } finally {
