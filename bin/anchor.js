@@ -13,15 +13,17 @@ import { AnchorStore } from '../src/store.ts';
 const store = new AnchorStore();
 const args = process.argv.slice(2);
 
-// 1. View pending tasks
-if (args.length === 0) {
-  const active = store.list({ status: 'active', cwd: process.cwd() });
+// 1. View pending tasks (anchor or anchor list)
+if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
+  const showAll = args.includes('-a') || args.includes('--all');
+  const active = store.list({ status: 'active', cwd: showAll ? undefined : process.cwd(), all: showAll });
   if (active.length === 0) {
     console.log('⚓ 暂无未完成的锚点任务。用 `anchor <任务描述>` 记录。');
   } else {
     console.log('⚓ 待办锚点:');
     for (const a of active) {
-      console.log(`  #${a.id}  ${a.title}`);
+      const dura = a.durability === 'ephemeral' ? ' [短期备忘]' : '';
+      console.log(`  #${a.id}  ${a.title}${dura}`);
     }
   }
   process.exit(0);
