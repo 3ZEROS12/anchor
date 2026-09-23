@@ -5,13 +5,14 @@
 
 export type AnchorStatus = 'active' | 'sleeping' | 'settled' | 'graveyard';
 export type AnchorPriority = 'p0' | 'p1' | 'p2';
+export type AnchorDurability = 'ephemeral' | 'durable';
 
 export interface AnchorDecayPolicy {
-  /** Days before an untouched active anchor transitions to sleeping (default: 3) */
+  /** Days before an untouched active anchor transitions to sleeping */
   activeDays: number;
-  /** Days an anchor remains sleeping before dropping to graveyard (default: 7) */
+  /** Days an anchor remains sleeping before dropping to graveyard */
   sleepDays: number;
-  /** Total maximum days before permanent graveyard sweep (default: 14) */
+  /** Total maximum days before permanent graveyard sweep (9999 = never) */
   graveyardDays: number;
 }
 
@@ -34,6 +35,8 @@ export interface Anchor {
   priority: AnchorPriority;
   /** Current lifecycle status */
   status: AnchorStatus;
+  /** Durability tier: ephemeral (short-lived reminder, 48h TTL) or durable (long-term architecture vision) */
+  durability: AnchorDurability;
   /** Canonical project name (e.g. 'PPT', 'X', or 'global') */
   project: string;
   /** Canonical root directory where the task was anchored (empty string for global tasks) */
@@ -75,6 +78,18 @@ export interface SettlementProposal {
   reason: string;
   recommendedAction: 'settle' | 'defer';
 }
+
+export const EPHEMERAL_DECAY_POLICY: AnchorDecayPolicy = {
+  activeDays: 1,      // 24 hours active
+  sleepDays: 1,       // 24 hours sleeping
+  graveyardDays: 2    // 48 hours total before auto-clearing
+};
+
+export const DURABLE_DECAY_POLICY: AnchorDecayPolicy = {
+  activeDays: 7,
+  sleepDays: 30,
+  graveyardDays: 9999 // Never permanently auto-dropped; preserved indefinitely
+};
 
 export const DEFAULT_DECAY_POLICY: AnchorDecayPolicy = {
   activeDays: 3,

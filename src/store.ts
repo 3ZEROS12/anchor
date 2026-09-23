@@ -3,13 +3,31 @@ import path from 'node:path';
 import os from 'node:os';
 import type {
   Anchor,
+  AnchorDurability,
   AnchorEvidence,
   AnchorPriority,
   AnchorStatus,
   AnchorStoreState
 } from './types.ts';
-import { DEFAULT_DECAY_POLICY } from './types.ts';
+import { DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, EPHEMERAL_DECAY_POLICY } from './types.ts';
 import { normalizePath } from './matcher.ts';
+
+/**
+ * Detect whether a task is a short-term ephemeral reminder or a long-term architectural vision
+ */
+export function detectDurability(title: string): AnchorDurability {
+  const temporalKeywords = [
+    '晚上', '今晚', '明天', '稍后', '待会', '下午', '临时', '一会儿', '等等',
+    'tonight', 'tomorrow', 'later', 'temp', 'today', 'soon'
+  ];
+  const lower = title.toLowerCase();
+  for (const kw of temporalKeywords) {
+    if (lower.includes(kw)) {
+      return 'ephemeral';
+    }
+  }
+  return 'durable';
+}
 
 export class AnchorStore {
   public readonly storageDir: string;
@@ -98,6 +116,7 @@ export class AnchorStore {
     title: string;
     description?: string;
     priority?: AnchorPriority;
+    durability?: AnchorDurability;
     cwd?: string;
     project?: string;
     files?: string[];
@@ -113,12 +132,16 @@ export class AnchorStore {
       ? input.project.trim()
       : (cwd ? path.basename(cwd) : 'global');
 
+    const durability = input.durability || detectDurability(input.title);
+    const decayPolicy = durability === 'ephemeral' ? EPHEMERAL_DECAY_POLICY : DEFAULT_DECAY_POLICY;
+
     const anchor: Anchor = {
       id,
       title: input.title.trim(),
       description: input.description?.trim(),
       priority: input.priority || 'p1',
       status: 'active',
+      durability,
       project: projectName,
       cwd,
       createdAt: now,
@@ -127,7 +150,7 @@ export class AnchorStore {
       files: (input.files || []).map(f => normalizePath(f)).filter(Boolean),
       tags: (input.tags || []).map(t => t.trim()).filter(Boolean),
       verifyCommand: input.verifyCommand?.trim() || undefined,
-      decay: { ...DEFAULT_DECAY_POLICY }
+      decay: { ...decayPolicy }
     };
 
     state.anchors.push(anchor);
