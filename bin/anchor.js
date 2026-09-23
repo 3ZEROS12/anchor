@@ -2,10 +2,10 @@
 
 /**
  * Anchor CLI - Minimalist task pin for AI coding workflows
+ * Production-ready executable importing from prebuilt dist/
  */
 
-import { AnchorStore } from '../src/store.ts';
-import { formatOrigin, formatRelativeTime, formatRemainingTtl } from '../src/tui.ts';
+import { AnchorStore, formatOrigin, formatRelativeTime, formatRemainingTtl } from '../dist/index.js';
 
 const store = new AnchorStore();
 const args = process.argv.slice(2);
