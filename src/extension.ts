@@ -113,7 +113,7 @@ export default function (pi: ExtensionAPI) {
           summary: `Auto-settled via Git commit: ${commitMatch.message}`,
           touchedFiles: prop.matchedFiles
         });
-        ctx.ui.notify(`Anchor: 依据 Git 提交已自动结案 #${a.id}（若误判可敲 /anchor undo 撤销）`, 'info');
+        ctx.ui.notify(`⌖ Auto-settled #${a.id} via Git commit (run /anchor undo to revert)`, 'info');
         continue;
       }
 
@@ -126,15 +126,15 @@ export default function (pi: ExtensionAPI) {
             summary: `Automated test passed: ${a.verifyCommand}`,
             touchedFiles: prop.matchedFiles
           });
-          ctx.ui.notify(`Anchor: 物理验讫通过 (${a.verifyCommand})，任务 #${a.id} 自动结案归档！`, 'info');
+          ctx.ui.notify(`⌖ Test passed (${a.verifyCommand}), auto-settled #${a.id}`, 'info');
           continue;
         }
       }
 
       // 3. Fallback: Prompt user for one-tap settlement on exit
       const ok = await ctx.ui.confirm(
-        '⚓ Anchor 关门结案提议',
-        `任务 #${a.id} [${a.title}] 关联的文件已在本会话中被修改 (${prop.matchedFiles.slice(0, 2).join(', ')})。\n是否标记已完成并结案归档？`
+        '⌖ Settle Anchor Task',
+        `Task #${a.id} [${a.title}] touched files (${prop.matchedFiles.slice(0, 2).join(', ')}).\nMark as completed and archive?`
       );
 
       if (ok) {
@@ -142,7 +142,7 @@ export default function (pi: ExtensionAPI) {
           settledBy: 'one-tap-settlement',
           touchedFiles: prop.matchedFiles
         });
-        ctx.ui.notify(`Anchor: 任务 #${a.id} 已完成并即焚归档！`, 'info');
+        ctx.ui.notify(`⌖ Settled #${a.id}: "${a.title}"`, 'info');
       }
     }
   });
@@ -247,54 +247,50 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 6. Register /anchor command:
-  //    /anchor             -> 查看当前项目待办
-  //    /anchor <id>        -> 直接划掉完成 (如 /anchor anc-1)
-  //    /anchor undo        -> 逆向撤销
-  //    /anchor all         -> 查看全盘待办
+  // 6. User Slash Commands: /anchor and /pin
   pi.registerCommand('anchor', {
-    description: '查看或划掉跨会话任务锚点',
+    description: 'Inspect and settle active anchors',
     handler: async (args, ctx) => {
       const input = (args || '').trim();
 
-      // Case 1: 查看待办 (打开极简单层清单，回车直接划掉完成)
+      // Case 1: View active anchors (clean list, enter to complete)
       if (!input || input === 'list' || input === 'ls') {
         await openAnchorDashboard(ctx, store);
         return;
       }
 
-      // Case 2: 撤销结案
+      // Case 2: Revert settlement
       if (input === 'undo') {
         try {
           const restored = store.undoSettle();
-          ctx.ui.notify(`⚓ 已撤销结案，任务 #${restored.id} "${restored.title}" 恢复为活跃状态`, 'info');
+          ctx.ui.notify(`⌖ Restored #${restored.id}: "${restored.title}"`, 'info');
           updateAnchorStatusBar(ctx, store);
         } catch (err: any) {
-          ctx.ui.notify(`撤销失败: ${err.message}`, 'error');
+          ctx.ui.notify(`Revert failed: ${err.message}`, 'error');
         }
         return;
       }
 
-      // Case 3: 直接输 ID 划掉结案 (如 /anchor anc-1 或 /anchor #anc-1)
+      // Case 3: Complete directly by ID (e.g. /anchor anc-1)
       const targetId = input.startsWith('#') ? input.slice(1) : input;
       const item = store.get(targetId);
       if (item) {
         store.settle(targetId, { settledBy: 'manual-command' });
-        ctx.ui.notify(`⌖ 已完成并清除: "${item.title}"`, 'info');
+        ctx.ui.notify(`⌖ Settled: "${item.title}"`, 'info');
         updateAnchorStatusBar(ctx, store);
         return;
       }
 
-      // Case 5: 随手输入一段文字直接当作 pin 记录
+      // Case 4: Freeform text directly creates an anchor
       const anc = store.create({ title: input, cwd: ctx.cwd });
-      ctx.ui.notify(`⌖ 已记录 #${anc.id}: "${anc.title}"`, 'info');
+      ctx.ui.notify(`⌖ Pinned #${anc.id}: "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, store);
     }
   });
 
   // Alias /pin to instant-add
   pi.registerCommand('pin', {
-    description: '快速记录跨会话长期任务',
+    description: 'Quickly pin a task across sessions',
     handler: async (args, ctx) => {
       const title = (args || '').trim();
       if (!title) {
@@ -302,7 +298,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const anc = store.create({ title, cwd: ctx.cwd });
-      ctx.ui.notify(`⌖ 已记录 #${anc.id}: "${anc.title}"`, 'info');
+      ctx.ui.notify(`⌖ Pinned #${anc.id}: "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, store);
     }
   });

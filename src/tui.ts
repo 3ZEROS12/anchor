@@ -1,10 +1,10 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AnchorStore } from './store.ts';
-import type { Anchor, AnchorDurability } from './types.ts';
+import type { Anchor } from './types.ts';
 import path from 'node:path';
 
 /**
- * Format relative time in natural human language
+ * Format relative time in concise English (e.g. 'now', '17m', '2h', '3d')
  */
 export function formatRelativeTime(timestamp: number, now: number = Date.now()): string {
   const elapsedMs = Math.max(0, now - timestamp);
@@ -12,32 +12,19 @@ export function formatRelativeTime(timestamp: number, now: number = Date.now()):
   const hours = Math.floor(elapsedMs / (60 * 60 * 1000));
   const days = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
 
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes}分钟前`;
-  if (hours < 24) return `${hours}小时前`;
-  if (days === 1) return '昨天';
-  if (days < 30) return `${days}天前`;
-  return `${Math.floor(days / 30)}个月前`;
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  if (hours < 24) return `${hours}h`;
+  if (days < 30) return `${days}d`;
+  return `${Math.floor(days / 30)}mo`;
 }
 
 /**
- * Format workspace origin
+ * Format origin workspace in concise English
  */
 export function formatOrigin(cwd: string): string {
-  if (!cwd) return '[全局]';
-  const name = path.basename(cwd);
-  if (name.toLowerCase() === 'desktop' || name === '桌面') return '[来自: 桌面]';
-  return `[来自: ${name}]`;
-}
-
-/**
- * Format lifecycle contract tag
- */
-export function formatLifecycle(durability: AnchorDurability): string {
-  if (durability === 'ephemeral') {
-    return '[48h 自净]';
-  }
-  return '[长期常驻]';
+  if (!cwd) return 'global';
+  return path.basename(cwd) || 'global';
 }
 
 /**
@@ -58,7 +45,8 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
 }
 
 /**
- * Clean, human-centric checklist with clear origin and lifecycle contract
+ * Clean, minimalist checklist in concise English
+ * Task title retains user's original language.
  */
 export async function openAnchorDashboard(
   ctx: ExtensionContext,
@@ -68,7 +56,7 @@ export async function openAnchorDashboard(
 
   const list = store.list({ status: 'active', cwd: ctx.cwd });
   if (list.length === 0) {
-    ctx.ui.notify('⌖ 暂无未完成的任务。输入 /pin <任务描述> 记录。', 'info');
+    ctx.ui.notify('⌖ No active anchors. Use /pin <task> to record.', 'info');
     return;
   }
 
@@ -79,23 +67,30 @@ export async function openAnchorDashboard(
     const a = list[i];
     const num = (i + 1).toString().padStart(2, '0');
     const origin = formatOrigin(a.cwd);
-    const lifecycle = formatLifecycle(a.durability);
     const relTime = formatRelativeTime(a.createdAt);
-    const fileTag = (a.files && a.files.length > 0) ? ` [${a.files.slice(0, 1).join(', ')}]` : '';
 
-    const label = `${num}  ${a.title}${fileTag}  ${origin}  ${lifecycle}  ${relTime}`;
+    const metaParts: string[] = [origin];
+    if (a.files && a.files.length > 0) {
+      metaParts.push(a.files.slice(0, 1).join(', '));
+    }
+    if (a.durability === 'ephemeral') {
+      metaParts.push('48h');
+    }
+    metaParts.push(relTime);
+
+    const label = `${num}  ${a.title}  · ${metaParts.join(' · ')}`;
 
     optionMap.set(label, a);
     displayOptions.push(label);
   }
 
-  const selected = await ctx.ui.select('⌖ 待办清单 (回车划掉完成):', displayOptions);
+  const selected = await ctx.ui.select('⌖ Anchors (enter to complete):', displayOptions);
   if (!selected) return;
 
   const anchor = optionMap.get(selected);
   if (!anchor) return;
 
   store.settle(anchor.id, { settledBy: 'manual-command' });
-  ctx.ui.notify(`⌖ 已完成: "${anchor.title}"`, 'info');
+  ctx.ui.notify(`⌖ Settled: "${anchor.title}"`, 'info');
   updateAnchorStatusBar(ctx, store);
 }

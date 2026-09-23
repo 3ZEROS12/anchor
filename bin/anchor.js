@@ -5,7 +5,7 @@
  */
 
 import { AnchorStore } from '../src/store.ts';
-import { formatOrigin, formatLifecycle, formatRelativeTime } from '../src/tui.ts';
+import { formatOrigin, formatRelativeTime } from '../src/tui.ts';
 
 const store = new AnchorStore();
 const args = process.argv.slice(2);
@@ -15,20 +15,28 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
   const active = store.list({ status: 'active', cwd: process.cwd() });
 
   if (active.length === 0) {
-    console.log('⌖ 暂无未完成的任务。使用 `anchor <任务描述>` 记录。\n');
+    console.log('\n⌖ No active anchors. Use `anchor <task>` to record.\n');
     process.exit(0);
   }
 
-  console.log('\n⌖ 待办清单:');
+  console.log('\n⌖ Anchors:');
   active.forEach((a, i) => {
     const num = (i + 1).toString().padStart(2, '0');
     const origin = formatOrigin(a.cwd);
-    const lifecycle = formatLifecycle(a.durability);
     const relTime = formatRelativeTime(a.createdAt);
-    const fileTag = (a.files && a.files.length > 0) ? ` [${a.files.slice(0, 1).join(', ')}]` : '';
-    console.log(`  ${num}  ${a.title}${fileTag}  ${origin}  ${lifecycle}  ${relTime}`);
+
+    const metaParts = [origin];
+    if (a.files && a.files.length > 0) {
+      metaParts.push(a.files.slice(0, 1).join(', '));
+    }
+    if (a.durability === 'ephemeral') {
+      metaParts.push('48h');
+    }
+    metaParts.push(relTime);
+
+    console.log(`  ${num}  ${a.title.padEnd(28, ' ')} · ${metaParts.join(' · ')}`);
   });
-  console.log('\n  输入 `anchor done <id>` 划掉完成。\n');
+  console.log('\n  Use `anchor done <id>` to complete.\n');
   process.exit(0);
 }
 
@@ -36,14 +44,14 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
 if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
   const id = args[1];
   if (!id) {
-    console.error('用法: anchor done <id>');
+    console.error('Usage: anchor done <id>');
     process.exit(1);
   }
   try {
     const settled = store.settle(id, { settledBy: 'manual-command' });
-    console.log(`⌖ 已完成: "${settled.title}"`);
+    console.log(`⌖ Settled: "${settled.title}"`);
   } catch (err) {
-    console.error(`错误: ${err.message}`);
+    console.error(`Error: ${err.message}`);
     process.exit(1);
   }
   process.exit(0);
@@ -52,5 +60,5 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
 // 3. Pin new task: `anchor <task description>`
 const title = args.join(' ').trim();
 const anc = store.create({ title, cwd: process.cwd() });
-const lifecycle = formatLifecycle(anc.durability);
-console.log(`⌖ 已记录: "${anc.title}"  ${lifecycle}`);
+const expireBadge = anc.durability === 'ephemeral' ? ' · 48h' : '';
+console.log(`⌖ Pinned #${anc.id}: "${anc.title}"${expireBadge}`);
