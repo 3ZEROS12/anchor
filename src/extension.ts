@@ -2,8 +2,9 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { AnchorStore } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
-import { renderActiveAnchorsContext } from './context_injector.ts';
+import { renderColdStartAnchorsContext, renderActiveAnchorsContext } from './context_injector.ts';
 import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
+import { normalizePath, findMatchedAnchors } from './matcher.ts';
 import { sweepStore } from './decay.ts';
 import { updateAnchorStatusBar, openAnchorDashboard } from './tui.ts';
 import { execSync } from 'node:child_process';
@@ -30,13 +31,48 @@ export default function (pi: ExtensionAPI) {
     observer.recordToolCall(event.toolName, event.input || {});
   });
 
-  // 3. Ultra-compact context injection (only active anchors matching current cwd, 0 token overhead elsewhere)
+  // 3. JIT Cold-Start Injection: Only fires on Turn 1 of a session. From turn 2 onwards, consumes 0 tokens!
   pi.on('before_agent_start', async (event, ctx) => {
-    const contextSnippet = renderActiveAnchorsContext(store, ctx.cwd);
-    if (contextSnippet) {
-      return {
-        systemPrompt: `${event.systemPrompt}\n\n${contextSnippet}`
-      };
+    const entries = ctx.sessionManager?.getEntries() || [];
+    const messageTurns = entries.filter((e: any) => e.type === 'message');
+    const isColdStart = messageTurns.length <= 1;
+
+    if (isColdStart) {
+      const contextSnippet = renderColdStartAnchorsContext(store, ctx.cwd);
+      if (contextSnippet) {
+        return {
+          systemPrompt: `${event.systemPrompt}\n\n${contextSnippet}`
+        };
+      }
+    }
+  });
+
+  // 4. JIT Path-Triggered Context Alert: When agent touches an intersecting file, annotate tool result JIT
+  pi.on('tool_result', async (event, ctx) => {
+    const pathInput = (event.input as any)?.path;
+    if (typeof pathInput !== 'string') return;
+
+    const touchedPath = normalizePath(pathInput);
+    const anchors = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active' || a.status === 'sleeping');
+    const matches = findMatchedAnchors(anchors, [touchedPath]);
+
+    if (matches.length > 0) {
+      for (const m of matches) {
+        store.touch(m.anchor.id);
+      }
+      updateAnchorStatusBar(ctx, store);
+
+      const a = matches[0].anchor;
+      const alert = `\n\n[Anchor JIT Alert: Accessing "${touchedPath}" intersects with active commitment #${a.id}: "${a.title}" (${a.priority.toUpperCase()}).]`;
+
+      const contents = [...(event.content || [])];
+      for (let i = contents.length - 1; i >= 0; i--) {
+        const item = contents[i];
+        if (item && item.type === 'text') {
+          contents[i] = { ...item, text: item.text + alert };
+          return { content: contents };
+        }
+      }
     }
   });
 
