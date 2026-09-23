@@ -329,7 +329,7 @@ export class AnchorStore {
     if (!fs.existsSync(this.archivePath)) return [];
     try {
       const raw = fs.readFileSync(this.archivePath, 'utf-8');
-      const all: Anchor[] = raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+      const all: Anchor[] = raw.split('\n').filter(Boolean).map((l: string) => JSON.parse(l));
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
       return all.filter(a => !a.cwd || a.cwd === targetCwd);
@@ -342,7 +342,7 @@ export class AnchorStore {
     if (!fs.existsSync(this.graveyardPath)) return [];
     try {
       const raw = fs.readFileSync(this.graveyardPath, 'utf-8');
-      const all: Anchor[] = raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+      const all: Anchor[] = raw.split('\n').filter(Boolean).map((l: string) => JSON.parse(l));
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
       return all.filter(a => !a.cwd || a.cwd === targetCwd);

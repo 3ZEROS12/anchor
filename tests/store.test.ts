@@ -38,7 +38,7 @@ test('AnchorStore - basic CRUD & atomic writes', () => {
     const reloadedStore = new AnchorStore(tempDir);
     const loadedAnc = reloadedStore.get('anc-1');
     assert.ok(loadedAnc);
-    assert.strictEqual(loadedAnc.title, 'Fix auth session bug');
+    assert.strictEqual(loadedAnc!.title, 'Fix auth session bug');
 
     // 5. Update anchor
     const updated = store.update('anc-1', { title: 'Fix auth session regression' });
@@ -86,7 +86,7 @@ test('AnchorStore - corrupt state recovery', () => {
     assert.strictEqual(state.anchors.length, 0);
 
     const files = fs.readdirSync(store.storageDir);
-    assert.ok(files.some(f => f.startsWith('state.corrupt.')));
+    assert.ok(files.some((f: string) => f.startsWith('state.corrupt.')));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

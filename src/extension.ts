@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import { AnchorStore } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
@@ -15,7 +15,7 @@ export default function (pi: ExtensionAPI) {
   const observer = new SessionTouchObserver();
 
   // 1. Session start: sweep stale tasks and update TUI status bar for current workspace
-  pi.on('session_start', async (_event, ctx) => {
+  pi.on('session_start', async (_event: any, ctx: ExtensionContext) => {
     observer.clear();
     const sweep = sweepStore(store);
 
@@ -27,13 +27,13 @@ export default function (pi: ExtensionAPI) {
   });
 
   // 2. Track touched files across all tool calls
-  pi.on('tool_call', async (event, _ctx) => {
+  pi.on('tool_call', async (event: any, _ctx: ExtensionContext) => {
     observer.recordToolCall(event.toolName, event.input || {});
   });
 
   // 3. JIT Cold-Start Injection: Only fires on Turn 1 of a session. From turn 2 onwards, consumes 0 tokens!
-  pi.on('before_agent_start', async (event, ctx) => {
-    const entries = ctx.sessionManager?.getEntries() || [];
+  pi.on('before_agent_start', async (event: any, ctx: ExtensionContext) => {
+    const entries = (ctx as any).sessionManager?.getEntries() || [];
     const messageTurns = entries.filter((e: any) => e.type === 'message');
     const isColdStart = messageTurns.length <= 1;
 
@@ -48,7 +48,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // 4. JIT Path-Triggered Context Alert: When agent touches an intersecting file, annotate tool result JIT
-  pi.on('tool_result', async (event, ctx) => {
+  pi.on('tool_result', async (event: any, ctx: ExtensionContext) => {
     const pathInput = (event.input as any)?.path;
     if (typeof pathInput !== 'string') return;
 
@@ -77,7 +77,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // 4. Session shutdown: One-tap settlement check scoped to current workspace
-  pi.on('session_shutdown', async (_event, ctx) => {
+  pi.on('session_shutdown', async (_event: any, ctx: ExtensionContext) => {
     // Opportunistically scan git modified files
     try {
       const gitStatus = execSync('git status --porcelain', {
@@ -88,7 +88,7 @@ export default function (pi: ExtensionAPI) {
       });
       const changed = gitStatus
         .split('\n')
-        .map(l => l.slice(3).trim())
+        .map((l: string) => l.slice(3).trim())
         .filter(Boolean);
       for (const f of changed) {
         observer.addTouchedFile(f);
@@ -177,7 +177,8 @@ export default function (pi: ExtensionAPI) {
       verifyCommand: Type.Optional(Type.String({ description: 'Optional shell command for automated physical verification' })),
       id: Type.Optional(Type.String({ description: 'Anchor ID, e.g. anc-1 (for settle or touch)' }))
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId: string, params: any, _signal?: AbortSignal, _onUpdate?: (partial: any) => void, ctx?: ExtensionContext) {
+      if (!ctx) return { content: [{ type: 'text', text: 'Error: context required' }], isError: true };
       if (params.action === 'pin') {
         if (!params.title) {
           return { content: [{ type: 'text', text: 'Error: title is required for pin action' }], isError: true };
@@ -250,7 +251,7 @@ export default function (pi: ExtensionAPI) {
   // 6. User Slash Commands: /anchor and /pin
   pi.registerCommand('anchor', {
     description: 'Inspect and settle active anchors',
-    handler: async (args, ctx) => {
+    handler: async (args: string, ctx: ExtensionContext) => {
       const input = (args || '').trim();
 
       // Case 1: View active anchors (clean list, enter to complete)
@@ -291,7 +292,7 @@ export default function (pi: ExtensionAPI) {
   // Alias /pin to instant-add
   pi.registerCommand('pin', {
     description: 'Quickly pin a task across sessions',
-    handler: async (args, ctx) => {
+    handler: async (args: string, ctx: ExtensionContext) => {
       const title = (args || '').trim();
       if (!title) {
         await openAnchorDashboard(ctx, store);

@@ -9,6 +9,9 @@ test('AnchorMatcher - exact, prefix, and tag matching', () => {
     title: 'Migrate JWT tokens to HTTP-only cookies',
     priority: 'p0',
     status: 'active',
+    durability: 'durable',
+    project: 'auth',
+    cwd: '/workspace/auth',
     createdAt: Date.now(),
     updatedAt: Date.now(),
     lastTouchedAt: Date.now(),
@@ -20,21 +23,21 @@ test('AnchorMatcher - exact, prefix, and tag matching', () => {
   // 1. Exact match
   const match1 = matchAnchorAgainstTouchedFiles(anchor, ['src/auth/jwt.ts', 'src/other.ts']);
   assert.ok(match1);
-  assert.strictEqual(match1.score, 1.0);
-  assert.strictEqual(match1.reason, 'exact-file');
-  assert.deepStrictEqual(match1.matchedFiles, ['src/auth/jwt.ts']);
+  assert.strictEqual(match1!.score, 1.0);
+  assert.strictEqual(match1!.reason, 'exact-file');
+  assert.deepStrictEqual(match1!.matchedFiles, ['src/auth/jwt.ts']);
 
   // 2. Directory prefix match
   const match2 = matchAnchorAgainstTouchedFiles(anchor, ['src/auth/middleware.ts']);
   assert.ok(match2);
-  assert.strictEqual(match2.score, 0.85);
-  assert.strictEqual(match2.reason, 'dir-prefix');
+  assert.strictEqual(match2!.score, 0.85);
+  assert.strictEqual(match2!.reason, 'dir-prefix');
 
   // 3. Tag keyword match
   const match3 = matchAnchorAgainstTouchedFiles(anchor, ['src/lib/session_cache.ts']);
   assert.ok(match3);
-  assert.strictEqual(match3.score, 0.5);
-  assert.strictEqual(match3.reason, 'tag-keyword');
+  assert.strictEqual(match3!.score, 0.5);
+  assert.strictEqual(match3!.reason, 'tag-keyword');
 
   // 4. No match
   const match4 = matchAnchorAgainstTouchedFiles(anchor, ['docs/readme.md']);
@@ -47,6 +50,9 @@ test('AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-prio
     title: 'P2 low priority exact match',
     priority: 'p2',
     status: 'active',
+    durability: 'durable',
+    project: 'auth',
+    cwd: '/workspace/auth',
     createdAt: Date.now(),
     updatedAt: Date.now(),
     lastTouchedAt: Date.now(),
@@ -60,6 +66,9 @@ test('AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-prio
     title: 'P0 critical prefix match',
     priority: 'p0',
     status: 'active',
+    durability: 'durable',
+    project: 'auth',
+    cwd: '/workspace/auth',
     createdAt: Date.now(),
     updatedAt: Date.now(),
     lastTouchedAt: Date.now(),
@@ -73,6 +82,9 @@ test('AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-prio
     title: 'P0 critical exact match',
     priority: 'p0',
     status: 'active',
+    durability: 'durable',
+    project: 'auth',
+    cwd: '/workspace/auth',
     createdAt: Date.now(),
     updatedAt: Date.now(),
     lastTouchedAt: Date.now(),
