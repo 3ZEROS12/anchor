@@ -1,8 +1,3 @@
-/**
- * Session Touch Observer
- * Silently monitors tool calls during a session to accumulate touched files and commit evidence.
- */
-
 import { normalizePath } from './matcher.ts';
 import type { Anchor } from './types.ts';
 
@@ -12,29 +7,34 @@ export class SessionTouchObserver {
   private commitMessages: string[] = [];
 
   /**
-   * Record file interactions and commit messages from tool calls
+   * Observe and record a tool call invocation
    */
-  public recordToolCall(toolName: string, input: Record<string, any>): void {
-    if (!input) return;
+  public recordToolCall(toolName: string, input: Record<string, unknown>): void {
+    if (!input || typeof input !== 'object') return;
 
-    // File operation tools (read, edit, write, etc.)
-    if (typeof input.path === 'string') {
-      this.touchedFiles.add(normalizePath(input.path));
+    // File inspection or editing tools (read, write, edit, replace, etc.)
+    const pathField = (input as any).path || (input as any).filePath || (input as any).file;
+    if (typeof pathField === 'string') {
+      this.touchedFiles.add(normalizePath(pathField));
     }
 
-    // Multiple edits
-    if (Array.isArray(input.edits) && typeof input.path === 'string') {
-      this.touchedFiles.add(normalizePath(input.path));
+    // Multiple paths in single call
+    if (Array.isArray((input as any).paths)) {
+      for (const p of (input as any).paths) {
+        if (typeof p === 'string') {
+          this.touchedFiles.add(normalizePath(p));
+        }
+      }
     }
 
-    // Git commit detection in terminal execution
+    // Shell executions that might involve git commits
     if (toolName === 'bash' || toolName === 'powershell') {
-      const cmd = typeof input.command === 'string' ? input.command : '';
-      if (/\bgit\s+commit\b/i.test(cmd)) {
+      const cmd = String((input as any).command || '');
+      if (cmd.includes('git commit')) {
         this.committed = true;
-        const match = cmd.match(/-m\s+["']([^"']+)["']/i);
-        if (match && match[1]) {
-          this.commitMessages.push(match[1]);
+        const msgMatch = cmd.match(/-m\s+["']([^"']+)["']/);
+        if (msgMatch && msgMatch[1]) {
+          this.commitMessages.push(msgMatch[1]);
         }
       }
     }
@@ -66,7 +66,23 @@ export class SessionTouchObserver {
    */
   public matchesCommit(anchor: Anchor): { matched: boolean; message?: string } {
     const idLower = anchor.id.toLowerCase();
-    const titleTokens = anchor.title.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    const title = anchor.title.toLowerCase();
+
+    // Universal tokenization for CJK & Latin words
+    let titleTokens: string[] = [];
+    if (typeof Intl !== 'undefined' && (Intl as any).Segmenter) {
+      try {
+        const segmenter = new (Intl as any).Segmenter('und', { granularity: 'word' });
+        titleTokens = Array.from(segmenter.segment(title))
+          .filter((s: any) => s.isWordLike)
+          .map((s: any) => s.segment.trim().toLowerCase())
+          .filter((t: string) => t.length >= 2);
+      } catch {
+        titleTokens = title.split(/[\s,._\-\/]+/).filter(t => t.length >= 2);
+      }
+    } else {
+      titleTokens = title.split(/[\s,._\-\/]+/).filter(t => t.length >= 2);
+    }
 
     for (const msg of this.commitMessages) {
       const msgLower = msg.toLowerCase();

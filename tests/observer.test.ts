@@ -33,3 +33,18 @@ test('SessionTouchObserver - records read, edit, write and commits', () => {
   assert.strictEqual(obs.getTouchedFiles().length, 0);
   assert.strictEqual(obs.hasCommitted(), false);
 });
+
+test('SessionTouchObserver - matches CJK commit messages with segmentation', () => {
+  const obs = new SessionTouchObserver();
+  obs.recordToolCall('bash', { command: 'git commit -m "feat(auth): 彻底修复用户模块鉴权漏洞"' });
+
+  const mockAnchor = {
+    id: 'anc-2',
+    title: '修复鉴权漏洞',
+    files: []
+  } as any;
+
+  const match = obs.matchesCommit(mockAnchor);
+  assert.strictEqual(match.matched, true);
+  assert.ok(match.message?.includes('鉴权漏洞'));
+});
