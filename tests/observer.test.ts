@@ -18,6 +18,16 @@ test('SessionTouchObserver - records read, edit, write and commits', () => {
   assert.ok(touched.includes('src/auth/session.ts'));
   assert.strictEqual(obs.hasCommitted(), true);
 
+  // 4. Matches commit evidence
+  const mockAnchor = {
+    id: 'anc-1',
+    title: 'auth regression fix',
+    files: []
+  } as any;
+  const matchResult = obs.matchesCommit(mockAnchor);
+  assert.strictEqual(matchResult.matched, true);
+  assert.ok(matchResult.message?.includes('auth regression'));
+
   // Clear
   obs.clear();
   assert.strictEqual(obs.getTouchedFiles().length, 0);

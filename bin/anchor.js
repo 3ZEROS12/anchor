@@ -22,6 +22,7 @@ Usage:
   anchor list [-a|--all]              List anchors (default: current project, -a for all)
   anchor pin <title>                  Create a new task anchor in current project
   anchor settle <id>                  Settle and archive a task
+  anchor undo                         Reverse the most recent settlement
   anchor verify <id>                  Run physical verification command
   anchor show <id>                    Show detailed anchor metadata
   anchor log                          View history of settled anchors
@@ -102,6 +103,17 @@ switch (command) {
     try {
       const settled = store.settle(id, { settledBy: 'manual-command' });
       console.log(`\n⚓ Settled #${settled.id}: "${settled.title}". Archived to archive.jsonl.\n`);
+    } catch (err) {
+      console.error(`Error: ${err.message}`);
+      process.exit(1);
+    }
+    break;
+  }
+
+  case 'undo': {
+    try {
+      const restored = store.undoSettle();
+      console.log(`\n⚓ Undid settlement: restored #${restored.id} "${restored.title}" [${restored.project}] back to active state.\n`);
     } catch (err) {
       console.error(`Error: ${err.message}`);
       process.exit(1);

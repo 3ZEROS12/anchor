@@ -105,7 +105,19 @@ export default function (pi: ExtensionAPI) {
     for (const prop of proposals) {
       const a = prop.anchor;
 
-      // Automated physical verification
+      // 1. Zero-friction Git Commit evidence matching
+      const commitMatch = observer.matchesCommit(a);
+      if (commitMatch.matched) {
+        store.settle(a.id, {
+          settledBy: 'verification-test',
+          summary: `Auto-settled via Git commit: ${commitMatch.message}`,
+          touchedFiles: prop.matchedFiles
+        });
+        ctx.ui.notify(`Anchor: 依据 Git 提交已自动结案 #${a.id}（若误判可敲 /anchor undo 撤销）`, 'info');
+        continue;
+      }
+
+      // 2. Automated physical verification command
       if (a.verifyCommand) {
         const verifyRes = runPhysicalVerification(a, ctx.cwd);
         if (verifyRes.success) {
@@ -119,6 +131,7 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
+      // 3. Fallback: Prompt user for one-tap settlement on exit
       const ok = await ctx.ui.confirm(
         '⚓ Anchor 关门结案提议',
         `任务 #${a.id} [${a.title}] 关联的文件已在本会话中被修改 (${prop.matchedFiles.slice(0, 2).join(', ')})。\n是否标记已完成并结案归档？`
@@ -241,6 +254,17 @@ export default function (pi: ExtensionAPI) {
 
       if (!sub) {
         openAnchorDashboard(ctx, store, { showAll: false });
+        return;
+      }
+
+      if (sub === 'undo') {
+        try {
+          const restored = store.undoSettle();
+          ctx.ui.notify(`Anchor: 已撤销结案，任务 #${restored.id} "${restored.title}" 恢复为活跃状态！`, 'info');
+          updateAnchorStatusBar(ctx, store);
+        } catch (err: any) {
+          ctx.ui.notify(`撤销失败: ${err.message}`, 'error');
+        }
         return;
       }
 

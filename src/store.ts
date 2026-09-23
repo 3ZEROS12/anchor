@@ -246,6 +246,38 @@ export class AnchorStore {
   }
 
   /**
+   * Reverse/undo the last settled anchor, popping it from archive.jsonl back into state.json
+   */
+  public undoSettle(): Anchor {
+    if (!fs.existsSync(this.archivePath)) {
+      throw new Error('No archived anchors to undo');
+    }
+
+    const raw = fs.readFileSync(this.archivePath, 'utf-8');
+    const lines = raw.split('\n').filter(Boolean);
+    if (lines.length === 0) {
+      throw new Error('Archive is empty, nothing to undo');
+    }
+
+    const lastLine = lines.pop()!;
+    const anchor: Anchor = JSON.parse(lastLine);
+
+    // 1. Re-write archive without the last line
+    fs.writeFileSync(this.archivePath, lines.length > 0 ? lines.join('\n') + '\n' : '', 'utf-8');
+
+    // 2. Restore to active state
+    anchor.status = 'active';
+    anchor.updatedAt = Date.now();
+    delete anchor.evidence;
+
+    const state = this.loadState();
+    state.anchors.push(anchor);
+    this.saveState(state);
+
+    return anchor;
+  }
+
+  /**
    * Evict anchor to graveyard.jsonl upon total decay expiry
    */
   public dropToGraveyard(id: string, reason: string): Anchor {

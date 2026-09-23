@@ -62,6 +62,13 @@ test('AnchorStore - basic CRUD & atomic writes', () => {
     const archiveContent = fs.readFileSync(archiveFile, 'utf-8');
     assert.ok(archiveContent.includes('Fix auth session regression'));
     assert.ok(archiveContent.includes('a1b2c3d'));
+
+    // 9. Undo settlement (reverse pop back into active state)
+    const restored = store.undoSettle();
+    assert.strictEqual(restored.id, 'anc-1');
+    assert.strictEqual(restored.status, 'active');
+    assert.strictEqual(store.list().length, 1);
+    assert.strictEqual(store.get('anc-1')?.title, 'Fix auth session regression');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
