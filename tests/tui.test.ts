@@ -31,15 +31,15 @@ test('AnchorTUI - status bar reflects active state cleanly with [⚓ N]', () => 
     updateAnchorStatusBar(mockCtx, store);
     assert.strictEqual(currentStatus, undefined);
 
-    // 2. One active anchor matching cwd -> [⚓ 1]
+    // 2. One active anchor matching cwd -> ⚓ │ 1
     store.create({ title: 'Task Alpha', cwd: '/workspace/project-a' });
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '[⚓ 1]');
+    assert.strictEqual(currentStatus, '⚓ │ 1');
 
-    // 3. Two active anchors -> [⚓ 2]
+    // 3. Two active anchors -> ⚓ │ 2
     store.create({ title: 'Task Beta', cwd: '/workspace/project-a' });
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '[⚓ 2]');
+    assert.strictEqual(currentStatus, '⚓ │ 2');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -74,7 +74,7 @@ test('AnchorTUI - openAnchorDashboard renders single-step completion list', asyn
 
     // 1. Empty ledger: quiet notify, 0 popups
     await openAnchorDashboard(mockCtx, store);
-    assert.ok(notifyMsg.includes('暂无待办任务'));
+    assert.ok(notifyMsg.includes('暂无未完成的锚点任务'));
 
     // 2. Ledger with active items
     store.create({ title: 'Refactor auth', priority: 'p0', files: ['src/auth/jwt.ts'], cwd: '/workspace/project-a' });

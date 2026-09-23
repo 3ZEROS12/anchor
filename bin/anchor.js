@@ -1,35 +1,57 @@
 #!/usr/bin/env node
 
 /**
- * Anchor - Minimalist task pin for AI coding workflows
- * 3 actions only:
- *   anchor                (view pending)
- *   anchor <task>         (pin new)
- *   anchor done <id>      (close completed)
+ * Anchor CLI - Minimalist task pin for AI coding workflows
+ * Touchpoint 3: Clean, aligned, low-saturation terminal output.
  */
 
 import { AnchorStore } from '../src/store.ts';
+import { evaluateAnchorDecay } from '../src/decay.ts';
+import path from 'node:path';
 
 const store = new AnchorStore();
 const args = process.argv.slice(2);
 
-// 1. View pending tasks (anchor or anchor list)
+// 1. View pending tasks: `anchor` or `anchor list`
 if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
   const showAll = args.includes('-a') || args.includes('--all');
   const active = store.list({ status: 'active', cwd: showAll ? undefined : process.cwd(), all: showAll });
-  if (active.length === 0) {
-    console.log('⚓ 暂无未完成的锚点任务。用 `anchor <任务描述>` 记录。');
-  } else {
-    console.log('⚓ 待办锚点:');
+  const sleeping = store.list({ status: 'sleeping', cwd: showAll ? undefined : process.cwd(), all: showAll });
+
+  const currentScope = showAll ? 'All Workspaces' : (path.basename(process.cwd()) || 'Current Workspace');
+  console.log(`\n⚓ Anchor Contracts · ${currentScope}`);
+
+  if (active.length === 0 && sleeping.length === 0) {
+    console.log('  No active anchors found. Use `anchor <task>` to record.\n');
+    process.exit(0);
+  }
+
+  if (active.length > 0) {
     for (const a of active) {
-      const dura = a.durability === 'ephemeral' ? ' [短期备忘]' : '';
-      console.log(`  #${a.id}  ${a.title}${dura}`);
+      const decay = evaluateAnchorDecay(a);
+      const prio = `[${a.priority.toUpperCase()}]`;
+      const idCol = `#${a.id}`.padEnd(8, ' ');
+      const meta = a.durability === 'ephemeral'
+        ? `${decay.remainingActiveDays}d remaining  [ephemeral]`
+        : (a.files.length > 0 ? `[${a.files.slice(0, 1).join(', ')}]  ${prio}` : `${decay.remainingActiveDays}d active  ${prio}`);
+      console.log(`  ${idCol} ● ${a.title.padEnd(24, ' ')} ${meta}`);
     }
   }
+
+  if (sleeping.length > 0) {
+    console.log('\n  Sleeping (0 context tokens):');
+    for (const a of sleeping) {
+      const decay = evaluateAnchorDecay(a);
+      const idCol = `#${a.id}`.padEnd(8, ' ');
+      console.log(`  ${idCol} ○ ${a.title.padEnd(24, ' ')} ${decay.remainingSleepDays}d until graveyard`);
+    }
+  }
+
+  console.log(`\n  Use 'anchor done <id>' to complete.\n`);
   process.exit(0);
 }
 
-// 2. Close task: anchor done <id> / anchor rm <id>
+// 2. Close task: `anchor done <id>` or `anchor rm <id>`
 if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
   const id = args[1];
   if (!id) {
@@ -37,8 +59,8 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
     process.exit(1);
   }
   try {
-    store.settle(id, { settledBy: 'manual-command' });
-    console.log(`⚓ 已完成并清除 #${id}`);
+    const settled = store.settle(id, { settledBy: 'manual-command' });
+    console.log(`⚓ 已完成并清除 #${id}: "${settled.title}"`);
   } catch (err) {
     console.error(`错误: ${err.message}`);
     process.exit(1);
@@ -46,7 +68,8 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
   process.exit(0);
 }
 
-// 3. Pin new task: anchor "my task description"
+// 3. Pin new task: `anchor <task description>`
 const title = args.join(' ').trim();
 const anc = store.create({ title, cwd: process.cwd() });
-console.log(`⚓ 已记录 #${anc.id}: "${anc.title}"`);
+const duraBadge = anc.durability === 'ephemeral' ? ' [短期备忘/48h]' : '';
+console.log(`⚓ 已记录 #${anc.id}: "${anc.title}"${duraBadge}`);

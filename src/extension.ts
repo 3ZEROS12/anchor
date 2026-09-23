@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
       updateAnchorStatusBar(ctx, store);
 
       const a = matches[0].anchor;
-      const alert = `\n\n[Anchor JIT Alert: Accessing "${touchedPath}" intersects with active commitment #${a.id}: "${a.title}" (${a.priority.toUpperCase()}).]`;
+      const alert = `\n\n// ⚓ anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
 
       const contents = [...(event.content || [])];
       for (let i = contents.length - 1; i >= 0; i--) {
