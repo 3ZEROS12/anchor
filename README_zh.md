@@ -1,162 +1,202 @@
-# ⚓ Anchor (任务锚)
+# ⌖ Anchor
 
 <p align="center">
-  <strong>专为 AI 编码会话设计的零污染、上下文感知、自动承兑跨会话任务协议。</strong><br>
-  <em>清理膨胀的 AGENTS.md。跨会话保持追踪，上下文拒绝冗余。</em>
+  <strong>面向 AI 编程智能体的零污染、上下文感知、自消解跨会话任务协议。</strong><br>
+  <em>拒绝发霉膨胀的 AGENTS.md。用 0 Token 闲置损耗与 0 仓库文件污染，守住多轮会话工程意图。</em>
 </p>
 
 <p align="center">
-  <a href="README.md">English Documentation</a> •
-  <a href="#-设计背景与工程痛点">💡 工程背景</a> •
-  <a href="#-三大运行机制">✨ 核心机制</a> •
-  <a href="#-同类方案横向对标">📊 横向对比</a> •
-  <a href="#-快速上手">🚀 快速上手</a>
+  <a href="README.md">English</a> •
+  <a href="#-核心痛点">💡 核心痛点</a> •
+  <a href="#-核心机制">✨ 核心机制</a> •
+  <a href="#-界面设计">🖥️ 界面设计</a> •
+  <a href="#-竞品对比">📊 竞品对比</a> •
+  <a href="#-快速开始">🚀 快速开始</a>
 </p>
 
 <p align="center">
+  <a href="https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml">
+    <img src="https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg" alt="CI 状态">
+  </a>
   <img src="https://img.shields.io/badge/Node-v20+-brightgreen.svg" alt="Node v20+">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue.svg" alt="TypeScript Strict">
-  <img src="https://img.shields.io/badge/依赖-零外部依赖-success.svg" alt="零外部依赖">
-  <img src="https://img.shields.io/badge/测试-8项通过-brightgreen.svg" alt="8项通过">
+  <img src="https://img.shields.io/badge/Tests-13%20通过-brightgreen.svg" alt="Tests: 13 Passed">
+  <img src="https://img.shields.io/badge/存储-零仓库污染-success.svg" alt="零仓库污染">
   <img src="https://img.shields.io/badge/开源协议-MIT-orange.svg" alt="License: MIT">
 </p>
 
 ---
 
-## 💡 设计背景与工程痛点
+## 💡 核心痛点
 
-日常使用终端 AI 编程助手（Claude Code、Pi、Cursor、Aider）时，开发者普遍面临三项工程摩擦：
+使用终端 AI 编程智能体（Pi、Claude Code、Cursor、Aider）时，开发者普遍面临三大交互摩擦：
 
-1. **终端退出即状态丢失（Session State Loss）**：按下 `Ctrl+C` 退出终端，多轮探索中的架构意图和待办承诺随之消散。
-2. **上下文持久化膨胀（Context Bloat）**：将任务写入 `AGENTS.md` 或 `TODO.md`，两周后文件往往堆积数百行陈旧记录。每次请求均被动消耗数千 Token。
-3. **人工勾选闭环失效（Manual Ticking Failure）**：多数重构与排查任务缺乏自动化校验脚本。依赖开发者事后手动修改 Markdown 文件打勾，往往导致任务长期滞留。
+1. **会话遗忘症**：敲击 `Ctrl+C` 或关闭终端，当前的会话上下文立刻清空，前面积累的跨步重构目标与口头承诺全部丢失。
+2. **提示词上下文膨胀**：将任务记入 `AGENTS.md` 或 `TODO.md`，不仅频繁污染 Git 提交历史，而且每轮交互都要给 Prompt 塞入几十行陈旧文本，白白浪费海量 Token。
+3. **人工打勾负担重**：真实的重构任务很难一次性配齐完备的自动化单测，开发者写完代码后往往不会专程去翻 Markdown 文件打勾，未结案任务最终堆积发霉。
 
-Anchor 将跨会话任务定义为自带生命周期与验讫机制的承兑契约：关联具体文件路径，触碰代码时唤醒提示，退出会话时就地核验，超时未推进自动休眠脱落。
-
----
-
-## ✨ 三大运行机制
-
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           Anchor 任务生命周期状态机                     │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │ 用户或 Agent 挂锚：/pin "重构鉴权"
-                                     ▼
-             ┌───────────────────────────────────────────────┐
-             │            [活跃期 ACTIVE] (0 ~ 3 天)         │
-             │ - 终端状态栏显示: ⚓ ● 1 active                │
-             │ - 仅向 System Prompt 注入 2 行紧凑标头        │
-             └───────┬───────────────────────────────┬───────┘
-                     │                               │
-        相关代码被修改│                               │ 连续 3 天未触碰
-        (File Touch) ▼                               ▼
-┌──────────────────────────────┐            ┌─────────────────────────────────┐
-│ [关门贴脸一键结案]           │            │    [休眠期 SLEEPING] (4 ~ 7 天) │
-│ 会话退出时弹出结案单：       │            │ - 物理移出 System Prompt        │
-│ 按下 [回车] 立即结案归档     │            │ - 消耗 Token 严格为 0           │
-└──────────────┬───────────────┘            └────────────────┬────────────────┘
-               │                                             │
-               │ 确认结案                                     │ 超过 14 天未唤醒
-               ▼                                             ▼
-┌──────────────────────────────┐            ┌─────────────────────────────────┐
-│      [已结案 SETTLED]        │            │        [墓园档案 GRAVEYARD]     │
-│ 写入 archive.jsonl 归档      │            │ 移出活动状态库，避免陈旧累积     │
-└──────────────────────────────┘            └─────────────────────────────────┘
-```
-
-### 1. 关门贴脸一键结案 (One-Tap Settlement at Exit)
-开发者退出终端时往往不会主动清理任务列表。
-Anchor 在捕获到 `/exit` 命令或退出信号时，读取本次会话修改的文件列表。若修改范围命中活跃锚点，直接在终端当前行输出交互核验卡：
-
-```text
-───────────────────────────────────────────────────────────────────
-⚓ 关门结案提议 | Anchor Settlement
-   任务 #anc-1: 修复鉴权模块 Cookie 泄露 [P0]
-   证据触发: 本次修改了 src/auth/login.ts, src/auth/jwt.ts
-   [Enter 确认结案并归档]  /  [Tab 暂未完成，继续挂起]
-───────────────────────────────────────────────────────────────────
-```
-会话退出时按下回车，任务完成并即刻归档，上下文即时释放。
-
-### 2. 意图触碰唤醒 (Context-Aware Resurface)
-未触碰的锚点不干扰全局系统提示词。后续会话中调用 `read` 或 `edit` 读取对应路径（如 `src/auth/`）时，状态栏提示关联锚点存在：
-> `💡 Anchor: 检测到查看 auth 目录，3 天前留下锚点 #anc-1，按 Tab 唤出看板。`
-
-### 3. 遗忘半衰期自净 (Half-Life Decay & Auto-Sweep)
-未完成且长期搁置的任务通过时间窗口自动降级：
-* **0 至 3 天（活跃期）**：状态栏可见，系统提示词注入 2 行结构化标头。
-* **4 至 7 天（休眠期）**：从系统提示词完全剥离，Token 占用降为 0。
-* **14 天以上（墓园期）**：自动归档至 `.anchor/graveyard.jsonl`，主配置保持轻量。
+**Anchor** 将任务抽象为**自带闭环证据的自消解承兑单（Promissory Notes）**：
+* **全局唯一安全存储**（`~/.pi/agent/anchors/`）—— 代码仓库内绝对不建 `.anchor/` 目录，0 文件污染。
+* **0-Token 稳态控制**——首轮冷启动注入极简说明，后续所有正常对话轮次物理剔除（0 Token 消耗），仅在触碰相关代码时 JIT 唤醒。
+* **凭物理证据结案**——Git Commit 语义感知、物理测试验讫跑通自动结案；退出时单键即焚划掉。
+* **双轨生命周期**——临时随口一念（48小时无动作自动自净）vs 长期架构愿景（永久安全存续）。
 
 ---
 
-## 📊 同类方案横向对标
+## ✨ 核心机制
 
-| 维度 | `gastownhall/beads` (2.7w ⭐) | `engram` (6.7k ⭐) | `AGENTS.md` / `TODO.md` | **Anchor ⚓ (本项目)** |
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                        Anchor 生命周期状态机                                  │
+└──────────────────────────────────────┬───────────────────────────────────────┘
+                                       │ 记录任务: /pin "重构鉴权为 HttpOnly Cookie"
+                                       ▼
+               ┌───────────────────────────────────────────────┐
+               │           [活跃期 ACTIVE] (首轮注入提示)        │
+               │ - 底部状态栏微光准星: ⌖ 1                      │
+               │ - 第 2 轮起完全剥离出提示词 (0 Token 稳态)      │
+               └───────┬───────────────────────────────┬───────┘
+                       │                               │
+        Git 提交命中 /  │                               │ 闲置半衰期衰退
+        触碰关联代码文件  ▼                               ▼
+  ┌──────────────────────────────┐            ┌────────────────────────────────┐
+  │      [JIT 代码注释级唤醒]     │            │    [休眠期 SLEEPING] (0 Token) │
+  │ 触碰 src/auth/* 时优雅淡入:   │            │ 全局安全封存，不打扰当前心流，   │
+  │ // ⌖ anchor context: #anc-1  │            │ 触碰代码时重新唤醒              │
+  └──────────────┬───────────────┘            └────────────────┬───────────────┘
+                 │                                             │
+        关门承兑 / 自动匹配完成                                 │ 48小时超时 (临时备忘)
+                 ▼                                             ▼
+  ┌──────────────────────────────┐            ┌────────────────────────────────┐
+  │     [结案归档 SETTLED]        │            │     [自动自净 GRAVEYARD]       │
+  │ 追加写入 archive.jsonl 账本   │            │ 自动扫入墓园归档，绝不堆积发霉   │
+  │ 物理从活跃上下文中即刻脱落    │            │                                │
+  └──────────────────────────────┘            └────────────────────────────────┘
+```
+
+### 1. 绝对零仓库污染
+Anchor 不会在你的工程目录中建立任何文件夹，也不会留下任何本地缓存。所有任务状态统一托管于用户全局目录：
+```
+~/.pi/agent/anchors/
+├── state.json           # 活跃与休眠任务状态表 (< 10KB，原子化写入)
+├── archive.jsonl        # 已结案归档的承兑历史账本
+└── graveyard.jsonl      # 自动自净脱落的临时备忘墓园
+```
+
+### 2. 0-Token 稳态与 JIT 触碰唤醒
+* **第 1 轮（冷启动）**：注入精简的未结清单与真人助手搭话协议。
+* **第 2 轮及后续**：彻底从 System Prompt 中隐形，**0 Token 消耗**，不稀释大模型注意力。
+* **代码触碰 JIT 唤醒**：当 Agent 在后续工作流中读取了相关文件（如 `src/auth/*`），Anchor 仅在工具结果末尾以单行极简代码注释形式淡入提示：
+  ```text
+  // ⌖ anchor context: #anc-1 重构鉴权为 HttpOnly Cookie (P0)
+  ```
+
+### 3. 双轨寿命契约（长短期分层）
+* **短期临时备忘（`48h left`）**：针对“今晚”、“明天”、“稍后”等随口一说的临时事项，若 48 小时内未触碰自动无声脱落，绝不跨周死缠烂打。
+* **长期架构愿景（常驻）**：针对核心重构、设计规划、日常习惯，永久存续，系统绝不擅自丢弃。
+
+### 4. 零负担多源证据结案
+* **Git 提交语义感知**：内置基于 `Intl.Segmenter` 的多语系分词引擎。例如敲入 `git commit -m "fix(auth): 修复鉴权 Cookie 泄露"` 时，自动识别并闭环结案 `#anc-1`。
+* **会话关门贴脸结案**：当退出终端且本会话修改过关联代码时，触发一次单键确认：
+  ```text
+  ⌖ 跨会话任务结案提议
+  任务 #anc-1 [重构鉴权模块] 关联的文件已在本会话中修改 (src/auth/jwt.ts)。
+  是否标记已完成并结案归档？ [回车确认] / [Esc保留]
+  ```
+* **一键撤销（Undo）**：若发生误判，敲入 `/anchor undo` 瞬间逆向回滚恢复。
+
+---
+
+## 🖥️ 界面设计
+
+遵循冷峻低饱和度的 Neovim / 极客终端呼吸感：
+
+### 底部状态栏组件
+* 无任务时：**100% 物理隐身**（0 字符，零干扰）。
+* 有任务时：呈现极简准星专注标点：**`⌖ 1`**。
+
+### 交互面板 (`/anchor`)
+```text
+⌖ Anchors (enter to complete):
+
+> 01  明天吃香蕉                  · Desktop · 46h left · 2h ago
+  02  每天吃一个苹果              · Desktop · 2h ago
+  03  完成针对桌面的优化          · Desktop · 2h ago
+  04  Refactor auth session      · backend · src/auth/* · 3h ago
+```
+* **上下键 + 回车**：直接划掉完成并释放上下文，无多级菜单困扰。
+* **时间语义清晰正交**：`46h left`（未来自净倒计时） vs `2h ago`（过去创建时间）。
+
+### 独立终端 CLI (`anchor`)
+无需启动 AI 环境，在任何系统命令行中独立使用：
+```bash
+anchor                           # 查看待办清单
+anchor "明天看下 PR #42"         # 记录新任务 (自动识别为 48h 临时备忘)
+anchor done anc-1                # 划掉并归档任务
+```
+
+---
+
+## 📊 竞品对比
+
+| 对比维度 | `gastownhall/beads` | `Gentleman-Programming/engram` | `AGENTS.md` / `TODO.md` | **Anchor ⚓** |
 | :--- | :--- | :--- | :--- | :--- |
-| **底层定位** | 分布式 SQL 任务图谱 | 跨会话只读记忆库 | 静态 Markdown 纯文本 | **自消解跨会话承兑协议** |
-| **外部依赖** | 依赖 Dolt 数据库 (200MB) | Go 编译二进制 + SQLite | 无 | **零外部依赖 (原生 TypeScript)** |
-| **Token 消耗** | 需注入依赖图谱 | 注入历史事实段落 | 堆积历史未清理文本 | **活跃状态 2 行，休眠状态 0 行** |
-| **结案机制** | 手动执行 close 命令 | 无任务生命周期 | 人工编辑源文件 | **退出会话时单键确认归档** |
-| **衰变脱落** | 手动执行 prune 命令 | 无衰变机制 | 长期留存无衰减 | **内置 3/7/14 天阶梯自动脱落** |
-| **终端集成** | 基础命令行输出 | 独立 TUI 界面 | 静态文本查看 | **状态栏常驻指示 + 交互驾驶舱** |
+| **底层架构** | 分布式 SQL 依赖图谱 | 向量与 SQLite 外部库 | 静态 Markdown 纯文本 | **轻量原子化自消解状态机** |
+| **工作区清洁度** | 仓库内塞入 200MB Dolt 数据库 | 系统后台服务 | **频繁污染 Git 历史与引发冲突** | **100% 零仓库污染 (`~/.pi/agent/anchors/`)** |
+| **Token 损耗** | 每轮中/高消耗 | 高（注入长文历史） | 极高（陈旧文本成倍累积） | **0 Token 稳态（仅文件触碰 JIT 唤醒）** |
+| **结案闭环** | 人工命令 `close` | 无闭环概念 | 人工修改文本打勾 | **Git Commit 自动识别 + 关门单键承兑** |
+| **衰减自净** | 手动 prune | 无衰退机制 | 长期堆积发霉 | **双轨自净（48小时极速自净 vs 长期常驻）** |
+| **环境依赖** | 外部 Dolt 二进制 | 外部 Go 编译产物 | 无 | **零原生二进制外部依赖（纯 TS）** |
 
 ---
 
-## 🛠️ 存储架构
+## 🚀 快速开始
 
-采用写入临时文件后执行原子替换机制（`state.json.tmp.<pid>` 重命名覆盖），终端进程意外中断不损坏数据结构。
+### 安装
 
-```
-.anchor/
-├── state.json           # 活跃与休眠状态（单文件体积 < 5KB）
-├── archive.jsonl        # 已结案时间线记录（行分隔 JSON）
-└── graveyard.jsonl      # 超期脱落记录（行分隔 JSON）
-```
-
----
-
-## 🚀 快速上手 (Pi 原生扩展)
-
-将插件拷贝至 Pi 扩展目录：
+#### 1. 作为 Pi Coding Agent 扩展
 ```bash
-cp -r projects/anchor ~/.pi/agent/extensions/anchor
+# 在 ~/.pi/agent/extensions/ 目录下
+npm install @3zeros12/anchor
 ```
 
-在终端中输入命令调用：
+#### 2. 全局独立命令行 CLI
 ```bash
-/anchor               # 唤出终端交互式驾驶舱看板
-/pin "修复鉴权 Bug"   # 快速建立任务锚点
-/anchor sweep         # 手动触发半衰期衰变核验
+npm install -g @3zeros12/anchor
 ```
 
 ---
 
-## 🧪 自动化单元测试
+## 🧪 自动化测试与质量保障
 
-基于 Node.js 原生测试运行器执行，无第三方测试框架依赖：
+采用标准 Node 原生测试运行器，执行严格的类型检查与测试：
 
 ```bash
-cd projects/anchor
-npm test
+npm run build      # tsup 双格式打包 (ESM/CJS) 与 .d.ts 生成
+npm run typecheck  # TypeScript 严格模式检查 (0 错误)
+npm test           # 全套自动化单元测试
 ```
 
 ```text
-✔ ContextInjector - 仅注入活跃锚点，休眠任务消耗 0 Token (96ms)
-✔ AnchorDecay - 半衰期状态迁移计算 (1.6ms)
-✔ AnchorDecay - 自动清理与墓园脱落 (139ms)
-✔ AnchorMatcher - 精确文件、目录前缀、领域标签匹配 (2.0ms)
-✔ AnchorMatcher - 优先级加权排序 (0.5ms)
-✔ SessionTouchObserver - 触碰文件与 Git Commit 被动感知 (1.6ms)
-✔ AnchorStore - 原子化增删改查与文件落盘 (80ms)
-✔ AnchorStore - 损坏状态安全恢复与隔离 (19ms)
+✔ ContextInjector - 仅注入活跃锚点，休眠任务消耗 0 Token (64ms)
+✔ AnchorDecay - 遗忘半衰期计算 (1.5ms)
+✔ AnchorDecay - 自动退化与墓园清理 (142ms)
+✔ AnchorMatcher - 精确文件、前缀、领域标签匹配 (5.6ms)
+✔ AnchorMatcher - 通配符 Glob 模式匹配 (*.ts, src/**/*.ts) (1.1ms)
+✔ AnchorMatcher - 置信度与优先级复合排序 (0.5ms)
+✔ SessionTouchObserver - 工具调用与文件触碰监听 (32ms)
+✔ SessionTouchObserver - 多语系 Git 提交语义分词匹配 (3ms)
+✔ AnchorStore - 原子化增删改查与文件落盘 (90ms)
+✔ AnchorStore - 状态损坏自动安全容灾恢复 (5.2ms)
+✔ AnchorTUI - 状态栏准星组件 ⌖ N (31ms)
+✔ AnchorTUI - 正交区分未来倒计时 (left) 与过去创建时间 (ago) (17ms)
+✔ AnchorTUI - 极客面板排版与出处溯源 (42ms)
 
-ℹ 8 项测试全量通过
+ℹ pass 13, fail 0 (455ms 全绿通过)
 ```
 
 ---
 
-## 📄 开源协议
+## 📄 开源许可
 
-MIT License © [Jason Song](https://github.com/3ZEROS12)
+[MIT License](LICENSE) © 2025 [Jason Song (@3ZEROS12)](https://github.com/3ZEROS12)
