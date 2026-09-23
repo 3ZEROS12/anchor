@@ -8,13 +8,13 @@ import { updateAnchorStatusBar, openAnchorDashboard } from '../src/tui.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 function createTempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-tui-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-simple-tui-test-'));
 }
 
-test('AnchorTUI - status bar reflects active and sleeping state cleanly with benzene ring', () => {
+test('AnchorTUI - status bar reflects active and sleeping state cleanly with original anchor icon', () => {
   const tempDir = createTempDir();
   try {
-    const store = new DualAnchorStore(tempDir);
+    const store = new DualAnchorStore(tempDir, path.join(tempDir, 'global_anchors'));
     let currentStatus: string | undefined = 'initial';
 
     const mockCtx = {
@@ -30,75 +30,51 @@ test('AnchorTUI - status bar reflects active and sleeping state cleanly with ben
     updateAnchorStatusBar(mockCtx, store);
     assert.strictEqual(currentStatus, undefined);
 
-    // 2. One active anchor -> [⌬ anc: 1 active]
+    // 2. One active anchor -> [⚓ 1 active]
     store.create({ title: 'Task Alpha' });
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '[⌬ anc: 1 active]');
+    assert.strictEqual(currentStatus, '[⚓ 1 active]');
 
-    // 3. One active and one sleeping -> [⌬ anc: 1 active, 1 sleep]
+    // 3. One active and one sleeping -> [⚓ 1 active, 1 sleep]
     const a2 = store.create({ title: 'Task Beta' });
     store.projectStore.update(a2.id, { status: 'sleeping' });
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '[⌬ anc: 1 active, 1 sleep]');
+    assert.strictEqual(currentStatus, '[⚓ 1 active, 1 sleep]');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
-test('AnchorTUI - openAnchorDashboard renders ToolFlow style custom component', async () => {
+test('AnchorTUI - openAnchorDashboard renders fast, simple text notification without heavy modals', () => {
   const tempDir = createTempDir();
   try {
-    const store = new DualAnchorStore(tempDir);
-    let customCalled = false;
-    let customComponent: any = null;
-
-    const mockTheme = {
-      fg: (_color: string, s: string) => s,
-      bg: (_color: string, s: string) => s,
-      bold: (s: string) => s
-    };
+    const store = new DualAnchorStore(tempDir, path.join(tempDir, 'global_anchors'));
+    let notifyMsg = '';
 
     const mockCtx = {
       hasUI: true,
       ui: {
-        custom: async (factory: any) => {
-          customCalled = true;
-          let doneCalled = false;
-          customComponent = factory(
-            { requestRender: () => {} },
-            mockTheme,
-            {},
-            () => { doneCalled = true; }
-          );
+        notify: (msg: string) => {
+          notifyMsg = msg;
         },
-        notify: () => {},
         setStatus: () => {}
       }
     } as unknown as ExtensionContext;
 
+    // 1. Empty ledger
+    openAnchorDashboard(mockCtx, store);
+    assert.ok(notifyMsg.includes('暂无活跃锚点'));
+
+    // 2. Ledger with active project and global items
     store.create({ title: 'Refactor auth', priority: 'p0', files: ['src/auth/jwt.ts'], scope: 'project' });
-    store.create({ title: 'Update Pi rules', priority: 'p1', scope: 'global' });
+    store.create({ title: 'Learn Pi update', priority: 'p1', scope: 'global' });
 
-    await openAnchorDashboard(mockCtx, store);
-    assert.strictEqual(customCalled, true);
-    assert.ok(customComponent);
-
-    // Test render output width 80
-    const renderedLines = customComponent.render(80);
-    assert.ok(renderedLines.length > 5);
-    const textJoined = renderedLines.join('\n');
-    assert.ok(textJoined.includes('⌬ ⚓ Anchor 任务锚点驾驶舱'));
-    assert.ok(textJoined.includes('Refactor auth'));
-
-    // Test input handling: 'g' toggles scope to global
-    const handledG = customComponent.handleInput('g');
-    assert.strictEqual(handledG, true);
-    const renderedGlobal = customComponent.render(80).join('\n');
-    assert.ok(renderedGlobal.includes('Update Pi rules'));
-
-    // Test escape exits
-    const handledEsc = customComponent.handleInput('\x1b');
-    assert.strictEqual(handledEsc, true);
+    openAnchorDashboard(mockCtx, store);
+    assert.ok(notifyMsg.includes('[⚓ Anchor 任务清单]'));
+    assert.ok(notifyMsg.includes('Refactor auth'));
+    assert.ok(notifyMsg.includes('Learn Pi update'));
+    assert.ok(notifyMsg.includes('[全局]'));
+    assert.ok(notifyMsg.includes('[项目]'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

@@ -19,11 +19,11 @@ export class AnchorStore {
   public readonly archivePath: string;
   public readonly graveyardPath: string;
 
-  constructor(rootDir: string = process.cwd(), scope: AnchorScope = 'project') {
+  constructor(rootDir: string = process.cwd(), scope: AnchorScope = 'project', customGlobalDir?: string) {
     this.rootDir = path.resolve(rootDir);
     this.scope = scope;
     if (scope === 'global') {
-      this.anchorDir = path.join(os.homedir(), '.pi', 'agent', 'anchors');
+      this.anchorDir = customGlobalDir || path.join(os.homedir(), '.pi', 'agent', 'anchors');
     } else {
       this.anchorDir = path.join(this.rootDir, '.anchor');
     }
@@ -265,9 +265,9 @@ export class DualAnchorStore {
   public readonly projectStore: AnchorStore;
   public readonly globalStore: AnchorStore;
 
-  constructor(cwd: string = process.cwd()) {
+  constructor(cwd: string = process.cwd(), customGlobalDir?: string) {
     this.projectStore = new AnchorStore(cwd, 'project');
-    this.globalStore = new AnchorStore(cwd, 'global');
+    this.globalStore = new AnchorStore(cwd, 'global', customGlobalDir);
   }
 
   public getStoreForScope(scope: AnchorScope): AnchorStore {
