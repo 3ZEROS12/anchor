@@ -41,7 +41,37 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
   process.exit(0);
 }
 
-// 2. Close task: `anchor done <id>` or `anchor rm <id>`
+// 2. Undo settlement: `anchor undo`
+if (args[0] === 'undo') {
+  try {
+    const restored = store.undoSettle();
+    console.log(`⌖ Restored #${restored.id}: "${restored.title}"`);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+// 3. Help: `anchor --help` or `anchor -h`
+if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
+  console.log(`
+⌖ Anchor CLI - Cross-session task protocol for AI coding agents
+
+Usage:
+  anchor                    List active anchors
+  anchor <task>             Pin a new task across sessions
+  anchor done <id>          Settle and evict a task (e.g. anchor done 1)
+  anchor undo               Restore the last settled task
+
+Options:
+  -h, --help                Show this help message
+  -v, --version             Show version
+`);
+  process.exit(0);
+}
+
+// 4. Close task: `anchor done <id>` or `anchor rm <id>`
 if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
   const id = args[1];
   if (!id) {

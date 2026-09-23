@@ -86,7 +86,7 @@ export const EPHEMERAL_DECAY_POLICY: AnchorDecayPolicy = {
 };
 
 export const DURABLE_DECAY_POLICY: AnchorDecayPolicy = {
-  activeDays: 7,
+  activeDays: 3,
   sleepDays: 30,
   graveyardDays: 9999 // Never permanently auto-dropped; preserved indefinitely
 };

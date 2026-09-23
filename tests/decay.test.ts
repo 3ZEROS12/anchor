@@ -53,9 +53,9 @@ test('AnchorDecay - sweepStore transitions and graveyard eviction', () => {
     const store = new AnchorStore(tempDir);
     const baseTime = 100_000_000_000;
 
-    const a1 = store.create({ title: 'Task fresh (1 day)' });
-    const a2 = store.create({ title: 'Task stale (5 days)' });
-    const a3 = store.create({ title: 'Task expired (20 days)' });
+    const a1 = store.create({ title: 'Task fresh (1 day)', decay: { activeDays: 3, sleepDays: 7, graveyardDays: 14 } });
+    const a2 = store.create({ title: 'Task stale (5 days)', decay: { activeDays: 3, sleepDays: 7, graveyardDays: 14 } });
+    const a3 = store.create({ title: 'Task expired (20 days)', decay: { activeDays: 3, sleepDays: 7, graveyardDays: 14 } });
 
     store.touch(a1.id, baseTime - 1 * MS_PER_DAY);
     store.touch(a2.id, baseTime - 5 * MS_PER_DAY);

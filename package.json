@@ -8,6 +8,7 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist",
+    "src",
     "bin",
     "README.md",
     "README_zh.md",
@@ -28,6 +29,7 @@
     "prepack": "npm run build"
   },
   "keywords": [
+    "pi-package",
     "ai-agent",
     "coding-agent",
     "task-management",

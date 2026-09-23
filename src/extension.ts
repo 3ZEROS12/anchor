@@ -132,6 +132,8 @@ export default function (pi: ExtensionAPI) {
       }
 
       // 3. Fallback: Prompt user for one-tap settlement on exit
+      if (!ctx.hasUI || !ctx.ui) continue;
+
       const ok = await ctx.ui.confirm(
         '⌖ Settle Anchor Task',
         `Task #${a.id} [${a.title}] touched files (${prop.matchedFiles.slice(0, 2).join(', ')}).\nMark as completed and archive?`
@@ -224,6 +226,25 @@ export default function (pi: ExtensionAPI) {
             content: [{
               type: 'text',
               text: `Anchor #${settled.id} successfully settled and evicted from active context.`
+            }],
+            isError: false
+          };
+        } catch (err: any) {
+          return { content: [{ type: 'text', text: err.message }], isError: true };
+        }
+      }
+
+      if (params.action === 'touch') {
+        if (!params.id) {
+          return { content: [{ type: 'text', text: 'Error: id is required for touch action' }], isError: true };
+        }
+        try {
+          const touched = store.touch(params.id);
+          updateAnchorStatusBar(ctx, store);
+          return {
+            content: [{
+              type: 'text',
+              text: `Anchor #${touched.id} touched and decay timer refreshed.`
             }],
             isError: false
           };

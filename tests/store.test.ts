@@ -34,11 +34,14 @@ test('AnchorStore - basic CRUD & atomic writes', () => {
     const stateFile = path.join(tempDir, 'state.json');
     assert.ok(fs.existsSync(stateFile));
 
-    // 4. Reload from disk
+    // 4. Reload from disk & verify flexible ID matching ('anc-1', '1', '01', '#anc-1')
     const reloadedStore = new AnchorStore(tempDir);
     const loadedAnc = reloadedStore.get('anc-1');
     assert.ok(loadedAnc);
     assert.strictEqual(loadedAnc!.title, 'Fix auth session bug');
+    assert.strictEqual(reloadedStore.get('1')?.id, 'anc-1');
+    assert.strictEqual(reloadedStore.get('01')?.id, 'anc-1');
+    assert.strictEqual(reloadedStore.get('#anc-1')?.id, 'anc-1');
 
     // 5. Update anchor
     const updated = store.update('anc-1', { title: 'Fix auth session regression' });

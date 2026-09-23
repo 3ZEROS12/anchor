@@ -71,6 +71,19 @@ test('AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts)', () => {
 
   const match3 = matchAnchorAgainstTouchedFiles(anchor, ['src/components/sub/Deep.tsx']);
   assert.strictEqual(match3, null);
+
+  // 4. Recursive zero-depth glob matching: src/**/*.ts should match src/index.ts AND src/auth/jwt.ts
+  const anchorRec: Anchor = {
+    ...anchor,
+    id: 'anc-rec',
+    files: ['src/**/*.ts']
+  };
+  const matchTop = matchAnchorAgainstTouchedFiles(anchorRec, ['src/index.ts']);
+  assert.ok(matchTop);
+  assert.strictEqual(matchTop!.reason, 'exact-file');
+  const matchDeep = matchAnchorAgainstTouchedFiles(anchorRec, ['src/auth/jwt.ts']);
+  assert.ok(matchDeep);
+  assert.strictEqual(matchDeep!.reason, 'exact-file');
 });
 
 test('AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority', () => {

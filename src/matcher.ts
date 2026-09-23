@@ -7,8 +7,10 @@ import type { Anchor, TouchMatchResult } from './types.ts';
 export function globToRegExp(pattern: string): RegExp {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\/\*\*\//g, '___GLOB_DIR_SLASH___')
     .replace(/\*\*/g, '___GLOB_STAR_STAR___')
     .replace(/\*/g, '[^/]*')
+    .replace(/___GLOB_DIR_SLASH___/g, '(?:/|/.+/)')
     .replace(/___GLOB_STAR_STAR___/g, '.*');
   return new RegExp(`^${escaped}$`);
 }

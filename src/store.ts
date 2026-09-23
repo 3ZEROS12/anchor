@@ -3,6 +3,7 @@ import path from 'node:path';
 import os from 'node:os';
 import type {
   Anchor,
+  AnchorDecayPolicy,
   AnchorDurability,
   AnchorEvidence,
   AnchorPriority,
@@ -122,6 +123,7 @@ export class AnchorStore {
     files?: string[];
     tags?: string[];
     verifyCommand?: string;
+    decay?: AnchorDecayPolicy;
   }): Anchor {
     const state = this.loadState();
     const now = Date.now();
@@ -133,7 +135,7 @@ export class AnchorStore {
       : (cwd ? path.basename(cwd) : 'global');
 
     const durability = input.durability || detectDurability(input.title);
-    const decayPolicy = durability === 'ephemeral' ? EPHEMERAL_DECAY_POLICY : DEFAULT_DECAY_POLICY;
+    const decayPolicy = durability === 'ephemeral' ? EPHEMERAL_DECAY_POLICY : DURABLE_DECAY_POLICY;
 
     const anchor: Anchor = {
       id,
@@ -150,7 +152,7 @@ export class AnchorStore {
       files: (input.files || []).map(f => normalizePath(f)).filter(Boolean),
       tags: (input.tags || []).map(t => t.trim()).filter(Boolean),
       verifyCommand: input.verifyCommand?.trim() || undefined,
-      decay: { ...decayPolicy }
+      decay: input.decay ? { ...input.decay } : { ...decayPolicy }
     };
 
     state.anchors.push(anchor);
@@ -158,12 +160,22 @@ export class AnchorStore {
     return anchor;
   }
 
+  private findAnchorIndex(anchors: Anchor[], id: string): number {
+    const clean = id.trim().replace(/^#/, '');
+    return anchors.findIndex(a =>
+      a.id === clean ||
+      a.id === `anc-${clean}` ||
+      (clean.match(/^\d+$/) ? a.id === `anc-${parseInt(clean, 10)}` : false)
+    );
+  }
+
   /**
-   * Get an anchor by ID
+   * Get an anchor by ID (supports 'anc-1', '#anc-1', '1', '01')
    */
   public get(id: string): Anchor | undefined {
     const state = this.loadState();
-    return state.anchors.find(a => a.id === id);
+    const idx = this.findAnchorIndex(state.anchors, id);
+    return idx === -1 ? undefined : state.anchors[idx];
   }
 
   /**
@@ -201,7 +213,7 @@ export class AnchorStore {
    */
   public update(id: string, patch: Partial<Omit<Anchor, 'id' | 'createdAt'>>): Anchor {
     const state = this.loadState();
-    const idx = state.anchors.findIndex(a => a.id === id);
+    const idx = this.findAnchorIndex(state.anchors, id);
     if (idx === -1) {
       throw new Error(`Anchor not found: ${id}`);
     }
@@ -227,7 +239,7 @@ export class AnchorStore {
    */
   public touch(id: string, timestamp: number = Date.now()): Anchor {
     const state = this.loadState();
-    const idx = state.anchors.findIndex(a => a.id === id);
+    const idx = this.findAnchorIndex(state.anchors, id);
     if (idx === -1) {
       throw new Error(`Anchor not found: ${id}`);
     }
@@ -249,7 +261,7 @@ export class AnchorStore {
    */
   public settle(id: string, evidence: AnchorEvidence = {}): Anchor {
     const state = this.loadState();
-    const idx = state.anchors.findIndex(a => a.id === id);
+    const idx = this.findAnchorIndex(state.anchors, id);
     if (idx === -1) {
       throw new Error(`Anchor not found: ${id}`);
     }
