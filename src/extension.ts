@@ -257,9 +257,9 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const input = (args || '').trim();
 
-      // Case 1: 查看待办 (打开极简原生交互面板)
+      // Case 1: 查看待办 (打开极简单层清单，回车直接划掉完成)
       if (!input || input === 'list' || input === 'ls') {
-        await openAnchorDashboard(ctx, store, { showAll: false });
+        await openAnchorDashboard(ctx, store);
         return;
       }
 
@@ -275,18 +275,12 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Case 3: 查看全部项目 (打开全盘交互面板)
-      if (input === 'all' || input === '-a') {
-        await openAnchorDashboard(ctx, store, { showAll: true });
-        return;
-      }
-
-      // Case 4: 直接输 ID 划掉结案 (如 /anchor anc-1 或 /anchor #anc-1)
+      // Case 3: 直接输 ID 划掉结案 (如 /anchor anc-1 或 /anchor #anc-1)
       const targetId = input.startsWith('#') ? input.slice(1) : input;
       const item = store.get(targetId);
       if (item) {
         store.settle(targetId, { settledBy: 'manual-command' });
-        ctx.ui.notify(`⚓ 已完成并清除 #${targetId}: "${item.title}"`, 'info');
+        ctx.ui.notify(`⚓ 已完成并清除: "${item.title}"`, 'info');
         updateAnchorStatusBar(ctx, store);
         return;
       }
