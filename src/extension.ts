@@ -3,7 +3,7 @@ import { Type } from '@sinclair/typebox';
 import { DualAnchorStore } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
 import { renderActiveAnchorsContext } from './context_injector.ts';
-import { generateSettlementProposals } from './settlement.ts';
+import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
 import { sweepStore } from './decay.ts';
 import { updateAnchorStatusBar, openAnchorDashboard } from './tui.ts';
 import { execSync } from 'node:child_process';
@@ -75,9 +75,24 @@ export default function (pi: ExtensionAPI) {
     const proposals = generateSettlementProposals(s, touched);
     if (proposals.length === 0) return;
 
-    // Prompt user for one-tap settlement on exit
+    // Check proposals for automated verification or one-tap settlement
     for (const prop of proposals) {
       const a = prop.anchor;
+
+      // Automated physical verification
+      if (a.verifyCommand) {
+        const verifyRes = runPhysicalVerification(a, ctx.cwd);
+        if (verifyRes.success) {
+          s.settle(a.id, {
+            settledBy: 'verification-test',
+            summary: `Automated test passed: ${a.verifyCommand}`,
+            touchedFiles: prop.matchedFiles
+          });
+          ctx.ui.notify(`Anchor: 物理验讫通过 (${a.verifyCommand})，任务 #${a.id} 自动结案归档！`, 'info');
+          continue;
+        }
+      }
+
       const ok = await ctx.ui.confirm(
         '⚓ Anchor 关门结案提议',
         `任务 #${a.id} [${a.title}] 关联的文件已在本会话中被修改 (${prop.matchedFiles.slice(0, 2).join(', ')})。\n是否标记已完成并结案归档？`

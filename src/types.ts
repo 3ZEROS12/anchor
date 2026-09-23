@@ -45,6 +45,8 @@ export interface Anchor {
   lastTouchedAt: number;
   /** Associated file paths or globs, e.g. ['src/auth/*.ts'] */
   files: string[];
+  /** Optional shell command for automated physical verification (e.g. 'npm test') */
+  verifyCommand?: string;
   /** Topic or domain tags, e.g. ['auth', 'security'] */
   tags: string[];
   /** Decay policy overrides */

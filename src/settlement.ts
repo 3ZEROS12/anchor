@@ -1,6 +1,28 @@
 import type { AnchorStore, DualAnchorStore } from './store.ts';
 import { findMatchedAnchors } from './matcher.ts';
-import type { SettlementProposal } from './types.ts';
+import type { Anchor, SettlementProposal } from './types.ts';
+import { execSync } from 'node:child_process';
+
+/**
+ * Execute physical verification test command for an anchor
+ */
+export function runPhysicalVerification(anchor: Anchor, cwd: string): { success: boolean; output: string } {
+  if (!anchor.verifyCommand) {
+    return { success: false, output: 'No verification command specified' };
+  }
+
+  try {
+    const stdout = execSync(anchor.verifyCommand, {
+      cwd,
+      encoding: 'utf-8',
+      timeout: 30000,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    return { success: true, output: stdout.trim() };
+  } catch (err: any) {
+    return { success: false, output: String(err.stderr || err.stdout || err.message).trim() };
+  }
+}
 
 /**
  * Generate settlement candidates based on files touched during the session

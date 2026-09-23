@@ -112,6 +112,7 @@ export class AnchorStore {
     files?: string[];
     tags?: string[];
     scope?: AnchorScope;
+    verifyCommand?: string;
   }): Anchor {
     const state = this.loadState();
     const now = Date.now();
@@ -129,6 +130,7 @@ export class AnchorStore {
       lastTouchedAt: now,
       files: (input.files || []).map(f => f.trim().replace(/\\/g, '/')).filter(Boolean),
       tags: (input.tags || []).map(t => t.trim()).filter(Boolean),
+      verifyCommand: input.verifyCommand?.trim() || undefined,
       decay: { ...DEFAULT_DECAY_POLICY }
     };
 
@@ -256,6 +258,26 @@ export class AnchorStore {
     this.saveState(state);
     return anchor;
   }
+
+  public getArchive(): Anchor[] {
+    if (!fs.existsSync(this.archivePath)) return [];
+    try {
+      const raw = fs.readFileSync(this.archivePath, 'utf-8');
+      return raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+    } catch {
+      return [];
+    }
+  }
+
+  public getGraveyard(): Anchor[] {
+    if (!fs.existsSync(this.graveyardPath)) return [];
+    try {
+      const raw = fs.readFileSync(this.graveyardPath, 'utf-8');
+      return raw.split('\n').filter(Boolean).map(l => JSON.parse(l));
+    } catch {
+      return [];
+    }
+  }
 }
 
 /**
@@ -301,10 +323,25 @@ export class DualAnchorStore {
     files?: string[];
     tags?: string[];
     scope?: AnchorScope;
+    verifyCommand?: string;
   }): Anchor {
     const targetScope = input.scope || 'project';
     const store = this.getStoreForScope(targetScope);
     return store.create(input);
+  }
+
+  public getArchive(scope: AnchorScope | 'all' = 'all'): Anchor[] {
+    let res: Anchor[] = [];
+    if (scope === 'all' || scope === 'project') res = res.concat(this.projectStore.getArchive());
+    if (scope === 'all' || scope === 'global') res = res.concat(this.globalStore.getArchive());
+    return res;
+  }
+
+  public getGraveyard(scope: AnchorScope | 'all' = 'all'): Anchor[] {
+    let res: Anchor[] = [];
+    if (scope === 'all' || scope === 'project') res = res.concat(this.projectStore.getGraveyard());
+    if (scope === 'all' || scope === 'global') res = res.concat(this.globalStore.getGraveyard());
+    return res;
   }
 
   public settle(id: string, evidence?: AnchorEvidence): Anchor {
