@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { AnchorStore } from '../src/store.ts';
-import { updateAnchorStatusBar, openAnchorDashboard } from '../src/tui.ts';
+import { updateAnchorStatusBar, openAnchorDashboard, formatRemainingTtl, formatRelativeTime } from '../src/tui.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 function createTempDir(): string {
@@ -40,6 +40,28 @@ test('AnchorTUI - status bar reflects active state cleanly with ⌖ N', () => {
     store.create({ title: 'Task Beta', cwd: '/workspace/project-a' });
     updateAnchorStatusBar(mockCtx, store);
     assert.strictEqual(currentStatus, '⌖ 2');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('AnchorTUI - formatRemainingTtl and formatRelativeTime distinguish left vs ago', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const baseTime = 100_000_000_000;
+
+    const aEphemeral = store.create({ title: '明天吃香蕉' });
+    const aDurable = store.create({ title: '每天吃一个苹果' });
+
+    const ttlEphemeral = formatRemainingTtl(aEphemeral, aEphemeral.createdAt + 2 * 3600 * 1000);
+    const ttlDurable = formatRemainingTtl(aDurable, aDurable.createdAt + 2 * 3600 * 1000);
+
+    assert.strictEqual(ttlEphemeral, '46h left');
+    assert.strictEqual(ttlDurable, undefined);
+
+    const pastRel = formatRelativeTime(baseTime - 23 * 60 * 1000, baseTime);
+    assert.strictEqual(pastRel, '23m ago');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

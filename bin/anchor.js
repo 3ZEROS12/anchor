@@ -5,7 +5,7 @@
  */
 
 import { AnchorStore } from '../src/store.ts';
-import { formatOrigin, formatRelativeTime } from '../src/tui.ts';
+import { formatOrigin, formatRelativeTime, formatRemainingTtl } from '../src/tui.ts';
 
 const store = new AnchorStore();
 const args = process.argv.slice(2);
@@ -24,13 +24,14 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
     const num = (i + 1).toString().padStart(2, '0');
     const origin = formatOrigin(a.cwd);
     const relTime = formatRelativeTime(a.createdAt);
+    const ttl = formatRemainingTtl(a);
 
     const metaParts = [origin];
     if (a.files && a.files.length > 0) {
       metaParts.push(a.files.slice(0, 1).join(', '));
     }
-    if (a.durability === 'ephemeral') {
-      metaParts.push('48h');
+    if (ttl) {
+      metaParts.push(ttl);
     }
     metaParts.push(relTime);
 
@@ -60,5 +61,5 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
 // 3. Pin new task: `anchor <task description>`
 const title = args.join(' ').trim();
 const anc = store.create({ title, cwd: process.cwd() });
-const expireBadge = anc.durability === 'ephemeral' ? ' · 48h' : '';
+const expireBadge = anc.durability === 'ephemeral' ? ' · 48h left' : '';
 console.log(`⌖ Pinned #${anc.id}: "${anc.title}"${expireBadge}`);

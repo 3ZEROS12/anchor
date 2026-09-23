@@ -4,7 +4,7 @@ import type { Anchor } from './types.ts';
 import path from 'node:path';
 
 /**
- * Format relative time in concise English (e.g. 'now', '17m', '2h', '3d')
+ * Format relative past time in concise English (e.g. 'just now', '23m ago', '2h ago', '3d ago')
  */
 export function formatRelativeTime(timestamp: number, now: number = Date.now()): string {
   const elapsedMs = Math.max(0, now - timestamp);
@@ -12,11 +12,23 @@ export function formatRelativeTime(timestamp: number, now: number = Date.now()):
   const hours = Math.floor(elapsedMs / (60 * 60 * 1000));
   const days = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
 
-  if (minutes < 1) return 'now';
-  if (minutes < 60) return `${minutes}m`;
-  if (hours < 24) return `${hours}h`;
-  if (days < 30) return `${days}d`;
-  return `${Math.floor(days / 30)}mo`;
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  if (hours < 24) return `${hours}h ago`;
+  if (days < 30) return `${days}d ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
+/**
+ * Format remaining TTL for ephemeral tasks (e.g. '48h left')
+ */
+export function formatRemainingTtl(anchor: Anchor, now: number = Date.now()): string | undefined {
+  if (anchor.durability !== 'ephemeral') return undefined;
+  const ttlMs = (anchor.decay.graveyardDays || 2) * 24 * 60 * 60 * 1000;
+  const elapsedMs = Math.max(0, now - anchor.createdAt);
+  const remainingMs = Math.max(0, ttlMs - elapsedMs);
+  const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
+  return `${remainingHours}h left`;
 }
 
 /**
@@ -45,8 +57,7 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
 }
 
 /**
- * Clean, minimalist checklist in concise English
- * Task title retains user's original language.
+ * Clean, minimalist checklist with explicit `left` vs `ago` time distinction
  */
 export async function openAnchorDashboard(
   ctx: ExtensionContext,
@@ -68,13 +79,14 @@ export async function openAnchorDashboard(
     const num = (i + 1).toString().padStart(2, '0');
     const origin = formatOrigin(a.cwd);
     const relTime = formatRelativeTime(a.createdAt);
+    const ttl = formatRemainingTtl(a);
 
     const metaParts: string[] = [origin];
     if (a.files && a.files.length > 0) {
       metaParts.push(a.files.slice(0, 1).join(', '));
     }
-    if (a.durability === 'ephemeral') {
-      metaParts.push('48h');
+    if (ttl) {
+      metaParts.push(ttl);
     }
     metaParts.push(relTime);
 
