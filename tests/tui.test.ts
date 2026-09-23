@@ -11,11 +11,11 @@ function createTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-tui-test-'));
 }
 
-test('AnchorTUI - status bar reflects active and sleeping state correctly', () => {
+test('AnchorTUI - status bar reflects active and sleeping state cleanly without noise', () => {
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
-    let currentStatus: string | undefined;
+    let currentStatus: string | undefined = 'initial';
 
     const mockCtx = {
       hasUI: true,
@@ -26,81 +26,55 @@ test('AnchorTUI - status bar reflects active and sleeping state correctly', () =
       }
     } as unknown as ExtensionContext;
 
-    // 1. Zero active, zero sleeping -> must show '⚓ 0 active' (not undefined)
+    // 1. Zero active, zero sleeping -> must be undefined (completely invisible)
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '⚓ 0 active');
+    assert.strictEqual(currentStatus, undefined);
 
-    // 2. One active anchor
+    // 2. One active anchor -> [anc: 1 active]
     store.create({ title: 'Task Alpha' });
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '⚓ ● 1 active');
+    assert.strictEqual(currentStatus, '[anc: 1 active]');
 
-    // 3. Mark active as sleeping
-    const anchors = store.list();
-    store.update(anchors[0].id, { status: 'sleeping' });
+    // 3. One active and one sleeping -> [anc: 1 active, 1 sleep]
+    const a2 = store.create({ title: 'Task Beta' });
+    store.update(a2.id, { status: 'sleeping' });
     updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '⚓ 0 active | 💤 1 sleep');
-
-    // 4. One active and one sleeping
-    store.create({ title: 'Task Beta' });
-    updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '⚓ ● 1 active | 💤 1 sleep');
+    assert.strictEqual(currentStatus, '[anc: 1 active, 1 sleep]');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
-test('AnchorTUI - openAnchorDashboard uses string[] options exclusively and executes actions', async () => {
+test('AnchorTUI - openAnchorDashboard renders clean text ledger notification', () => {
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
-    let selectTitle = '';
-    let selectOptions: any[] = [];
     let notifyMsg = '';
 
     const mockCtx = {
       hasUI: true,
       ui: {
-        select: async (title: string, options: string[]) => {
-          selectTitle = title;
-          selectOptions = options;
-          // Verify every option is strictly a string (not an object!)
-          for (const opt of options) {
-            assert.strictEqual(typeof opt, 'string', `Option "${opt}" must be string`);
-          }
-          return options[0]; // pick first option
-        },
-        input: async (_title: string, _prompt: string) => {
-          return 'New Task From Dashboard';
-        },
-        notify: (msg: string, _type: string) => {
+        notify: (msg: string) => {
           notifyMsg = msg;
         },
         setStatus: () => {}
       }
     } as unknown as ExtensionContext;
 
-    // 1. Dashboard on empty store
-    await openAnchorDashboard(mockCtx, store);
-    assert.ok(selectTitle.includes('空空如也'));
-    assert.strictEqual(selectOptions.length, 2);
-    assert.strictEqual(typeof selectOptions[0], 'string');
-    assert.strictEqual(typeof selectOptions[1], 'string');
-    assert.ok(notifyMsg.includes('已成功锚定'));
-    assert.strictEqual(store.list().length, 1);
+    // 1. Empty ledger
+    openAnchorDashboard(mockCtx, store);
+    assert.ok(notifyMsg.includes('No active contracts'));
 
-    // 2. Dashboard with items
-    const titlesSeen: string[] = [];
-    mockCtx.ui.select = async (title: string, options: string[]) => {
-      titlesSeen.push(title);
-      for (const opt of options) {
-        assert.strictEqual(typeof opt, 'string', `Dashboard option "${opt}" must be string`);
-      }
-      return options[0];
-    };
-    await openAnchorDashboard(mockCtx, store);
-    assert.ok(titlesSeen.some(t => t.includes('驾驶舱')));
-    assert.ok(titlesSeen.some(t => t.includes('管理任务')));
+    // 2. Ledger with active and sleeping items
+    store.create({ title: 'Refactor auth', priority: 'p0', files: ['src/auth/jwt.ts'] });
+    const a2 = store.create({ title: 'Clean cache', priority: 'p1' });
+    store.update(a2.id, { status: 'sleeping' });
+
+    openAnchorDashboard(mockCtx, store);
+    assert.ok(notifyMsg.includes('[Anchor Ledger]'));
+    assert.ok(notifyMsg.includes('Refactor auth'));
+    assert.ok(notifyMsg.includes('Clean cache'));
+    assert.ok(notifyMsg.includes('[P0]'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

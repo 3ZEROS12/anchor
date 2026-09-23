@@ -197,18 +197,18 @@ export default function (pi: ExtensionAPI) {
       const sub = (args || '').trim();
 
       if (!sub) {
-        await openAnchorDashboard(ctx, s);
+        openAnchorDashboard(ctx, s);
         return;
       }
 
       if (sub.startsWith('add ')) {
         const title = sub.slice(4).trim();
         if (!title) {
-          ctx.ui.notify('用法: /anchor add <任务描述>', 'warning');
+          ctx.ui.notify('Usage: /anchor add <task>', 'warning');
           return;
         }
         const anc = s.create({ title });
-        ctx.ui.notify(`⚓ 任务 #${anc.id} 已成功锚定！将在后续会话中保持追踪。`, 'info');
+        ctx.ui.notify(`Anchor: pinned #${anc.id} "${anc.title}"`, 'info');
         updateAnchorStatusBar(ctx, s);
         return;
       }
@@ -216,15 +216,15 @@ export default function (pi: ExtensionAPI) {
       if (sub.startsWith('close ') || sub.startsWith('settle ')) {
         const id = sub.split(' ')[1]?.trim();
         if (!id) {
-          ctx.ui.notify('用法: /anchor close <id>', 'warning');
+          ctx.ui.notify('Usage: /anchor close <id>', 'warning');
           return;
         }
         try {
           s.settle(id, { settledBy: 'manual-command' });
-          ctx.ui.notify(`⚓ 任务 #${id} 已结案归档！`, 'info');
+          ctx.ui.notify(`Anchor: settled #${id}`, 'info');
           updateAnchorStatusBar(ctx, s);
         } catch (err: any) {
-          ctx.ui.notify(`结案失败: ${err.message}`, 'error');
+          ctx.ui.notify(`Settlement error: ${err.message}`, 'error');
         }
         return;
       }
@@ -232,7 +232,7 @@ export default function (pi: ExtensionAPI) {
       if (sub === 'sweep') {
         const res = sweepStore(s);
         ctx.ui.notify(
-          `⚓ 状态清理完成：休眠 ${res.transitionedToSleeping.length} 个，脱落墓园 ${res.evictedToGraveyard.length} 个。`,
+          `Anchor: sweep complete (${res.transitionedToSleeping.length} sleeping, ${res.evictedToGraveyard.length} swept)`,
           'info'
         );
         updateAnchorStatusBar(ctx, s);
@@ -240,34 +240,26 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (sub === 'list' || sub === 'ls') {
-        const active = s.list({ status: 'active' });
-        const sleeping = s.list({ status: 'sleeping' });
-        const activeText = active.map(a => `• #${a.id} [${a.priority.toUpperCase()}] ${a.title}`).join('\n');
-        const sleepText = sleeping.map(a => `• #${a.id} (休眠) ${a.title}`).join('\n');
-
-        ctx.ui.notify(
-          `⚓ 【任务锚点总览】\n活跃中 (${active.length}):\n${activeText || '无'}\n\n休眠中 (${sleeping.length}):\n${sleepText || '无'}`,
-          'info'
-        );
+        openAnchorDashboard(ctx, s);
         return;
       }
 
-      ctx.ui.notify('可用命令: /anchor (打开看板), /anchor add <任务>, /anchor close <id>, /anchor sweep', 'info');
+      ctx.ui.notify('Usage: /anchor (view ledger), /anchor add <task>, /anchor close <id>, /anchor sweep', 'info');
     }
   });
 
   // Alias /pin to quick-add
   pi.registerCommand('pin', {
-    description: '快速挂锚或打开 Anchor 任务看板',
+    description: '快速挂锚或查看任务清单',
     handler: async (args, ctx) => {
       const s = getStore(ctx.cwd);
       const title = (args || '').trim();
       if (!title) {
-        await openAnchorDashboard(ctx, s);
+        openAnchorDashboard(ctx, s);
         return;
       }
       const anc = s.create({ title });
-      ctx.ui.notify(`⚓ 任务 #${anc.id} 已成功锚定！`, 'info');
+      ctx.ui.notify(`Anchor: pinned #${anc.id} "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, s);
     }
   });
