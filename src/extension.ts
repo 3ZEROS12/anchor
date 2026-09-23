@@ -63,7 +63,7 @@ export default function (pi: ExtensionAPI) {
       updateAnchorStatusBar(ctx, store);
 
       const a = matches[0].anchor;
-      const alert = `\n\n// ⚓ anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
+      const alert = `\n\n// ⌖ anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
 
       const contents = [...(event.content || [])];
       for (let i = contents.length - 1; i >= 0; i--) {
@@ -280,14 +280,14 @@ export default function (pi: ExtensionAPI) {
       const item = store.get(targetId);
       if (item) {
         store.settle(targetId, { settledBy: 'manual-command' });
-        ctx.ui.notify(`⚓ 已完成并清除: "${item.title}"`, 'info');
+        ctx.ui.notify(`⌖ 已完成并清除: "${item.title}"`, 'info');
         updateAnchorStatusBar(ctx, store);
         return;
       }
 
       // Case 5: 随手输入一段文字直接当作 pin 记录
       const anc = store.create({ title: input, cwd: ctx.cwd });
-      ctx.ui.notify(`⚓ 已记录 #${anc.id}: "${anc.title}"`, 'info');
+      ctx.ui.notify(`⌖ 已记录 #${anc.id}: "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, store);
     }
   });
@@ -298,11 +298,11 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const title = (args || '').trim();
       if (!title) {
-        openAnchorDashboard(ctx, store, { showAll: false });
+        await openAnchorDashboard(ctx, store);
         return;
       }
       const anc = store.create({ title, cwd: ctx.cwd });
-      ctx.ui.notify(`⚓ 已记录 #${anc.id}: "${anc.title}"`, 'info');
+      ctx.ui.notify(`⌖ 已记录 #${anc.id}: "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, store);
     }
   });
