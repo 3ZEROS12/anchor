@@ -183,10 +183,11 @@ export class AnchorStore {
       if (filter?.status && a.status !== filter.status) return false;
       if (filter?.priority && a.priority !== filter.priority) return false;
 
-      // Project context filtering
+      // Project context filtering:
+      // If an anchor has specific code files attached, scope it to that cwd.
+      // If an anchor has NO code files attached (habits, general tasks, study), it is universal and visible everywhere!
       if (!filter?.all && targetCwd) {
-        // Return if matches current cwd, or is a system-wide global anchor (cwd === '')
-        if (a.cwd && a.cwd !== targetCwd) {
+        if (a.files.length > 0 && a.cwd && a.cwd !== targetCwd) {
           return false;
         }
       }

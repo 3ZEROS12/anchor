@@ -74,16 +74,16 @@ test('AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with fol
 
     // 1. Empty ledger: quiet notify, 0 popups
     await openAnchorDashboard(mockCtx, store);
-    assert.ok(notifyMsg.includes('暂无未完成的跨会话任务'));
+    assert.ok(notifyMsg.includes('暂无未完成的任务'));
 
-    // 2. Ledger with active items (including folder metadata & geometric badges)
+    // 2. Ledger with active items (clean numbers, code file tags only when bound)
     store.create({ title: 'Refactor auth', priority: 'p0', files: ['src/auth/jwt.ts'], cwd: '/workspace/project-a' });
     store.create({ title: 'Global task', priority: 'p1' });
 
     await openAnchorDashboard(mockCtx, store);
-    assert.ok(selectTitle.includes('跨会话任务'));
-    // Verify Plan 2 layout: ◈ 01 Refactor auth [jwt.ts]
-    assert.ok(selectOptions.some(o => o.includes('◈ 01') && o.includes('Refactor auth') && o.includes('[src/auth/jwt.ts]')));
+    assert.ok(selectTitle.includes('待办清单'));
+    assert.ok(selectOptions.some(o => o.includes('01') && o.includes('Refactor auth') && o.includes('[src/auth/jwt.ts]')));
+    assert.ok(selectOptions.some(o => o.includes('02') && o.includes('Global task')));
     assert.ok(notifyMsg.includes('已完成'));
     assert.strictEqual(store.list({ cwd: '/workspace/project-a' }).length, 1);
   } finally {
