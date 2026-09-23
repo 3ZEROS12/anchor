@@ -5,6 +5,7 @@
 
 export type AnchorStatus = 'active' | 'sleeping' | 'settled' | 'graveyard';
 export type AnchorPriority = 'p0' | 'p1' | 'p2';
+export type AnchorScope = 'project' | 'global';
 
 export interface AnchorDecayPolicy {
   /** Days before an untouched active anchor transitions to sleeping (default: 3) */
@@ -34,6 +35,8 @@ export interface Anchor {
   priority: AnchorPriority;
   /** Current lifecycle status */
   status: AnchorStatus;
+  /** Storage scope: project-local or user-global */
+  scope: AnchorScope;
   /** Creation timestamp in ms */
   createdAt: number;
   /** Last update timestamp in ms */

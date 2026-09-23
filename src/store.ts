@@ -1,9 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import type {
   Anchor,
   AnchorEvidence,
   AnchorPriority,
+  AnchorScope,
   AnchorStatus,
   AnchorStoreState
 } from './types.ts';
@@ -11,14 +13,20 @@ import { DEFAULT_DECAY_POLICY } from './types.ts';
 
 export class AnchorStore {
   public readonly rootDir: string;
+  public readonly scope: AnchorScope;
   public readonly anchorDir: string;
   public readonly statePath: string;
   public readonly archivePath: string;
   public readonly graveyardPath: string;
 
-  constructor(rootDir: string = process.cwd()) {
+  constructor(rootDir: string = process.cwd(), scope: AnchorScope = 'project') {
     this.rootDir = path.resolve(rootDir);
-    this.anchorDir = path.join(this.rootDir, '.anchor');
+    this.scope = scope;
+    if (scope === 'global') {
+      this.anchorDir = path.join(os.homedir(), '.pi', 'agent', 'anchors');
+    } else {
+      this.anchorDir = path.join(this.rootDir, '.anchor');
+    }
     this.statePath = path.join(this.anchorDir, 'state.json');
     this.archivePath = path.join(this.anchorDir, 'archive.jsonl');
     this.graveyardPath = path.join(this.anchorDir, 'graveyard.jsonl');
@@ -82,14 +90,16 @@ export class AnchorStore {
    * Generate next sequential ID, e.g. 'anc-1', 'anc-2'
    */
   private generateId(existingAnchors: Anchor[]): string {
+    const prefix = this.scope === 'global' ? 'anc-g' : 'anc-';
+    const regex = new RegExp(`^${prefix}(\\d+)$`);
     const numbers = existingAnchors
       .map(a => {
-        const match = a.id.match(/^anc-(\d+)$/);
+        const match = a.id.match(regex);
         return match ? parseInt(match[1], 10) : 0;
       })
       .filter(n => n > 0);
     const nextNum = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
-    return `anc-${nextNum}`;
+    return `${prefix}${nextNum}`;
   }
 
   /**
@@ -101,6 +111,7 @@ export class AnchorStore {
     priority?: AnchorPriority;
     files?: string[];
     tags?: string[];
+    scope?: AnchorScope;
   }): Anchor {
     const state = this.loadState();
     const now = Date.now();
@@ -112,6 +123,7 @@ export class AnchorStore {
       description: input.description?.trim(),
       priority: input.priority || 'p1',
       status: 'active',
+      scope: input.scope || this.scope,
       createdAt: now,
       updatedAt: now,
       lastTouchedAt: now,
@@ -243,5 +255,73 @@ export class AnchorStore {
     fs.appendFileSync(this.graveyardPath, JSON.stringify(anchor) + '\n', 'utf-8');
     this.saveState(state);
     return anchor;
+  }
+}
+
+/**
+ * Multi-scope store manager handling both Project-local (.anchor/) and User-global (~/.pi/agent/anchors/)
+ */
+export class DualAnchorStore {
+  public readonly projectStore: AnchorStore;
+  public readonly globalStore: AnchorStore;
+
+  constructor(cwd: string = process.cwd()) {
+    this.projectStore = new AnchorStore(cwd, 'project');
+    this.globalStore = new AnchorStore(cwd, 'global');
+  }
+
+  public getStoreForScope(scope: AnchorScope): AnchorStore {
+    return scope === 'global' ? this.globalStore : this.projectStore;
+  }
+
+  public get(id: string): { anchor: Anchor; store: AnchorStore } | undefined {
+    const inProj = this.projectStore.get(id);
+    if (inProj) return { anchor: inProj, store: this.projectStore };
+    const inGlob = this.globalStore.get(id);
+    if (inGlob) return { anchor: inGlob, store: this.globalStore };
+    return undefined;
+  }
+
+  public list(filter?: { status?: AnchorStatus; priority?: AnchorPriority; scope?: AnchorScope | 'all' }): Anchor[] {
+    const targetScope = filter?.scope || 'all';
+    let res: Anchor[] = [];
+    if (targetScope === 'all' || targetScope === 'project') {
+      res = res.concat(this.projectStore.list(filter));
+    }
+    if (targetScope === 'all' || targetScope === 'global') {
+      res = res.concat(this.globalStore.list(filter));
+    }
+    return res;
+  }
+
+  public create(input: {
+    title: string;
+    description?: string;
+    priority?: AnchorPriority;
+    files?: string[];
+    tags?: string[];
+    scope?: AnchorScope;
+  }): Anchor {
+    const targetScope = input.scope || 'project';
+    const store = this.getStoreForScope(targetScope);
+    return store.create(input);
+  }
+
+  public settle(id: string, evidence?: AnchorEvidence): Anchor {
+    const item = this.get(id);
+    if (!item) throw new Error(`Anchor not found: ${id}`);
+    return item.store.settle(id, evidence);
+  }
+
+  public touch(id: string, timestamp?: number): Anchor {
+    const item = this.get(id);
+    if (!item) throw new Error(`Anchor not found: ${id}`);
+    return item.store.touch(id, timestamp);
+  }
+
+  public dropToGraveyard(id: string, reason: string): Anchor {
+    const item = this.get(id);
+    if (!item) throw new Error(`Anchor not found: ${id}`);
+    return item.store.dropToGraveyard(id, reason);
   }
 }

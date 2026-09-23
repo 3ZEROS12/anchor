@@ -1,5 +1,5 @@
 import type { Anchor, AnchorStatus } from './types.ts';
-import { AnchorStore } from './store.ts';
+import type { AnchorStore, DualAnchorStore } from './store.ts';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -49,8 +49,19 @@ export interface SweepResult {
 /**
  * Run decay sweep across store: transitions statuses and evicts expired anchors
  */
-export function sweepStore(store: AnchorStore, now: number = Date.now()): SweepResult {
-  const state = store.loadState();
+export function sweepStore(store: AnchorStore | DualAnchorStore, now: number = Date.now()): SweepResult {
+  if ('projectStore' in store && 'globalStore' in store) {
+    const r1 = sweepStore(store.projectStore, now);
+    const r2 = sweepStore(store.globalStore, now);
+    return {
+      transitionedToSleeping: [...r1.transitionedToSleeping, ...r2.transitionedToSleeping],
+      wokenToActive: [...r1.wokenToActive, ...r2.wokenToActive],
+      evictedToGraveyard: [...r1.evictedToGraveyard, ...r2.evictedToGraveyard]
+    };
+  }
+
+  const singleStore = store as AnchorStore;
+  const state = singleStore.loadState();
   const result: SweepResult = {
     transitionedToSleeping: [],
     wokenToActive: [],
@@ -82,12 +93,12 @@ export function sweepStore(store: AnchorStore, now: number = Date.now()): SweepR
 
   state.lastSweepAt = now;
   if (stateModified) {
-    store.saveState(state);
+    singleStore.saveState(state);
   }
 
   // Drop expired to graveyard
   for (const exp of toEvict) {
-    store.dropToGraveyard(exp.id, `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`);
+    singleStore.dropToGraveyard(exp.id, `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`);
     result.evictedToGraveyard.push(exp.id);
   }
 

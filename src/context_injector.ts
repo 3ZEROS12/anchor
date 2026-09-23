@@ -1,11 +1,11 @@
-import { AnchorStore } from './store.ts';
+import type { AnchorStore, DualAnchorStore } from './store.ts';
 import { sweepStore } from './decay.ts';
 
 /**
  * Render an ultra-compact system prompt injection block
  * Only active anchors are injected. Sleeping and graveyard anchors consume 0 tokens.
  */
-export function renderActiveAnchorsContext(store: AnchorStore, now: number = Date.now()): string {
+export function renderActiveAnchorsContext(store: AnchorStore | DualAnchorStore, now: number = Date.now()): string {
   // 1. Run opportunistic sweep to ensure expired anchors don't leak into context
   sweepStore(store, now);
 

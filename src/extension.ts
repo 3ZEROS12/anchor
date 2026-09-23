@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
-import { AnchorStore } from './store.ts';
+import { DualAnchorStore } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
 import { renderActiveAnchorsContext } from './context_injector.ts';
 import { generateSettlementProposals } from './settlement.ts';
@@ -9,12 +9,12 @@ import { updateAnchorStatusBar, openAnchorDashboard } from './tui.ts';
 import { execSync } from 'node:child_process';
 
 export default function (pi: ExtensionAPI) {
-  let store: AnchorStore | null = null;
+  let store: DualAnchorStore | null = null;
   const observer = new SessionTouchObserver();
 
-  function getStore(cwd: string): AnchorStore {
-    if (!store || store.rootDir !== cwd) {
-      store = new AnchorStore(cwd);
+  function getStore(cwd: string): DualAnchorStore {
+    if (!store || store.projectStore.rootDir !== cwd) {
+      store = new DualAnchorStore(cwd);
     }
     return store;
   }
@@ -26,7 +26,7 @@ export default function (pi: ExtensionAPI) {
     const sweep = sweepStore(s);
 
     if (sweep.transitionedToSleeping.length > 0) {
-      ctx.ui.notify(`⚓ Anchor: ${sweep.transitionedToSleeping.length} 个非活跃任务已进入休眠（释放上下文）`, 'info');
+      ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} 个非活跃任务已进入休眠`, 'info');
     }
 
     updateAnchorStatusBar(ctx, s);
@@ -88,7 +88,7 @@ export default function (pi: ExtensionAPI) {
           settledBy: 'one-tap-settlement',
           touchedFiles: prop.matchedFiles
         });
-        ctx.ui.notify(`⚓ 任务 #${a.id} 已完成并即焚归档！`, 'info');
+        ctx.ui.notify(`Anchor: 任务 #${a.id} 已完成并即焚归档！`, 'info');
       }
     }
   });
@@ -98,10 +98,11 @@ export default function (pi: ExtensionAPI) {
     name: 'anchor',
     label: 'Anchor (Cross-session Task Protocol)',
     description:
-      'Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup).',
+      'Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Scope can be "project" (default, stored in .anchor/) or "global" (stored in ~/.pi/agent/anchors/).',
     promptSnippet: 'Anchor cross-session task contracts that survive terminal restarts and auto-evict',
     promptGuidelines: [
       'Use `anchor` when the user asks to retain a goal across sessions, e.g. "保留这个任务直到完成" or "记住明天优化X".',
+      'Choose scope: "global" for system/agent-wide tasks (e.g. Pi updates, user habits), "project" for repo-specific coding tasks.',
       'Never put cross-session tasks into AGENTS.md or TODO.md; use `anchor` instead to prevent context rot.',
       'When code for an anchor is completed and verified, call `anchor` with action "settle" to archive it and free context.',
       'Active anchors are automatically injected into future sessions in an ultra-compact block.'
@@ -116,9 +117,10 @@ export default function (pi: ExtensionAPI) {
       ]),
       title: Type.Optional(Type.String({ description: 'Short imperative task title (for pin)' })),
       priority: Type.Optional(Type.Union([Type.Literal('p0'), Type.Literal('p1'), Type.Literal('p2')])),
+      scope: Type.Optional(Type.Union([Type.Literal('project'), Type.Literal('global')], { description: 'Storage scope: project-local (.anchor/) or user-global (~/.pi/agent/anchors/)' })),
       files: Type.Optional(Type.Array(Type.String(), { description: 'Associated file paths or directory prefixes' })),
       tags: Type.Optional(Type.Array(Type.String(), { description: 'Domain tags' })),
-      id: Type.Optional(Type.String({ description: 'Anchor ID, e.g. anc-1 (for settle or touch)' }))
+      id: Type.Optional(Type.String({ description: 'Anchor ID, e.g. anc-1 or anc-g1 (for settle or touch)' }))
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const s = getStore(ctx.cwd);
@@ -129,6 +131,7 @@ export default function (pi: ExtensionAPI) {
         const anc = s.create({
           title: params.title,
           priority: params.priority || 'p1',
+          scope: params.scope || 'project',
           files: params.files || [],
           tags: params.tags || []
         });
@@ -136,15 +139,15 @@ export default function (pi: ExtensionAPI) {
         return {
           content: [{
             type: 'text',
-            text: `Successfully pinned cross-session anchor #${anc.id}: "${anc.title}". This contract will survive terminal restarts and will be tracked until settled.`
+            text: `Successfully pinned [${anc.scope.toUpperCase()}] anchor #${anc.id}: "${anc.title}". Stored in ${anc.scope === 'global' ? '~/.pi/agent/anchors/' : '.anchor/'}.`
           }],
           isError: false
         };
       }
 
       if (params.action === 'list') {
-        const active = s.list({ status: 'active' });
-        const sleeping = s.list({ status: 'sleeping' });
+        const active = s.list({ status: 'active', scope: params.scope || 'all' });
+        const sleeping = s.list({ status: 'sleeping', scope: params.scope || 'all' });
         return {
           content: [{
             type: 'text',
@@ -164,7 +167,7 @@ export default function (pi: ExtensionAPI) {
           return {
             content: [{
               type: 'text',
-              text: `Anchor #${settled.id} successfully settled and evicted from active context. Stored in archive.jsonl.`
+              text: `Anchor #${settled.id} successfully settled and evicted from active context.`
             }],
             isError: false
           };
@@ -189,7 +192,7 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 6. Register /anchor command (with interactive TUI dashboard fallback)
+  // 6. Register /anchor command (with interactive ToolFlow-style TUI cockpit)
   pi.registerCommand('anchor', {
     description: '跨会话任务锚点管理与驾驶舱',
     handler: async (args, ctx) => {
@@ -197,18 +200,23 @@ export default function (pi: ExtensionAPI) {
       const sub = (args || '').trim();
 
       if (!sub) {
-        openAnchorDashboard(ctx, s);
+        await openAnchorDashboard(ctx, s);
         return;
       }
 
       if (sub.startsWith('add ')) {
-        const title = sub.slice(4).trim();
+        let title = sub.slice(4).trim();
+        let scope: 'project' | 'global' = 'project';
+        if (title.startsWith('-g ') || title.startsWith('--global ')) {
+          scope = 'global';
+          title = title.replace(/^(-g|--global)\s+/, '').trim();
+        }
         if (!title) {
-          ctx.ui.notify('Usage: /anchor add <task>', 'warning');
+          ctx.ui.notify('Usage: /anchor add [-g] <task>', 'warning');
           return;
         }
-        const anc = s.create({ title });
-        ctx.ui.notify(`Anchor: pinned #${anc.id} "${anc.title}"`, 'info');
+        const anc = s.create({ title, scope });
+        ctx.ui.notify(`Anchor: pinned [${scope.toUpperCase()}] #${anc.id} "${anc.title}"`, 'info');
         updateAnchorStatusBar(ctx, s);
         return;
       }
@@ -240,26 +248,31 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (sub === 'list' || sub === 'ls') {
-        openAnchorDashboard(ctx, s);
+        await openAnchorDashboard(ctx, s);
         return;
       }
 
-      ctx.ui.notify('Usage: /anchor (view ledger), /anchor add <task>, /anchor close <id>, /anchor sweep', 'info');
+      ctx.ui.notify('Usage: /anchor (open cockpit), /anchor add [-g] <task>, /anchor close <id>, /anchor sweep', 'info');
     }
   });
 
   // Alias /pin to quick-add
   pi.registerCommand('pin', {
-    description: '快速挂锚或查看任务清单',
+    description: '快速挂锚 (支持 -g / --global 全局作用域)',
     handler: async (args, ctx) => {
       const s = getStore(ctx.cwd);
-      const title = (args || '').trim();
-      if (!title) {
-        openAnchorDashboard(ctx, s);
+      let text = (args || '').trim();
+      if (!text) {
+        await openAnchorDashboard(ctx, s);
         return;
       }
-      const anc = s.create({ title });
-      ctx.ui.notify(`Anchor: pinned #${anc.id} "${anc.title}"`, 'info');
+      let scope: 'project' | 'global' = 'project';
+      if (text.startsWith('-g ') || text.startsWith('--global ')) {
+        scope = 'global';
+        text = text.replace(/^(-g|--global)\s+/, '').trim();
+      }
+      const anc = s.create({ title: text, scope });
+      ctx.ui.notify(`Anchor: pinned [${scope.toUpperCase()}] #${anc.id} "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, s);
     }
   });

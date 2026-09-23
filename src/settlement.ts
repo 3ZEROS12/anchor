@@ -1,4 +1,4 @@
-import { AnchorStore } from './store.ts';
+import type { AnchorStore, DualAnchorStore } from './store.ts';
 import { findMatchedAnchors } from './matcher.ts';
 import type { SettlementProposal } from './types.ts';
 
@@ -6,7 +6,7 @@ import type { SettlementProposal } from './types.ts';
  * Generate settlement candidates based on files touched during the session
  */
 export function generateSettlementProposals(
-  store: AnchorStore,
+  store: AnchorStore | DualAnchorStore,
   touchedFiles: string[]
 ): SettlementProposal[] {
   const activeAndSleeping = store.list().filter(a => a.status === 'active' || a.status === 'sleeping');
