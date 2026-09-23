@@ -5,6 +5,7 @@
  */
 
 import { AnchorStore } from '../src/store.ts';
+import { formatOrigin, formatLifecycle, formatRelativeTime } from '../src/tui.ts';
 
 const store = new AnchorStore();
 const args = process.argv.slice(2);
@@ -21,8 +22,11 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
   console.log('\n⌖ 待办清单:');
   active.forEach((a, i) => {
     const num = (i + 1).toString().padStart(2, '0');
-    const fileTag = (a.files && a.files.length > 0) ? `  [${a.files.slice(0, 1).join(', ')}]` : '';
-    console.log(`  ${num}  ${a.title}${fileTag}`);
+    const origin = formatOrigin(a.cwd);
+    const lifecycle = formatLifecycle(a.durability);
+    const relTime = formatRelativeTime(a.createdAt);
+    const fileTag = (a.files && a.files.length > 0) ? ` [${a.files.slice(0, 1).join(', ')}]` : '';
+    console.log(`  ${num}  ${a.title}${fileTag}  ${origin}  ${lifecycle}  ${relTime}`);
   });
   console.log('\n  输入 `anchor done <id>` 划掉完成。\n');
   process.exit(0);
@@ -48,4 +52,5 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
 // 3. Pin new task: `anchor <task description>`
 const title = args.join(' ').trim();
 const anc = store.create({ title, cwd: process.cwd() });
-console.log(`⌖ 已记录: "${anc.title}"`);
+const lifecycle = formatLifecycle(anc.durability);
+console.log(`⌖ 已记录: "${anc.title}"  ${lifecycle}`);

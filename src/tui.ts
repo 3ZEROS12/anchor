@@ -1,9 +1,47 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AnchorStore } from './store.ts';
-import type { Anchor } from './types.ts';
+import type { Anchor, AnchorDurability } from './types.ts';
+import path from 'node:path';
 
 /**
- * Touchpoint 1: Minimalist geometric crosshair status indicator
+ * Format relative time in natural human language
+ */
+export function formatRelativeTime(timestamp: number, now: number = Date.now()): string {
+  const elapsedMs = Math.max(0, now - timestamp);
+  const minutes = Math.floor(elapsedMs / (60 * 1000));
+  const hours = Math.floor(elapsedMs / (60 * 60 * 1000));
+  const days = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
+
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${minutes}分钟前`;
+  if (hours < 24) return `${hours}小时前`;
+  if (days === 1) return '昨天';
+  if (days < 30) return `${days}天前`;
+  return `${Math.floor(days / 30)}个月前`;
+}
+
+/**
+ * Format workspace origin
+ */
+export function formatOrigin(cwd: string): string {
+  if (!cwd) return '[全局]';
+  const name = path.basename(cwd);
+  if (name.toLowerCase() === 'desktop' || name === '桌面') return '[来自: 桌面]';
+  return `[来自: ${name}]`;
+}
+
+/**
+ * Format lifecycle contract tag
+ */
+export function formatLifecycle(durability: AnchorDurability): string {
+  if (durability === 'ephemeral') {
+    return '[48h 自净]';
+  }
+  return '[长期常驻]';
+}
+
+/**
+ * Update the footer status bar indicator
  * Clean, focused: `⌖ 1`
  * Completely hidden when 0 anchors exist.
  */
@@ -20,9 +58,7 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
 }
 
 /**
- * Touchpoint 2: Clean, human-centric checklist
- * 01  Task title  [code/file.ts]
- * Zero brackets clutter, zero fake countdowns, zero desktop prefixes.
+ * Clean, human-centric checklist with clear origin and lifecycle contract
  */
 export async function openAnchorDashboard(
   ctx: ExtensionContext,
@@ -42,16 +78,18 @@ export async function openAnchorDashboard(
   for (let i = 0; i < list.length; i++) {
     const a = list[i];
     const num = (i + 1).toString().padStart(2, '0');
+    const origin = formatOrigin(a.cwd);
+    const lifecycle = formatLifecycle(a.durability);
+    const relTime = formatRelativeTime(a.createdAt);
+    const fileTag = (a.files && a.files.length > 0) ? ` [${a.files.slice(0, 1).join(', ')}]` : '';
 
-    // Only display file tag if the task is genuinely bound to code files
-    const fileTag = (a.files && a.files.length > 0) ? `  [${a.files.slice(0, 1).join(', ')}]` : '';
-    const label = `${num}  ${a.title}${fileTag}`;
+    const label = `${num}  ${a.title}${fileTag}  ${origin}  ${lifecycle}  ${relTime}`;
 
     optionMap.set(label, a);
     displayOptions.push(label);
   }
 
-  const selected = await ctx.ui.select('⌖ 待办清单:', displayOptions);
+  const selected = await ctx.ui.select('⌖ 待办清单 (回车划掉完成):', displayOptions);
   if (!selected) return;
 
   const anchor = optionMap.get(selected);
