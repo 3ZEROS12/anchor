@@ -242,8 +242,8 @@ export async function openAnchorDashboard(
 
   for (let i = 0; i < sortedList.length; i++) {
     const a = sortedList[i];
-    const idNum = a.id.replace(/^anc-/, '');
-    const num = idNum.padStart(2, '0');
+    const num = (i + 1).toString().padStart(2, '0');
+    const category = padToWidth(`[${classifyAnchor(a)}]`, 12);
     const origin = formatOrigin(a);
     const target = formatTargetDate(a);
     const created = formatCreationTime(a.createdAt);
@@ -252,14 +252,14 @@ export async function openAnchorDashboard(
       ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
       : a.title;
 
-    // Clean tabular column alignment: ID, Title, Project, Target, Created
+    // Clean tabular column alignment: ID, Category, Title, Project, Target, Created
     const colNum = `${num}  `;
     const colTitle = padToWidth(titleWithFiles, 28);
     const colOrigin = padToWidth(origin, 10);
     const colTarget = padToWidth(target, 12);
     const colCreated = created;
 
-    const label = `${colNum}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
+    const label = `${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
 
     optionMap.set(label, a);
     displayOptions.push(label);

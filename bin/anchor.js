@@ -2,11 +2,12 @@
 
 /**
  * Anchor CLI - Minimalist task protocol for AI coding workflows
- * Production-ready executable with dual-timeline (Target Date + Creation Time)
+ * Production-ready executable with dual-timeline & 4-quadrant cognitive grouping
  */
 
 import {
   AnchorStore,
+  classifyAnchor,
   formatOrigin,
   formatTargetDate,
   formatCreationTime,
@@ -36,12 +37,16 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
     { title: 'Backlog · 长期愿景', list: groups.backlog },
   ];
 
+  let seqNum = 1;
+
   for (const sec of sections) {
     if (sec.list.length === 0) continue;
     console.log(`  [${sec.title}]`);
     sec.list.forEach((a) => {
-      const idNum = a.id.replace(/^anc-/, '');
-      const num = idNum.padStart(2, '0');
+      const num = seqNum.toString().padStart(2, '0');
+      seqNum++;
+
+      const category = padToWidth(`[${classifyAnchor(a)}]`, 12);
       const origin = formatOrigin(a);
       const target = formatTargetDate(a);
       const created = formatCreationTime(a.createdAt);
@@ -56,7 +61,7 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
       const colTarget = padToWidth(target, 12);
       const colCreated = created;
 
-      console.log(`${colNum}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`);
+      console.log(`${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`);
     });
     console.log('');
   }
@@ -91,19 +96,39 @@ Usage:
 Options:
   -h, --help                Show this help message
   -v, --version             Show version
+  -d, --due <date>          Specify expected completion date (e.g. tomorrow, friday, 2026-09-28)
 `);
   process.exit(0);
 }
 
 // 4. Close task: `anchor done <id>` or `anchor rm <id>`
 if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
-  const id = args[1];
-  if (!id) {
+  const idInput = args[1];
+  if (!idInput) {
     console.error('Usage: anchor done <id>');
     process.exit(1);
   }
   try {
-    const settled = store.settle(id, { settledBy: 'manual-command' });
+    // 1. Check if idInput is a 1-based sequential display number (e.g. '1', '01')
+    const active = store.list({ status: 'active', cwd: process.cwd() });
+    const groups = groupAnchorsByQuadrant(active);
+    const sortedActive = [
+      ...groups.today,
+      ...groups.upcoming,
+      ...groups.habits,
+      ...groups.backlog
+    ];
+
+    let targetId = idInput;
+    const numMatch = idInput.match(/^\d+$/);
+    if (numMatch) {
+      const seqIndex = parseInt(idInput, 10);
+      if (seqIndex >= 1 && seqIndex <= sortedActive.length) {
+        targetId = sortedActive[seqIndex - 1].id;
+      }
+    }
+
+    const settled = store.settle(targetId, { settledBy: 'manual-command' });
     const successMsg = settled.recurrence === 'daily'
       ? `⌖ Completed for today: "${settled.title}" (resets tomorrow)`
       : `⌖ Settled: "${settled.title}"`;
