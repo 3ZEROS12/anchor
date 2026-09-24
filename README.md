@@ -183,10 +183,10 @@ The dashboard groups active tasks into four categories:
 ### 1. Global CLI
 ```bash
 # Global installation
-npm install -g @3zeros12/anchor
+npm install -g pi-anchor
 
 # Or instant invocation via npx
-npx @3zeros12/anchor
+npx pi-anchor
 ```
 
 Command summary:
@@ -200,7 +200,7 @@ anchor undo                             # Restore last archived task
 
 ### 2. Universal Protocol Library
 ```typescript
-import { AnchorStore, AnchorProtocol } from '@3zeros12/anchor';
+import { AnchorStore, AnchorProtocol } from 'pi-anchor';
 
 const store = new AnchorStore();
 const protocol = new AnchorProtocol(store);
@@ -222,8 +222,7 @@ const { annotation } = protocol.handleToolResult({
 ### 3. Pi Coding Agent Extension
 Install into user extensions:
 ```bash
-# In ~/.pi/agent/extensions/
-npm install @3zeros12/anchor
+pi install npm:pi-anchor
 ```
 
 ---

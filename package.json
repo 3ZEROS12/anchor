@@ -1,5 +1,5 @@
 {
-  "name": "@3zeros12/anchor",
+  "name": "pi-anchor",
   "version": "0.1.0",
   "description": "Zero-pollution, 0-idle-token task memory for AI coding agents",
   "type": "module",

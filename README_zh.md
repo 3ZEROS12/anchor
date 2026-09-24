@@ -182,10 +182,10 @@ Anchor 从两个正交的时间维度管理任务，兼顾“何时要交”与�
 ### 1. 全局独立命令行 CLI
 ```bash
 # 全局安装
-npm install -g @3zeros12/anchor
+npm install -g pi-anchor
 
 # 或直接通过 npx 免安装即用
-npx @3zeros12/anchor
+npx pi-anchor
 ```
 
 常用命令：
@@ -199,7 +199,7 @@ anchor undo                             # 撤销上次结案
 
 ### 2. 作为通用协议库引入
 ```typescript
-import { AnchorStore, AnchorProtocol } from '@3zeros12/anchor';
+import { AnchorStore, AnchorProtocol } from 'pi-anchor';
 
 const store = new AnchorStore();
 const protocol = new AnchorProtocol(store);
@@ -221,8 +221,7 @@ const { annotation } = protocol.handleToolResult({
 ### 3. 作为 Pi Coding Agent 扩展
 在 Pi 扩展目录中安装：
 ```bash
-# 在 ~/.pi/agent/extensions/ 目录下
-npm install @3zeros12/anchor
+pi install npm:pi-anchor
 ```
 
 ---
