@@ -3,6 +3,7 @@ import {
   SessionTouchObserver,
   findMatchedAnchors,
   generateSettlementProposals,
+  makeSafeTaskAnnotation,
   normalizePath,
   openAnchorDashboard,
   renderColdStartAnchorsContext,
@@ -10,12 +11,11 @@ import {
   sweepStore,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-R4FF2FXV.js";
+} from "./chunk-NNYUD5O7.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
 import { execSync } from "child_process";
-import path from "path";
 var MUTATION_TOOLS = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
 function extension_default(pi) {
   const store = new AnchorStore();
@@ -73,17 +73,15 @@ ${contextSnippet}`
       const a = matches[0].anchor;
       if (!annotatedThisSession.has(a.id)) {
         annotatedThisSession.add(a.id);
-        const ext = path.extname(touchedPath).toLowerCase();
-        const commentPrefix = ext === ".py" || ext === ".sh" || ext === ".bash" || ext === ".yaml" || ext === ".yml" || ext === ".toml" ? "#" : "//";
-        const alert = `
-
-${commentPrefix} \u2316 anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
-        const contents = [...event.content || []];
-        for (let i = contents.length - 1; i >= 0; i--) {
-          const item = contents[i];
-          if (item && item.type === "text") {
-            contents[i] = { ...item, text: item.text + alert };
-            return { content: contents };
+        const alert = makeSafeTaskAnnotation(touchedPath, a);
+        if (alert) {
+          const contents = [...event.content || []];
+          for (let i = contents.length - 1; i >= 0; i--) {
+            const item = contents[i];
+            if (item && item.type === "text") {
+              contents[i] = { ...item, text: item.text + alert };
+              return { content: contents };
+            }
           }
         }
       }

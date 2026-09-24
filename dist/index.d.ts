@@ -112,6 +112,14 @@ declare function getTodayDateString(timestamp?: number): string;
  */
 declare function getDefaultStorageDir(): string;
 /**
+ * Acquire exclusive lockfile using atomic 'wx' file creation (zero external dependencies).
+ * Features:
+ * - 0 async infection (100% synchronous)
+ * - Automatic stale lock eviction (>5000ms or dead PID)
+ * - Exponential backoff with jitter
+ */
+declare function acquireSyncLock(lockPath: string, maxWaitMs?: number, staleTimeoutMs?: number): () => void;
+/**
  * Windows-tolerant atomic rename with exponential spin-retry to combat NTFS EBUSY/EPERM file locks
  */
 declare function atomicRenameWithRetry(tempPath: string, targetPath: string, maxAttempts?: number): void;
@@ -121,6 +129,11 @@ declare class AnchorStore {
     readonly archivePath: string;
     readonly graveyardPath: string;
     constructor(customStorageDir?: string);
+    get lockPath(): string;
+    /**
+     * Execute mutation within a cross-process exclusive lock
+     */
+    withLock<T>(fn: () => T): T;
     private ensureDirs;
     /**
      * Load store state. If corrupt or missing, returns safe default.
@@ -369,6 +382,17 @@ declare class SessionTouchObserver {
 }
 
 /**
+ * Universal multi-language comment generator.
+ * Maps file extension to safe comment syntax.
+ * Formats that do not safely support comments (e.g. .json, .env, binary) return null.
+ */
+declare const COMMENT_FORMATS: Record<string, (msg: string) => string>;
+/**
+ * Format safe task context comment for a specific file.
+ * Returns null for formats that do not safely support comments (e.g. .json, .env, .lock)
+ */
+declare function makeSafeTaskAnnotation(filePath: string, anchor: Anchor): string | null;
+/**
  * Render ultra-compact cold-start context block for session turn 1.
  * Only active anchors for the current project context are injected.
  * From turn 2 onwards, this returns empty string (0 tokens).
@@ -377,4 +401,48 @@ declare function renderColdStartAnchorsContext(store: AnchorStore, cwdOrNow?: st
 /** Legacy alias for backwards compatibility */
 declare const renderActiveAnchorsContext: typeof renderColdStartAnchorsContext;
 
-export { type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, stripAnsi, sweepStore, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };
+/**
+ * Universal Agent Adapter Interface.
+ * Any AI coding harness (Pi, Claude Code, Cursor, Aider, custom MCP server) implements this thin layer.
+ */
+interface AgentAdapter {
+    readonly name: string;
+    getCwd(): string;
+    notify?(message: string, level: 'info' | 'warn' | 'error'): void;
+}
+/**
+ * The Sovereign Anchor Protocol Engine.
+ * Decoupled, harness-agnostic core managing state, decay, JIT annotations, and settlement.
+ */
+declare class AnchorProtocol {
+    readonly store: AnchorStore;
+    readonly observer: SessionTouchObserver;
+    private readonly annotatedThisSession;
+    constructor(store: AnchorStore);
+    /**
+     * Run session initialization lifecycle: sweeps stale anchors and resets session state
+     */
+    handleSessionStart(now?: number): {
+        sleepingCount: number;
+    };
+    /**
+     * Handle turn lifecycle: injects cold-start prompt on turn 1, returns null (0 tokens) on turn 2+
+     */
+    handleBeforeTurn(turnCount: number, cwd: string, now?: number): string | null;
+    /**
+     * Handle tool execution result: detects touched paths, refreshes mutation touch timers,
+     * and returns safe language-specific JIT annotation (or null if syntax incompatible/already annotated).
+     */
+    handleToolResult(input: {
+        toolName: string;
+        filePath?: string;
+        isError?: boolean;
+        isMutation?: boolean;
+        cwd: string;
+    }): {
+        annotation: string | null;
+        matchedAnchors: Anchor[];
+    };
+}
+
+export { type AgentAdapter, type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, AnchorProtocol, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, COMMENT_FORMATS, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, acquireSyncLock, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, makeSafeTaskAnnotation, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, stripAnsi, sweepStore, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };

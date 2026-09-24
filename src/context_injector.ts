@@ -1,6 +1,85 @@
 import type { AnchorStore } from './store.ts';
+import type { Anchor } from './types.ts';
 import { sweepStore } from './decay.ts';
 import { getTodayDateString } from './store.ts';
+import path from 'node:path';
+
+/**
+ * Universal multi-language comment generator.
+ * Maps file extension to safe comment syntax.
+ * Formats that do not safely support comments (e.g. .json, .env, binary) return null.
+ */
+export const COMMENT_FORMATS: Record<string, (msg: string) => string> = {
+  // Double slash //
+  '.ts': m => `// ${m}`,
+  '.tsx': m => `// ${m}`,
+  '.js': m => `// ${m}`,
+  '.jsx': m => `// ${m}`,
+  '.mjs': m => `// ${m}`,
+  '.cjs': m => `// ${m}`,
+  '.java': m => `// ${m}`,
+  '.kt': m => `// ${m}`,
+  '.swift': m => `// ${m}`,
+  '.go': m => `// ${m}`,
+  '.rs': m => `// ${m}`,
+  '.c': m => `// ${m}`,
+  '.cpp': m => `// ${m}`,
+  '.h': m => `// ${m}`,
+  '.hpp': m => `// ${m}`,
+  '.cs': m => `// ${m}`,
+  '.dart': m => `// ${m}`,
+  '.scala': m => `// ${m}`,
+  '.zig': m => `// ${m}`,
+  '.proto': m => `// ${m}`,
+
+  // Hash #
+  '.py': m => `# ${m}`,
+  '.rb': m => `# ${m}`,
+  '.sh': m => `# ${m}`,
+  '.bash': m => `# ${m}`,
+  '.zsh': m => `# ${m}`,
+  '.yaml': m => `# ${m}`,
+  '.yml': m => `# ${m}`,
+  '.toml': m => `# ${m}`,
+  '.conf': m => `# ${m}`,
+  '.dockerfile': m => `# ${m}`,
+  '.ps1': m => `# ${m}`,
+  '.r': m => `# ${m}`,
+
+  // HTML / XML <!-- -->
+  '.html': m => `<!-- ${m} -->`,
+  '.xml': m => `<!-- ${m} -->`,
+  '.svg': m => `<!-- ${m} -->`,
+  '.vue': m => `<!-- ${m} -->`,
+  '.svelte': m => `<!-- ${m} -->`,
+
+  // Block comment /* */
+  '.css': m => `/* ${m} */`,
+  '.scss': m => `/* ${m} */`,
+  '.less': m => `/* ${m} */`,
+
+  // SQL / Lua / Haskell --
+  '.sql': m => `-- ${m}`,
+  '.lua': m => `-- ${m}`,
+  '.hs': m => `-- ${m}`,
+
+  // Batch REM
+  '.bat': m => `REM ${m}`,
+  '.cmd': m => `REM ${m}`,
+};
+
+/**
+ * Format safe task context comment for a specific file.
+ * Returns null for formats that do not safely support comments (e.g. .json, .env, .lock)
+ */
+export function makeSafeTaskAnnotation(filePath: string, anchor: Anchor): string | null {
+  const ext = path.extname(filePath).toLowerCase();
+  const formatter = COMMENT_FORMATS[ext];
+  if (!formatter) {
+    return null;
+  }
+  return '\n\n' + formatter(`⌖ anchor context: #${anchor.id} ${anchor.title} (${anchor.priority.toUpperCase()})`);
+}
 
 /**
  * Render ultra-compact cold-start context block for session turn 1.

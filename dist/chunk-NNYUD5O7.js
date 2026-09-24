@@ -260,7 +260,59 @@ function sleepSync(ms) {
   while (Date.now() < end) {
   }
 }
-function atomicRenameWithRetry(tempPath, targetPath, maxAttempts = 5) {
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM";
+  }
+}
+function acquireSyncLock(lockPath, maxWaitMs = 1500, staleTimeoutMs = 5e3) {
+  const start = Date.now();
+  let attempt = 0;
+  while (Date.now() - start < maxWaitMs) {
+    attempt++;
+    try {
+      const fd = fs.openSync(lockPath, "wx");
+      const meta = { pid: process.pid, createdAt: Date.now() };
+      fs.writeFileSync(fd, JSON.stringify(meta), "utf-8");
+      fs.closeSync(fd);
+      return () => {
+        try {
+          if (fs.existsSync(lockPath)) {
+            fs.unlinkSync(lockPath);
+          }
+        } catch {
+        }
+      };
+    } catch (err) {
+      if (err.code === "EEXIST") {
+        try {
+          const content = fs.readFileSync(lockPath, "utf-8");
+          const meta = JSON.parse(content);
+          const isStale = Date.now() - meta.createdAt > staleTimeoutMs;
+          const isDead = meta.pid && !isProcessAlive(meta.pid);
+          if (isStale || isDead) {
+            try {
+              fs.unlinkSync(lockPath);
+              continue;
+            } catch {
+            }
+          }
+        } catch {
+        }
+        const delay = Math.min(40, Math.floor(attempt * 4 + Math.random() * 8));
+        sleepSync(delay);
+        continue;
+      }
+      break;
+    }
+  }
+  return () => {
+  };
+}
+function atomicRenameWithRetry(tempPath, targetPath, maxAttempts = 6) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       fs.renameSync(tempPath, targetPath);
@@ -268,12 +320,13 @@ function atomicRenameWithRetry(tempPath, targetPath, maxAttempts = 5) {
     } catch (err) {
       const code = err?.code;
       if ((code === "EBUSY" || code === "EPERM" || code === "EACCES") && attempt < maxAttempts) {
-        const delay = Math.floor(attempt * 15 + Math.random() * 10);
+        const delay = Math.floor(attempt * 20 + Math.random() * 15);
         sleepSync(delay);
         continue;
       }
+      const crashDump = `${tempPath}.failed`;
       try {
-        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+        if (fs.existsSync(tempPath)) fs.renameSync(tempPath, crashDump);
       } catch {
       }
       throw err;
@@ -295,6 +348,20 @@ var AnchorStore = class {
     this.archivePath = path2.join(this.storageDir, "archive.jsonl");
     this.graveyardPath = path2.join(this.storageDir, "graveyard.jsonl");
     this.ensureDirs();
+  }
+  get lockPath() {
+    return path2.join(this.storageDir, "state.lock");
+  }
+  /**
+   * Execute mutation within a cross-process exclusive lock
+   */
+  withLock(fn) {
+    const release = acquireSyncLock(this.lockPath);
+    try {
+      return fn();
+    } finally {
+      release();
+    }
   }
   ensureDirs() {
     if (!fs.existsSync(this.storageDir)) {
@@ -371,37 +438,39 @@ var AnchorStore = class {
    * Create a new Anchor with automatic project and cwd tagging
    */
   create(input) {
-    const state = this.loadState();
-    const now = Date.now();
-    const id = this.generateId(state.anchors);
-    const cwd = input.cwd ? normalizePath(input.cwd) : "";
-    const projectName = input.project ? input.project.trim() : cwd ? path2.basename(cwd) : "global";
-    const recurrence = input.recurrence || detectRecurrence(input.title);
-    const targetDate = input.targetDate || detectTargetDate(input.title, now);
-    const durability = recurrence ? "durable" : input.durability || detectDurability(input.title);
-    const decayPolicy = durability === "ephemeral" ? getEphemeralDecayPolicy(input.title) : DURABLE_DECAY_POLICY;
-    const anchor = {
-      id,
-      title: input.title.trim(),
-      description: input.description?.trim(),
-      priority: input.priority || "p1",
-      status: "active",
-      durability,
-      recurrence,
-      targetDate,
-      project: projectName,
-      cwd,
-      createdAt: now,
-      updatedAt: now,
-      lastTouchedAt: now,
-      files: (input.files || []).map((f) => normalizePath(f)).filter(Boolean),
-      tags: (input.tags || []).map((t) => t.trim()).filter(Boolean),
-      verifyCommand: input.verifyCommand?.trim() || void 0,
-      decay: input.decay ? { ...input.decay } : { ...decayPolicy }
-    };
-    state.anchors.push(anchor);
-    this.saveState(state);
-    return anchor;
+    return this.withLock(() => {
+      const state = this.loadState();
+      const now = Date.now();
+      const id = this.generateId(state.anchors);
+      const cwd = input.cwd ? normalizePath(input.cwd) : "";
+      const projectName = input.project ? input.project.trim() : cwd ? path2.basename(cwd) : "global";
+      const recurrence = input.recurrence || detectRecurrence(input.title);
+      const targetDate = input.targetDate || detectTargetDate(input.title, now);
+      const durability = recurrence ? "durable" : input.durability || detectDurability(input.title);
+      const decayPolicy = durability === "ephemeral" ? getEphemeralDecayPolicy(input.title) : DURABLE_DECAY_POLICY;
+      const anchor = {
+        id,
+        title: input.title.trim(),
+        description: input.description?.trim(),
+        priority: input.priority || "p1",
+        status: "active",
+        durability,
+        recurrence,
+        targetDate,
+        project: projectName,
+        cwd,
+        createdAt: now,
+        updatedAt: now,
+        lastTouchedAt: now,
+        files: (input.files || []).map((f) => normalizePath(f)).filter(Boolean),
+        tags: (input.tags || []).map((t) => t.trim()).filter(Boolean),
+        verifyCommand: input.verifyCommand?.trim() || void 0,
+        decay: input.decay ? { ...input.decay } : { ...decayPolicy }
+      };
+      state.anchors.push(anchor);
+      this.saveState(state);
+      return anchor;
+    });
   }
   findAnchorIndex(anchors, id) {
     const clean = id.trim().replace(/^#/, "");
@@ -443,124 +512,134 @@ var AnchorStore = class {
    * Update an existing anchor
    */
   update(id, patch) {
-    const state = this.loadState();
-    const idx = this.findAnchorIndex(state.anchors, id);
-    if (idx === -1) {
-      throw new Error(`Anchor not found: ${id}`);
-    }
-    const current = state.anchors[idx];
-    const updated = {
-      ...current,
-      ...patch,
-      updatedAt: Date.now()
-    };
-    if (patch.files) {
-      updated.files = patch.files.map((f) => normalizePath(f)).filter(Boolean);
-    }
-    state.anchors[idx] = updated;
-    this.saveState(state);
-    return updated;
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) {
+        throw new Error(`Anchor not found: ${id}`);
+      }
+      const current = state.anchors[idx];
+      const updated = {
+        ...current,
+        ...patch,
+        updatedAt: Date.now()
+      };
+      if (patch.files) {
+        updated.files = patch.files.map((f) => normalizePath(f)).filter(Boolean);
+      }
+      state.anchors[idx] = updated;
+      this.saveState(state);
+      return updated;
+    });
   }
   /**
    * Touch an anchor to refresh its decay window and reactivate sleeping state
    */
   touch(id, timestamp = Date.now()) {
-    const state = this.loadState();
-    const idx = this.findAnchorIndex(state.anchors, id);
-    if (idx === -1) {
-      throw new Error(`Anchor not found: ${id}`);
-    }
-    const current = state.anchors[idx];
-    current.lastTouchedAt = timestamp;
-    current.updatedAt = timestamp;
-    if (current.status === "sleeping") {
-      current.status = "active";
-    }
-    state.anchors[idx] = current;
-    this.saveState(state);
-    return current;
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) {
+        throw new Error(`Anchor not found: ${id}`);
+      }
+      const current = state.anchors[idx];
+      current.lastTouchedAt = timestamp;
+      current.updatedAt = timestamp;
+      if (current.status === "sleeping") {
+        current.status = "active";
+      }
+      state.anchors[idx] = current;
+      this.saveState(state);
+      return current;
+    });
   }
   /**
    * Settle an anchor (recurring daily habits complete for today and wake up tomorrow)
    */
   settle(id, evidence = {}, now = Date.now()) {
-    const state = this.loadState();
-    const idx = this.findAnchorIndex(state.anchors, id);
-    if (idx === -1) {
-      throw new Error(`Anchor not found: ${id}`);
-    }
-    const anchor = state.anchors[idx];
-    const today = getTodayDateString(now);
-    if (anchor.recurrence === "daily") {
-      anchor.lastCompletedDate = today;
-      anchor.lastTouchedAt = now;
-      anchor.updatedAt = now;
-      anchor.evidence = {
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) {
+        throw new Error(`Anchor not found: ${id}`);
+      }
+      const anchor = state.anchors[idx];
+      const today = getTodayDateString(now);
+      if (anchor.recurrence === "daily") {
+        anchor.lastCompletedDate = today;
+        anchor.lastTouchedAt = now;
+        anchor.updatedAt = now;
+        anchor.evidence = {
+          ...evidence,
+          settledAt: now,
+          settledBy: evidence.settledBy || "manual-command"
+        };
+        this.ensureDirs();
+        fs.appendFileSync(this.archivePath, JSON.stringify({ ...anchor, settledForDate: today }) + "\n", "utf-8");
+        this.saveState(state);
+        return anchor;
+      }
+      const [settled] = state.anchors.splice(idx, 1);
+      settled.status = "settled";
+      settled.updatedAt = now;
+      settled.evidence = {
         ...evidence,
         settledAt: now,
         settledBy: evidence.settledBy || "manual-command"
       };
       this.ensureDirs();
-      fs.appendFileSync(this.archivePath, JSON.stringify({ ...anchor, settledForDate: today }) + "\n", "utf-8");
+      fs.appendFileSync(this.archivePath, JSON.stringify(settled) + "\n", "utf-8");
       this.saveState(state);
-      return anchor;
-    }
-    const [settled] = state.anchors.splice(idx, 1);
-    settled.status = "settled";
-    settled.updatedAt = now;
-    settled.evidence = {
-      ...evidence,
-      settledAt: now,
-      settledBy: evidence.settledBy || "manual-command"
-    };
-    this.ensureDirs();
-    fs.appendFileSync(this.archivePath, JSON.stringify(settled) + "\n", "utf-8");
-    this.saveState(state);
-    return settled;
+      return settled;
+    });
   }
   /**
    * Reverse/undo the last settled anchor, popping it from archive.jsonl back into state.json
    */
   undoSettle() {
-    if (!fs.existsSync(this.archivePath)) {
-      throw new Error("No archived anchors to undo");
-    }
-    const raw = fs.readFileSync(this.archivePath, "utf-8");
-    const lines = raw.split("\n").filter(Boolean);
-    if (lines.length === 0) {
-      throw new Error("Archive is empty, nothing to undo");
-    }
-    const lastLine = lines.pop();
-    const anchor = JSON.parse(lastLine);
-    fs.writeFileSync(this.archivePath, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
-    anchor.status = "active";
-    anchor.updatedAt = Date.now();
-    delete anchor.evidence;
-    const state = this.loadState();
-    state.anchors.push(anchor);
-    this.saveState(state);
-    return anchor;
+    return this.withLock(() => {
+      if (!fs.existsSync(this.archivePath)) {
+        throw new Error("No archived anchors to undo");
+      }
+      const raw = fs.readFileSync(this.archivePath, "utf-8");
+      const lines = raw.split("\n").filter(Boolean);
+      if (lines.length === 0) {
+        throw new Error("Archive is empty, nothing to undo");
+      }
+      const lastLine = lines.pop();
+      const anchor = JSON.parse(lastLine);
+      fs.writeFileSync(this.archivePath, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
+      anchor.status = "active";
+      anchor.updatedAt = Date.now();
+      delete anchor.evidence;
+      const state = this.loadState();
+      state.anchors.push(anchor);
+      this.saveState(state);
+      return anchor;
+    });
   }
   /**
    * Evict anchor to graveyard.jsonl upon total decay expiry
    */
   dropToGraveyard(id, reason) {
-    const state = this.loadState();
-    const idx = state.anchors.findIndex((a) => a.id === id);
-    if (idx === -1) {
-      throw new Error(`Anchor not found: ${id}`);
-    }
-    const [anchor] = state.anchors.splice(idx, 1);
-    anchor.status = "graveyard";
-    anchor.updatedAt = Date.now();
-    anchor.evidence = {
-      summary: reason,
-      settledAt: Date.now()
-    };
-    this.ensureDirs();
-    fs.appendFileSync(this.graveyardPath, JSON.stringify(anchor) + "\n", "utf-8");
-    this.saveState(state);
-    return anchor;
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = state.anchors.findIndex((a) => a.id === id);
+      if (idx === -1) {
+        throw new Error(`Anchor not found: ${id}`);
+      }
+      const [anchor] = state.anchors.splice(idx, 1);
+      anchor.status = "graveyard";
+      anchor.updatedAt = Date.now();
+      anchor.evidence = {
+        summary: reason,
+        settledAt: Date.now()
+      };
+      this.ensureDirs();
+      fs.appendFileSync(this.graveyardPath, JSON.stringify(anchor) + "\n", "utf-8");
+      this.saveState(state);
+      return anchor;
+    });
   }
   getArchive(filter) {
     if (!fs.existsSync(this.archivePath)) return [];
@@ -790,6 +869,68 @@ function sweepStore(store, now = Date.now()) {
 }
 
 // src/context_injector.ts
+import path3 from "path";
+var COMMENT_FORMATS = {
+  // Double slash //
+  ".ts": (m) => `// ${m}`,
+  ".tsx": (m) => `// ${m}`,
+  ".js": (m) => `// ${m}`,
+  ".jsx": (m) => `// ${m}`,
+  ".mjs": (m) => `// ${m}`,
+  ".cjs": (m) => `// ${m}`,
+  ".java": (m) => `// ${m}`,
+  ".kt": (m) => `// ${m}`,
+  ".swift": (m) => `// ${m}`,
+  ".go": (m) => `// ${m}`,
+  ".rs": (m) => `// ${m}`,
+  ".c": (m) => `// ${m}`,
+  ".cpp": (m) => `// ${m}`,
+  ".h": (m) => `// ${m}`,
+  ".hpp": (m) => `// ${m}`,
+  ".cs": (m) => `// ${m}`,
+  ".dart": (m) => `// ${m}`,
+  ".scala": (m) => `// ${m}`,
+  ".zig": (m) => `// ${m}`,
+  ".proto": (m) => `// ${m}`,
+  // Hash #
+  ".py": (m) => `# ${m}`,
+  ".rb": (m) => `# ${m}`,
+  ".sh": (m) => `# ${m}`,
+  ".bash": (m) => `# ${m}`,
+  ".zsh": (m) => `# ${m}`,
+  ".yaml": (m) => `# ${m}`,
+  ".yml": (m) => `# ${m}`,
+  ".toml": (m) => `# ${m}`,
+  ".conf": (m) => `# ${m}`,
+  ".dockerfile": (m) => `# ${m}`,
+  ".ps1": (m) => `# ${m}`,
+  ".r": (m) => `# ${m}`,
+  // HTML / XML <!-- -->
+  ".html": (m) => `<!-- ${m} -->`,
+  ".xml": (m) => `<!-- ${m} -->`,
+  ".svg": (m) => `<!-- ${m} -->`,
+  ".vue": (m) => `<!-- ${m} -->`,
+  ".svelte": (m) => `<!-- ${m} -->`,
+  // Block comment /* */
+  ".css": (m) => `/* ${m} */`,
+  ".scss": (m) => `/* ${m} */`,
+  ".less": (m) => `/* ${m} */`,
+  // SQL / Lua / Haskell --
+  ".sql": (m) => `-- ${m}`,
+  ".lua": (m) => `-- ${m}`,
+  ".hs": (m) => `-- ${m}`,
+  // Batch REM
+  ".bat": (m) => `REM ${m}`,
+  ".cmd": (m) => `REM ${m}`
+};
+function makeSafeTaskAnnotation(filePath, anchor) {
+  const ext = path3.extname(filePath).toLowerCase();
+  const formatter = COMMENT_FORMATS[ext];
+  if (!formatter) {
+    return null;
+  }
+  return "\n\n" + formatter(`\u2316 anchor context: #${anchor.id} ${anchor.title} (${anchor.priority.toUpperCase()})`);
+}
 function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
   let cwd;
   let now = Date.now();
@@ -892,7 +1033,7 @@ function formatSettlementCard(proposal) {
 }
 
 // src/tui.ts
-import path3 from "path";
+import path4 from "path";
 function classifyAnchor(anchor, now = Date.now()) {
   if (anchor.recurrence === "daily") {
     return "Habits";
@@ -1027,10 +1168,10 @@ function formatRemainingTtl(anchor, now = Date.now()) {
 function formatOrigin(anchor) {
   if (typeof anchor === "object") {
     if (!anchor.cwd) return anchor.project || "global";
-    return path3.basename(anchor.cwd) || "global";
+    return path4.basename(anchor.cwd) || "global";
   }
   if (!anchor) return "global";
-  return path3.basename(anchor) || "global";
+  return path4.basename(anchor) || "global";
 }
 function updateAnchorStatusBar(ctx, store) {
   if (!ctx.hasUI || !ctx.ui) return;
@@ -1124,11 +1265,14 @@ export {
   detectRecurrence,
   getTodayDateString,
   getDefaultStorageDir,
+  acquireSyncLock,
   atomicRenameWithRetry,
   AnchorStore,
   SessionTouchObserver,
   evaluateAnchorDecay,
   sweepStore,
+  COMMENT_FORMATS,
+  makeSafeTaskAnnotation,
   renderColdStartAnchorsContext,
   renderActiveAnchorsContext,
   runPhysicalVerification,

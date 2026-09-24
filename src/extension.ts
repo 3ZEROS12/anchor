@@ -2,7 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-a
 import { Type } from '@sinclair/typebox';
 import { AnchorStore } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
-import { renderColdStartAnchorsContext, renderActiveAnchorsContext } from './context_injector.ts';
+import { renderColdStartAnchorsContext, renderActiveAnchorsContext, makeSafeTaskAnnotation } from './context_injector.ts';
 import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
 import { normalizePath, findMatchedAnchors } from './matcher.ts';
 import { sweepStore } from './decay.ts';
@@ -87,22 +87,19 @@ export default function (pi: ExtensionAPI) {
 
       const a = matches[0].anchor;
 
-      // Deduplicate annotations so we don't spam duplicate banners repeatedly
+      // Deduplicate annotations and ensure syntax safety (e.g. skip .json/.env)
       if (!annotatedThisSession.has(a.id)) {
         annotatedThisSession.add(a.id);
 
-        const ext = path.extname(touchedPath).toLowerCase();
-        const commentPrefix = (ext === '.py' || ext === '.sh' || ext === '.bash' || ext === '.yaml' || ext === '.yml' || ext === '.toml')
-          ? '#'
-          : '//';
-        const alert = `\n\n${commentPrefix} ⌖ anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
-
-        const contents = [...(event.content || [])];
-        for (let i = contents.length - 1; i >= 0; i--) {
-          const item = contents[i];
-          if (item && item.type === 'text') {
-            contents[i] = { ...item, text: item.text + alert };
-            return { content: contents };
+        const alert = makeSafeTaskAnnotation(touchedPath, a);
+        if (alert) {
+          const contents = [...(event.content || [])];
+          for (let i = contents.length - 1; i >= 0; i--) {
+            const item = contents[i];
+            if (item && item.type === 'text') {
+              contents[i] = { ...item, text: item.text + alert };
+              return { content: contents };
+            }
           }
         }
       }

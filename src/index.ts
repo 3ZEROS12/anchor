@@ -6,3 +6,4 @@ export * from './settlement.ts';
 export * from './tui.ts';
 export * from './observer.ts';
 export * from './context_injector.ts';
+export * from './protocol.ts';
