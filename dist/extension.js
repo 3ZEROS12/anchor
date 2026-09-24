@@ -10,31 +10,33 @@ import {
   sweepStore,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-4KCI6C5H.js";
+} from "./chunk-R4FF2FXV.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
 import { execSync } from "child_process";
+import path from "path";
 var MUTATION_TOOLS = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
 function extension_default(pi) {
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
-  pi.on("session_start", async (_event, ctx) => {
+  const annotatedThisSession = /* @__PURE__ */ new Set();
+  pi.on("session_start", async (event, ctx) => {
     observer.clear();
+    annotatedThisSession.clear();
     const sweep = sweepStore(store);
     if (sweep.transitionedToSleeping.length > 0) {
       ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} \u4E2A\u975E\u6D3B\u8DC3\u4EFB\u52A1\u5DF2\u8FDB\u5165\u4F11\u7720`, "info");
     }
     updateAnchorStatusBar(ctx, store);
-    updateStartupBanner(ctx, store);
+    if (event.reason !== "resume") {
+      updateStartupBanner(ctx, store);
+    }
   });
   pi.on("agent_start", async (_event, ctx) => {
     if (ctx.hasUI && ctx.ui) {
       ctx.ui.setWidget("anchor-startup", void 0);
     }
-  });
-  pi.on("tool_call", async (event, _ctx) => {
-    observer.recordToolCall(event.toolName, event.input || {});
   });
   pi.on("before_agent_start", async (event, ctx) => {
     const entries = ctx.sessionManager?.getEntries() || [];
@@ -52,6 +54,9 @@ ${contextSnippet}`
     }
   });
   pi.on("tool_result", async (event, ctx) => {
+    if (!event.isError) {
+      observer.recordToolCall(event.toolName, event.input || {});
+    }
     const pathInput = event.input?.path;
     if (typeof pathInput !== "string") return;
     const touchedPath = normalizePath(pathInput);
@@ -59,22 +64,27 @@ ${contextSnippet}`
     const matches = findMatchedAnchors(anchors, [touchedPath]);
     if (matches.length > 0) {
       const isMutation = MUTATION_TOOLS.has((event.toolName || "").toLowerCase());
-      if (isMutation) {
+      if (isMutation && !event.isError) {
         for (const m of matches) {
           store.touch(m.anchor.id);
         }
         updateAnchorStatusBar(ctx, store);
       }
       const a = matches[0].anchor;
-      const alert = `
+      if (!annotatedThisSession.has(a.id)) {
+        annotatedThisSession.add(a.id);
+        const ext = path.extname(touchedPath).toLowerCase();
+        const commentPrefix = ext === ".py" || ext === ".sh" || ext === ".bash" || ext === ".yaml" || ext === ".yml" || ext === ".toml" ? "#" : "//";
+        const alert = `
 
-// \u2316 anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
-      const contents = [...event.content || []];
-      for (let i = contents.length - 1; i >= 0; i--) {
-        const item = contents[i];
-        if (item && item.type === "text") {
-          contents[i] = { ...item, text: item.text + alert };
-          return { content: contents };
+${commentPrefix} \u2316 anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
+        const contents = [...event.content || []];
+        for (let i = contents.length - 1; i >= 0; i--) {
+          const item = contents[i];
+          if (item && item.type === "text") {
+            contents[i] = { ...item, text: item.text + alert };
+            return { content: contents };
+          }
         }
       }
     }
@@ -158,6 +168,7 @@ Mark as completed and archive?`
         Type.Literal("sweep")
       ]),
       title: Type.Optional(Type.String({ description: "Short imperative task title (for pin)" })),
+      description: Type.Optional(Type.String({ description: "Detailed context, acceptance criteria, or technical notes" })),
       priority: Type.Optional(Type.Union([Type.Literal("p0"), Type.Literal("p1"), Type.Literal("p2")])),
       project: Type.Optional(Type.String({ description: "Target project name or workspace (defaults to current directory if omitted)" })),
       targetDate: Type.Optional(Type.String({ description: "Expected completion date (e.g. YYYY-MM-DD, today, tomorrow)" })),
@@ -174,6 +185,7 @@ Mark as completed and archive?`
         }
         const anc = store.create({
           title: params.title,
+          description: params.description,
           priority: params.priority || "p1",
           project: params.project,
           targetDate: params.targetDate,

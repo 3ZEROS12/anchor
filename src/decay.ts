@@ -1,5 +1,6 @@
 import type { Anchor, AnchorStatus } from './types.ts';
 import type { AnchorStore } from './store.ts';
+import fs from 'node:fs';
 
 const MS_PER_DAY = 86_400_000;
 
@@ -15,6 +16,16 @@ export interface DecayEvaluation {
  * Calculate precise decay status based on elapsed time since last touch
  */
 export function evaluateAnchorDecay(anchor: Anchor, now: number = Date.now()): DecayEvaluation {
+  if (anchor.status === 'settled' || (anchor.status as string) === 'graveyard') {
+    return {
+      currentStatus: anchor.status,
+      nextStatus: anchor.status,
+      daysUntouched: 0,
+      remainingActiveDays: 0,
+      remainingSleepDays: 0
+    };
+  }
+
   const elapsedMs = Math.max(0, now - anchor.lastTouchedAt);
   const daysUntouched = elapsedMs / MS_PER_DAY;
 
@@ -80,15 +91,32 @@ export function sweepStore(store: AnchorStore, now: number = Date.now()): SweepR
     }
   }
 
+  // Single-pass batch eviction and state save
+  if (toEvict.length > 0) {
+    const evictIds = new Set(toEvict.map(e => e.id));
+    state.anchors = state.anchors.filter(a => !evictIds.has(a.id));
+    stateModified = true;
+
+    const graveyardLines = toEvict.map(exp => {
+      const rec = {
+        ...exp,
+        status: 'graveyard',
+        updatedAt: now,
+        evictedAt: now,
+        evictionReason: `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`
+      };
+      return JSON.stringify(rec);
+    }).join('\n') + '\n';
+
+    fs.appendFileSync(store.graveyardPath, graveyardLines, 'utf-8');
+    for (const exp of toEvict) {
+      result.evictedToGraveyard.push(exp.id);
+    }
+  }
+
   state.lastSweepAt = now;
   if (stateModified) {
     store.saveState(state);
-  }
-
-  // Drop expired to graveyard
-  for (const exp of toEvict) {
-    store.dropToGraveyard(exp.id, `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`);
-    result.evictedToGraveyard.push(exp.id);
   }
 
   return result;

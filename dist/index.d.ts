@@ -271,11 +271,26 @@ declare function classifyAnchor(anchor: Anchor, now?: number): AnchorQuadrant;
  */
 declare function groupAnchorsByQuadrant(anchors: Anchor[], now?: number): GroupedAnchors;
 /**
- * Calculate display width in terminal columns, accounting for CJK full-width characters (width 2)
+ * Strip ANSI escape codes from string
+ */
+declare function stripAnsi(str: string): string;
+/**
+ * Calculate display width in terminal columns, accounting for:
+ * - ANSI escape codes (width 0)
+ * - CJK ideographs & fullwidth forms (width 2)
+ * - Japanese Kana (width 2)
+ * - Korean Hangul syllables & Jamo (width 2)
+ * - Emojis & Pictographs (width 2)
+ * - Zero-width characters & joiners (width 0)
+ * - Standard ASCII (width 1)
  */
 declare function getDisplayWidth(str: string): number;
 /**
- * Pad string to target visual column width using spaces for clean vertical alignment
+ * Truncate string to target terminal visual width with ellipsis
+ */
+declare function truncateToWidth(str: string, maxWidth: number, ellipsis?: string): string;
+/**
+ * Pad and/or truncate string to exact visual column width, eliminating column tearing
  */
 declare function padToWidth(str: string, targetWidth: number): string;
 /**
@@ -362,4 +377,4 @@ declare function renderColdStartAnchorsContext(store: AnchorStore, cwdOrNow?: st
 /** Legacy alias for backwards compatibility */
 declare const renderActiveAnchorsContext: typeof renderColdStartAnchorsContext;
 
-export { type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, sweepStore, updateAnchorStatusBar, updateStartupBanner };
+export { type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, stripAnsi, sweepStore, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };

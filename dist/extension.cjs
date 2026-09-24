@@ -738,8 +738,18 @@ var SessionTouchObserver = class {
 };
 
 // src/decay.ts
+var import_node_fs2 = __toESM(require("fs"), 1);
 var MS_PER_DAY = 864e5;
 function evaluateAnchorDecay(anchor, now = Date.now()) {
+  if (anchor.status === "settled" || anchor.status === "graveyard") {
+    return {
+      currentStatus: anchor.status,
+      nextStatus: anchor.status,
+      daysUntouched: 0,
+      remainingActiveDays: 0,
+      remainingSleepDays: 0
+    };
+  }
   const elapsedMs = Math.max(0, now - anchor.lastTouchedAt);
   const daysUntouched = elapsedMs / MS_PER_DAY;
   const activeDays = anchor.decay.activeDays;
@@ -787,13 +797,28 @@ function sweepStore(store, now = Date.now()) {
       }
     }
   }
+  if (toEvict.length > 0) {
+    const evictIds = new Set(toEvict.map((e) => e.id));
+    state.anchors = state.anchors.filter((a) => !evictIds.has(a.id));
+    stateModified = true;
+    const graveyardLines = toEvict.map((exp) => {
+      const rec = {
+        ...exp,
+        status: "graveyard",
+        updatedAt: now,
+        evictedAt: now,
+        evictionReason: `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`
+      };
+      return JSON.stringify(rec);
+    }).join("\n") + "\n";
+    import_node_fs2.default.appendFileSync(store.graveyardPath, graveyardLines, "utf-8");
+    for (const exp of toEvict) {
+      result.evictedToGraveyard.push(exp.id);
+    }
+  }
   state.lastSweepAt = now;
   if (stateModified) {
     store.saveState(state);
-  }
-  for (const exp of toEvict) {
-    store.dropToGraveyard(exp.id, `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`);
-    result.evictedToGraveyard.push(exp.id);
   }
   return result;
 }
@@ -917,11 +942,18 @@ function groupAnchorsByQuadrant(anchors, now = Date.now()) {
   }
   return groups;
 }
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+}
 function getDisplayWidth(str) {
+  const clean = stripAnsi(str);
   let width = 0;
-  for (const char of str) {
+  for (const char of clean) {
     const code = char.codePointAt(0) || 0;
-    if (code >= 19968 && code <= 40959 || code >= 13312 && code <= 19903 || code >= 131072 && code <= 173791 || code >= 65281 && code <= 65376 || code >= 12288 && code <= 12351) {
+    if (code === 8205 || code === 65039 || code === 65038 || code >= 768 && code <= 879 || code >= 8203 && code <= 8207) {
+      continue;
+    }
+    if (code >= 19968 && code <= 40959 || code >= 13312 && code <= 19903 || code >= 131072 && code <= 173791 || code >= 173824 && code <= 177983 || code >= 65281 && code <= 65376 || code >= 12288 && code <= 12351 || code >= 44032 && code <= 55215 || code >= 4352 && code <= 4607 || code >= 12592 && code <= 12687 || code >= 12352 && code <= 12447 || code >= 12448 && code <= 12543 || code >= 127744 && code <= 129535 || code >= 128512 && code <= 128591 || code >= 128640 && code <= 128767 || code >= 9728 && code <= 10175 || code >= 129648 && code <= 129791) {
       width += 2;
     } else {
       width += 1;
@@ -929,10 +961,29 @@ function getDisplayWidth(str) {
   }
   return width;
 }
-function padToWidth(str, targetWidth) {
+function truncateToWidth(str, maxWidth, ellipsis = "\u2026") {
   const current = getDisplayWidth(str);
-  if (current >= targetWidth) return str;
-  return str + " ".repeat(targetWidth - current);
+  if (current <= maxWidth) return str;
+  const ellipsisWidth = getDisplayWidth(ellipsis);
+  const target = maxWidth - ellipsisWidth;
+  if (target <= 0) return ellipsis.slice(0, maxWidth);
+  let accumulated = "";
+  let accumWidth = 0;
+  for (const char of str) {
+    const charWidth = getDisplayWidth(char);
+    if (accumWidth + charWidth > target) {
+      break;
+    }
+    accumulated += char;
+    accumWidth += charWidth;
+  }
+  return accumulated + ellipsis;
+}
+function padToWidth(str, targetWidth) {
+  const truncated = truncateToWidth(str, targetWidth);
+  const current = getDisplayWidth(truncated);
+  if (current >= targetWidth) return truncated;
+  return truncated + " ".repeat(targetWidth - current);
 }
 function formatTargetDate(anchor, now = Date.now()) {
   if (anchor.recurrence === "daily") {
@@ -1055,7 +1106,7 @@ async function openAnchorDashboard(ctx, store) {
     const created = formatCreationTime(a.createdAt);
     const titleWithFiles = a.files && a.files.length > 0 ? `${a.title} [${a.files.slice(0, 1).join(", ")}]` : a.title;
     const colNum = `${num}  `;
-    const colTitle = padToWidth(titleWithFiles, 28);
+    const colTitle = padToWidth(titleWithFiles, 34);
     const colOrigin = padToWidth(origin, 10);
     const colTarget = padToWidth(target, 12);
     const colCreated = created;
@@ -1075,26 +1126,28 @@ async function openAnchorDashboard(ctx, store) {
 
 // src/extension.ts
 var import_node_child_process2 = require("child_process");
+var import_node_path4 = __toESM(require("path"), 1);
 var MUTATION_TOOLS2 = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
 function extension_default(pi) {
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
-  pi.on("session_start", async (_event, ctx) => {
+  const annotatedThisSession = /* @__PURE__ */ new Set();
+  pi.on("session_start", async (event, ctx) => {
     observer.clear();
+    annotatedThisSession.clear();
     const sweep = sweepStore(store);
     if (sweep.transitionedToSleeping.length > 0) {
       ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} \u4E2A\u975E\u6D3B\u8DC3\u4EFB\u52A1\u5DF2\u8FDB\u5165\u4F11\u7720`, "info");
     }
     updateAnchorStatusBar(ctx, store);
-    updateStartupBanner(ctx, store);
+    if (event.reason !== "resume") {
+      updateStartupBanner(ctx, store);
+    }
   });
   pi.on("agent_start", async (_event, ctx) => {
     if (ctx.hasUI && ctx.ui) {
       ctx.ui.setWidget("anchor-startup", void 0);
     }
-  });
-  pi.on("tool_call", async (event, _ctx) => {
-    observer.recordToolCall(event.toolName, event.input || {});
   });
   pi.on("before_agent_start", async (event, ctx) => {
     const entries = ctx.sessionManager?.getEntries() || [];
@@ -1112,6 +1165,9 @@ ${contextSnippet}`
     }
   });
   pi.on("tool_result", async (event, ctx) => {
+    if (!event.isError) {
+      observer.recordToolCall(event.toolName, event.input || {});
+    }
     const pathInput = event.input?.path;
     if (typeof pathInput !== "string") return;
     const touchedPath = normalizePath(pathInput);
@@ -1119,22 +1175,27 @@ ${contextSnippet}`
     const matches = findMatchedAnchors(anchors, [touchedPath]);
     if (matches.length > 0) {
       const isMutation = MUTATION_TOOLS2.has((event.toolName || "").toLowerCase());
-      if (isMutation) {
+      if (isMutation && !event.isError) {
         for (const m of matches) {
           store.touch(m.anchor.id);
         }
         updateAnchorStatusBar(ctx, store);
       }
       const a = matches[0].anchor;
-      const alert = `
+      if (!annotatedThisSession.has(a.id)) {
+        annotatedThisSession.add(a.id);
+        const ext = import_node_path4.default.extname(touchedPath).toLowerCase();
+        const commentPrefix = ext === ".py" || ext === ".sh" || ext === ".bash" || ext === ".yaml" || ext === ".yml" || ext === ".toml" ? "#" : "//";
+        const alert = `
 
-// \u2316 anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
-      const contents = [...event.content || []];
-      for (let i = contents.length - 1; i >= 0; i--) {
-        const item = contents[i];
-        if (item && item.type === "text") {
-          contents[i] = { ...item, text: item.text + alert };
-          return { content: contents };
+${commentPrefix} \u2316 anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
+        const contents = [...event.content || []];
+        for (let i = contents.length - 1; i >= 0; i--) {
+          const item = contents[i];
+          if (item && item.type === "text") {
+            contents[i] = { ...item, text: item.text + alert };
+            return { content: contents };
+          }
         }
       }
     }
@@ -1218,6 +1279,7 @@ Mark as completed and archive?`
         import_typebox.Type.Literal("sweep")
       ]),
       title: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Short imperative task title (for pin)" })),
+      description: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Detailed context, acceptance criteria, or technical notes" })),
       priority: import_typebox.Type.Optional(import_typebox.Type.Union([import_typebox.Type.Literal("p0"), import_typebox.Type.Literal("p1"), import_typebox.Type.Literal("p2")])),
       project: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Target project name or workspace (defaults to current directory if omitted)" })),
       targetDate: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Expected completion date (e.g. YYYY-MM-DD, today, tomorrow)" })),
@@ -1234,6 +1296,7 @@ Mark as completed and archive?`
         }
         const anc = store.create({
           title: params.title,
+          description: params.description,
           priority: params.priority || "p1",
           project: params.project,
           targetDate: params.targetDate,

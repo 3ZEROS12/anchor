@@ -62,7 +62,9 @@ __export(index_exports, {
   renderActiveAnchorsContext: () => renderActiveAnchorsContext,
   renderColdStartAnchorsContext: () => renderColdStartAnchorsContext,
   runPhysicalVerification: () => runPhysicalVerification,
+  stripAnsi: () => stripAnsi,
   sweepStore: () => sweepStore,
+  truncateToWidth: () => truncateToWidth,
   updateAnchorStatusBar: () => updateAnchorStatusBar,
   updateStartupBanner: () => updateStartupBanner
 });
@@ -661,8 +663,18 @@ var AnchorStore = class {
 };
 
 // src/decay.ts
+var import_node_fs2 = __toESM(require("fs"), 1);
 var MS_PER_DAY = 864e5;
 function evaluateAnchorDecay(anchor, now = Date.now()) {
+  if (anchor.status === "settled" || anchor.status === "graveyard") {
+    return {
+      currentStatus: anchor.status,
+      nextStatus: anchor.status,
+      daysUntouched: 0,
+      remainingActiveDays: 0,
+      remainingSleepDays: 0
+    };
+  }
   const elapsedMs = Math.max(0, now - anchor.lastTouchedAt);
   const daysUntouched = elapsedMs / MS_PER_DAY;
   const activeDays = anchor.decay.activeDays;
@@ -710,13 +722,28 @@ function sweepStore(store, now = Date.now()) {
       }
     }
   }
+  if (toEvict.length > 0) {
+    const evictIds = new Set(toEvict.map((e) => e.id));
+    state.anchors = state.anchors.filter((a) => !evictIds.has(a.id));
+    stateModified = true;
+    const graveyardLines = toEvict.map((exp) => {
+      const rec = {
+        ...exp,
+        status: "graveyard",
+        updatedAt: now,
+        evictedAt: now,
+        evictionReason: `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`
+      };
+      return JSON.stringify(rec);
+    }).join("\n") + "\n";
+    import_node_fs2.default.appendFileSync(store.graveyardPath, graveyardLines, "utf-8");
+    for (const exp of toEvict) {
+      result.evictedToGraveyard.push(exp.id);
+    }
+  }
   state.lastSweepAt = now;
   if (stateModified) {
     store.saveState(state);
-  }
-  for (const exp of toEvict) {
-    store.dropToGraveyard(exp.id, `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`);
-    result.evictedToGraveyard.push(exp.id);
   }
   return result;
 }
@@ -800,11 +827,18 @@ function groupAnchorsByQuadrant(anchors, now = Date.now()) {
   }
   return groups;
 }
+function stripAnsi(str) {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+}
 function getDisplayWidth(str) {
+  const clean = stripAnsi(str);
   let width = 0;
-  for (const char of str) {
+  for (const char of clean) {
     const code = char.codePointAt(0) || 0;
-    if (code >= 19968 && code <= 40959 || code >= 13312 && code <= 19903 || code >= 131072 && code <= 173791 || code >= 65281 && code <= 65376 || code >= 12288 && code <= 12351) {
+    if (code === 8205 || code === 65039 || code === 65038 || code >= 768 && code <= 879 || code >= 8203 && code <= 8207) {
+      continue;
+    }
+    if (code >= 19968 && code <= 40959 || code >= 13312 && code <= 19903 || code >= 131072 && code <= 173791 || code >= 173824 && code <= 177983 || code >= 65281 && code <= 65376 || code >= 12288 && code <= 12351 || code >= 44032 && code <= 55215 || code >= 4352 && code <= 4607 || code >= 12592 && code <= 12687 || code >= 12352 && code <= 12447 || code >= 12448 && code <= 12543 || code >= 127744 && code <= 129535 || code >= 128512 && code <= 128591 || code >= 128640 && code <= 128767 || code >= 9728 && code <= 10175 || code >= 129648 && code <= 129791) {
       width += 2;
     } else {
       width += 1;
@@ -812,10 +846,29 @@ function getDisplayWidth(str) {
   }
   return width;
 }
-function padToWidth(str, targetWidth) {
+function truncateToWidth(str, maxWidth, ellipsis = "\u2026") {
   const current = getDisplayWidth(str);
-  if (current >= targetWidth) return str;
-  return str + " ".repeat(targetWidth - current);
+  if (current <= maxWidth) return str;
+  const ellipsisWidth = getDisplayWidth(ellipsis);
+  const target = maxWidth - ellipsisWidth;
+  if (target <= 0) return ellipsis.slice(0, maxWidth);
+  let accumulated = "";
+  let accumWidth = 0;
+  for (const char of str) {
+    const charWidth = getDisplayWidth(char);
+    if (accumWidth + charWidth > target) {
+      break;
+    }
+    accumulated += char;
+    accumWidth += charWidth;
+  }
+  return accumulated + ellipsis;
+}
+function padToWidth(str, targetWidth) {
+  const truncated = truncateToWidth(str, targetWidth);
+  const current = getDisplayWidth(truncated);
+  if (current >= targetWidth) return truncated;
+  return truncated + " ".repeat(targetWidth - current);
 }
 function formatTargetDate(anchor, now = Date.now()) {
   if (anchor.recurrence === "daily") {
@@ -944,7 +997,7 @@ async function openAnchorDashboard(ctx, store) {
     const created = formatCreationTime(a.createdAt);
     const titleWithFiles = a.files && a.files.length > 0 ? `${a.title} [${a.files.slice(0, 1).join(", ")}]` : a.title;
     const colNum = `${num}  `;
-    const colTitle = padToWidth(titleWithFiles, 28);
+    const colTitle = padToWidth(titleWithFiles, 34);
     const colOrigin = padToWidth(origin, 10);
     const colTarget = padToWidth(target, 12);
     const colCreated = created;
@@ -1164,7 +1217,9 @@ var renderActiveAnchorsContext = renderColdStartAnchorsContext;
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
   runPhysicalVerification,
+  stripAnsi,
   sweepStore,
+  truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
 });

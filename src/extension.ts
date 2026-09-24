@@ -8,6 +8,7 @@ import { normalizePath, findMatchedAnchors } from './matcher.ts';
 import { sweepStore } from './decay.ts';
 import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner } from './tui.ts';
 import { execSync } from 'node:child_process';
+import path from 'node:path';
 
 const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
 
@@ -15,10 +16,12 @@ export default function (pi: ExtensionAPI) {
   // Global authoritative store in ~/.anchor/ (0 workspace clutter)
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
+  const annotatedThisSession = new Set<string>();
 
   // 1. Session start: sweep stale tasks, update TUI status bar, and render startup banner
-  pi.on('session_start', async (_event: any, ctx: ExtensionContext) => {
+  pi.on('session_start', async (event: any, ctx: ExtensionContext) => {
     observer.clear();
+    annotatedThisSession.clear();
     const sweep = sweepStore(store);
 
     if (sweep.transitionedToSleeping.length > 0) {
@@ -26,7 +29,11 @@ export default function (pi: ExtensionAPI) {
     }
 
     updateAnchorStatusBar(ctx, store);
-    updateStartupBanner(ctx, store);
+
+    // Only render startup banner on initial startup or new session, not on mid-session resume
+    if (event.reason !== 'resume') {
+      updateStartupBanner(ctx, store);
+    }
   });
 
   // 2. Auto-clear startup banner when agent starts first turn to keep screen clean
@@ -34,11 +41,6 @@ export default function (pi: ExtensionAPI) {
     if (ctx.hasUI && ctx.ui) {
       ctx.ui.setWidget('anchor-startup', undefined);
     }
-  });
-
-  // 2. Track touched files across all tool calls
-  pi.on('tool_call', async (event: any, _ctx: ExtensionContext) => {
-    observer.recordToolCall(event.toolName, event.input || {});
   });
 
   // 3. JIT Cold-Start Injection: Only fires on Turn 1 of a session. From turn 2 onwards, consumes 0 tokens!
@@ -57,8 +59,13 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 4. JIT Path-Triggered Context Alert: When agent touches an intersecting file, annotate tool result JIT
+  // 4. JIT Path-Triggered Context Alert: When agent successfully touches an intersecting file
   pi.on('tool_result', async (event: any, ctx: ExtensionContext) => {
+    // Only verified, non-error tool executions are recorded to prevent false-positive settlement
+    if (!event.isError) {
+      observer.recordToolCall(event.toolName, event.input || {});
+    }
+
     const pathInput = (event.input as any)?.path;
     if (typeof pathInput !== 'string') return;
 
@@ -71,7 +78,7 @@ export default function (pi: ExtensionAPI) {
 
       // Only physical mutations (edit, write) refresh decay timer and wake sleeping anchors!
       // Read-only inspection (read, grep) provides JIT context without fake lifecycle extension.
-      if (isMutation) {
+      if (isMutation && !event.isError) {
         for (const m of matches) {
           store.touch(m.anchor.id);
         }
@@ -79,14 +86,24 @@ export default function (pi: ExtensionAPI) {
       }
 
       const a = matches[0].anchor;
-      const alert = `\n\n// ⌖ anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
 
-      const contents = [...(event.content || [])];
-      for (let i = contents.length - 1; i >= 0; i--) {
-        const item = contents[i];
-        if (item && item.type === 'text') {
-          contents[i] = { ...item, text: item.text + alert };
-          return { content: contents };
+      // Deduplicate annotations so we don't spam duplicate banners repeatedly
+      if (!annotatedThisSession.has(a.id)) {
+        annotatedThisSession.add(a.id);
+
+        const ext = path.extname(touchedPath).toLowerCase();
+        const commentPrefix = (ext === '.py' || ext === '.sh' || ext === '.bash' || ext === '.yaml' || ext === '.yml' || ext === '.toml')
+          ? '#'
+          : '//';
+        const alert = `\n\n${commentPrefix} ⌖ anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
+
+        const contents = [...(event.content || [])];
+        for (let i = contents.length - 1; i >= 0; i--) {
+          const item = contents[i];
+          if (item && item.type === 'text') {
+            contents[i] = { ...item, text: item.text + alert };
+            return { content: contents };
+          }
         }
       }
     }
@@ -189,6 +206,7 @@ export default function (pi: ExtensionAPI) {
         Type.Literal('sweep')
       ]),
       title: Type.Optional(Type.String({ description: 'Short imperative task title (for pin)' })),
+      description: Type.Optional(Type.String({ description: 'Detailed context, acceptance criteria, or technical notes' })),
       priority: Type.Optional(Type.Union([Type.Literal('p0'), Type.Literal('p1'), Type.Literal('p2')])),
       project: Type.Optional(Type.String({ description: 'Target project name or workspace (defaults to current directory if omitted)' })),
       targetDate: Type.Optional(Type.String({ description: 'Expected completion date (e.g. YYYY-MM-DD, today, tomorrow)' })),
@@ -205,6 +223,7 @@ export default function (pi: ExtensionAPI) {
         }
         const anc = store.create({
           title: params.title,
+          description: params.description,
           priority: params.priority || 'p1',
           project: params.project,
           targetDate: params.targetDate,

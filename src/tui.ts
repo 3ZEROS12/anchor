@@ -58,34 +58,102 @@ export function groupAnchorsByQuadrant(anchors: Anchor[], now: number = Date.now
 }
 
 /**
- * Calculate display width in terminal columns, accounting for CJK full-width characters (width 2)
+ * Strip ANSI escape codes from string
+ */
+export function stripAnsi(str: string): string {
+  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+}
+
+/**
+ * Calculate display width in terminal columns, accounting for:
+ * - ANSI escape codes (width 0)
+ * - CJK ideographs & fullwidth forms (width 2)
+ * - Japanese Kana (width 2)
+ * - Korean Hangul syllables & Jamo (width 2)
+ * - Emojis & Pictographs (width 2)
+ * - Zero-width characters & joiners (width 0)
+ * - Standard ASCII (width 1)
  */
 export function getDisplayWidth(str: string): number {
+  const clean = stripAnsi(str);
   let width = 0;
-  for (const char of str) {
+
+  for (const char of clean) {
     const code = char.codePointAt(0) || 0;
+
+    // Zero-width characters (ZWJ, variation selectors, combining marks)
+    if (
+      code === 0x200d ||
+      code === 0xfe0f ||
+      code === 0xfe0e ||
+      (code >= 0x0300 && code <= 0x036f) ||
+      (code >= 0x200b && code <= 0x200f)
+    ) {
+      continue;
+    }
+
+    // Double-width characters: CJK, Hangul, Kana, Emojis
     if (
       (code >= 0x4e00 && code <= 0x9fff) ||
       (code >= 0x3400 && code <= 0x4dbf) ||
       (code >= 0x20000 && code <= 0x2a6df) ||
+      (code >= 0x2a700 && code <= 0x2b73f) ||
       (code >= 0xff01 && code <= 0xff60) ||
-      (code >= 0x3000 && code <= 0x303f)
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0xac00 && code <= 0xd7af) ||
+      (code >= 0x1100 && code <= 0x11ff) ||
+      (code >= 0x3130 && code <= 0x318f) ||
+      (code >= 0x3040 && code <= 0x309f) ||
+      (code >= 0x30a0 && code <= 0x30ff) ||
+      (code >= 0x1f300 && code <= 0x1f9ff) ||
+      (code >= 0x1f600 && code <= 0x1f64f) ||
+      (code >= 0x1f680 && code <= 0x1f6ff) ||
+      (code >= 0x2600 && code <= 0x27bf) ||
+      (code >= 0x1fa70 && code <= 0x1faff)
     ) {
       width += 2;
     } else {
       width += 1;
     }
   }
+
   return width;
 }
 
 /**
- * Pad string to target visual column width using spaces for clean vertical alignment
+ * Truncate string to target terminal visual width with ellipsis
+ */
+export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…'): string {
+  const current = getDisplayWidth(str);
+  if (current <= maxWidth) return str;
+
+  const ellipsisWidth = getDisplayWidth(ellipsis);
+  const target = maxWidth - ellipsisWidth;
+  if (target <= 0) return ellipsis.slice(0, maxWidth);
+
+  let accumulated = '';
+  let accumWidth = 0;
+
+  for (const char of str) {
+    const charWidth = getDisplayWidth(char);
+    if (accumWidth + charWidth > target) {
+      break;
+    }
+    accumulated += char;
+    accumWidth += charWidth;
+  }
+
+  return accumulated + ellipsis;
+}
+
+/**
+ * Pad and/or truncate string to exact visual column width, eliminating column tearing
  */
 export function padToWidth(str: string, targetWidth: number): string {
-  const current = getDisplayWidth(str);
-  if (current >= targetWidth) return str;
-  return str + ' '.repeat(targetWidth - current);
+  const truncated = truncateToWidth(str, targetWidth);
+  const current = getDisplayWidth(truncated);
+  if (current >= targetWidth) return truncated;
+  return truncated + ' '.repeat(targetWidth - current);
 }
 
 /**
@@ -292,7 +360,7 @@ export async function openAnchorDashboard(
 
     // Clean tabular column alignment: ID, Category, Title, Project, Target, Created
     const colNum = `${num}  `;
-    const colTitle = padToWidth(titleWithFiles, 28);
+    const colTitle = padToWidth(titleWithFiles, 34);
     const colOrigin = padToWidth(origin, 10);
     const colTarget = padToWidth(target, 12);
     const colCreated = created;
