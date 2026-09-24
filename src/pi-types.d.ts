@@ -7,6 +7,7 @@ declare module '@earendil-works/pi-coding-agent' {
       notify: (message: string, level?: 'info' | 'warn' | 'error') => void;
       confirm: (title: string, message: string) => Promise<boolean>;
       select: (title: string, options: string[]) => Promise<string | undefined>;
+      setWidget: (key: string, content: string[] | undefined, options?: { placement?: 'aboveEditor' | 'belowEditor' }) => void;
     };
   }
 

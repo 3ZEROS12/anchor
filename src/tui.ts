@@ -215,6 +215,44 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
 }
 
 /**
+ * Render lightweight startup banner widget above the editor.
+ * Features 3-4 lines with quadrant badges and target date hints.
+ * Automatically cleared on agent_start (when user sends first message).
+ */
+export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): void {
+  if (!ctx.hasUI || !ctx.ui) return;
+
+  const active = store.list({ status: 'active', cwd: ctx.cwd });
+  if (active.length === 0) {
+    ctx.ui.setWidget('anchor-startup', undefined);
+    return;
+  }
+
+  const groups = groupAnchorsByQuadrant(active);
+  const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
+
+  const lines: string[] = [
+    `⌖ Anchor · ${active.length} active commitments:`
+  ];
+
+  const topItems = sorted.slice(0, 3);
+  for (let i = 0; i < topItems.length; i++) {
+    const a = topItems[i];
+    const num = (i + 1).toString().padStart(2, '0');
+    const q = classifyAnchor(a);
+    const tgt = formatTargetDate(a);
+    const titlePadded = a.title.length > 34 ? a.title.slice(0, 32) + '..' : a.title;
+    lines.push(`  • [${q}]  ${num} ${titlePadded} (${tgt})`);
+  }
+
+  if (sorted.length > 3) {
+    lines.push(`  (+${sorted.length - 3} more · run /anchor to inspect)`);
+  }
+
+  ctx.ui.setWidget('anchor-startup', lines, { placement: 'aboveEditor' });
+}
+
+/**
  * Clean, columnar-aligned checklist with Target Date and Creation Time columns
  */
 export async function openAnchorDashboard(

@@ -7,6 +7,7 @@ import { AnchorStore } from '../src/store.ts';
 import {
   updateAnchorStatusBar,
   openAnchorDashboard,
+  updateStartupBanner,
   formatTargetDate,
   formatCreationTime,
   getDisplayWidth,
@@ -133,4 +134,38 @@ test('AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width c
 
   const paddedAscii = padToWidth('hello', 16);
   assert.strictEqual(getDisplayWidth(paddedAscii), 16);
+});
+
+test('AnchorTUI - updateStartupBanner renders clean widget above editor', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    let widgetKey: string | undefined;
+    let widgetLines: string[] | undefined;
+
+    const mockCtx = {
+      cwd: '/workspace',
+      hasUI: true,
+      ui: {
+        setWidget: (key: string, content: string[] | undefined) => {
+          widgetKey = key;
+          widgetLines = content;
+        }
+      }
+    } as unknown as ExtensionContext;
+
+    // 1. Zero items: widget cleared
+    updateStartupBanner(mockCtx, store);
+    assert.strictEqual(widgetLines, undefined);
+
+    // 2. Active items: widget rendered
+    store.create({ title: '今天完成优化' });
+    updateStartupBanner(mockCtx, store);
+    assert.strictEqual(widgetKey, 'anchor-startup');
+    assert.ok(widgetLines);
+    assert.ok((widgetLines as string[]).some((l: string) => l.includes('active commitments')));
+    assert.ok((widgetLines as string[]).some((l: string) => l.includes('[Today]') && l.includes('今天完成优化')));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
