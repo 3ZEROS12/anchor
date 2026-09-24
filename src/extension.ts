@@ -6,13 +6,133 @@ import { renderColdStartAnchorsContext, renderActiveAnchorsContext } from './con
 import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
 import { normalizePath, findMatchedAnchors } from './matcher.ts';
 import { sweepStore } from './decay.ts';
-import { updateAnchorStatusBar, openAnchorDashboard } from './tui.ts';
+import {
+  updateAnchorStatusBar,
+  openAnchorDashboard,
+  groupAnchorsByQuadrant,
+  classifyAnchor,
+  formatOrigin,
+  formatTargetDate,
+  formatCreationTime,
+  padToWidth
+} from './tui.ts';
 import { execSync } from 'node:child_process';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import { pathToFileURL } from 'node:url';
+
+let isStartupHooked = false;
+
+/**
+ * Dynamically hook Pi's InteractiveMode.prototype.showLoadedResources
+ * to display [Anchors] with the exact same first-class status, styling,
+ * expandable toggling (Ctrl+O), and quietStartup hiding behavior as [Skills].
+ */
+function installStartupAnchorSection(store: AnchorStore) {
+  if (isStartupHooked) return;
+  isStartupHooked = true;
+
+  try {
+    const candidates = [
+      path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'modes', 'interactive', 'interactive-mode.js'),
+      path.join(process.execPath, '..', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'modes', 'interactive', 'interactive-mode.js')
+    ];
+    let filePath: string | null = null;
+    for (const c of candidates) {
+      if (fs.existsSync(c)) {
+        filePath = c;
+        break;
+      }
+    }
+    if (!filePath) return;
+
+    const modUrl = pathToFileURL(filePath).href;
+    import(modUrl).then((mod) => {
+      const InteractiveMode = mod.InteractiveMode;
+      if (!InteractiveMode?.prototype?.showLoadedResources) return;
+
+      const origShow = InteractiveMode.prototype.showLoadedResources;
+      InteractiveMode.prototype.showLoadedResources = function (options: any) {
+        // 1. Call original Pi method first
+        origShow.call(this, options);
+
+        // 2. Obey user's choice: if quietStartup is enabled, hide simultaneously with Skills!
+        const showListing = options?.force || this.options?.verbose || !this.settingsManager?.getQuietStartup();
+        if (!showListing) return;
+
+        // 3. Fetch active anchors for current workspace
+        const active = store.list({ status: 'active', cwd: this.session?.cwd || process.cwd() });
+        if (active.length === 0) return;
+
+        // 4. Extract existing ExpandableText and Spacer classes from Pi's container
+        if (!this.loadedResourcesContainer?.children || this.loadedResourcesContainer.children.length < 2) return;
+        const ExpandableTextClass = this.loadedResourcesContainer.children[0].constructor;
+        const SpacerClass = this.loadedResourcesContainer.children[1].constructor;
+
+        // 5. Build Collapsed & Expanded representations
+        const groups = groupAnchorsByQuadrant(active);
+        const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
+
+        const collapsedItems = sorted.slice(0, 3).map((a, i) => {
+          const num = (i + 1).toString().padStart(2, '0');
+          const q = classifyAnchor(a);
+          return `[${q}] ${num} ${a.title}`;
+        });
+        if (sorted.length > 3) {
+          collapsedItems.push(`(+${sorted.length - 3} more · /anchor)`);
+        }
+        const collapsedBody = `  ${collapsedItems.join(' · ')}`;
+
+        const expandedLines: string[] = [];
+        const sections = [
+          { title: 'Today · 今日聚焦', list: groups.today },
+          { title: 'Upcoming · 近期排期', list: groups.upcoming },
+          { title: 'Habits · 每日循环', list: groups.habits },
+          { title: 'Backlog · 长期愿景', list: groups.backlog },
+        ];
+        let seqNum = 1;
+        for (const sec of sections) {
+          if (sec.list.length === 0) continue;
+          expandedLines.push(`  [${sec.title}]`);
+          for (const a of sec.list) {
+            const num = seqNum.toString().padStart(2, '0');
+            seqNum++;
+            const cat = padToWidth(`[${classifyAnchor(a)}]`, 12);
+            const orig = formatOrigin(a);
+            const tgt = formatTargetDate(a);
+            const crt = formatCreationTime(a.createdAt);
+            const titlePadded = padToWidth(a.title, 26);
+            expandedLines.push(`    ${num}  ${cat}${titlePadded}  ${padToWidth(orig, 10)}  ${padToWidth(tgt, 10)}  ${crt}`);
+          }
+        }
+        const expandedBody = expandedLines.join('\n');
+
+        // 6. Mount section into loadedResourcesContainer alongside Skills
+        const section = new ExpandableTextClass(
+          () => `\x1b[36m[Anchors]\x1b[0m\n${collapsedBody}`,
+          () => `\x1b[36m[Anchors]\x1b[0m\n${expandedBody}`,
+          this.getStartupExpansionState?.() ?? false,
+          0,
+          0
+        );
+
+        this.loadedResourcesContainer.addChild(section);
+        this.loadedResourcesContainer.addChild(new SpacerClass(1));
+      };
+    }).catch(() => {});
+  } catch (_e) {
+    // Graceful fallback
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   // Global authoritative store in ~/.pi/agent/anchors/ (0 workspace clutter)
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
+
+  // Install startup hook to display [Anchors] with identical status to [Skills]
+  installStartupAnchorSection(store);
 
   // 1. Session start: sweep stale tasks and update TUI status bar for current workspace
   pi.on('session_start', async (_event: any, ctx: ExtensionContext) => {
