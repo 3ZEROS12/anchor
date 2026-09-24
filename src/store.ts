@@ -58,6 +58,36 @@ export function detectProjectFromTitle(title: string): string | undefined {
 }
 
 /**
+ * Detect expected completion date from title keywords, returning 'YYYY-MM-DD'
+ */
+export function detectTargetDate(title: string, now: number = Date.now()): string | undefined {
+  const lower = title.toLowerCase();
+  const MS_DAY = 24 * 60 * 60 * 1000;
+
+  if (lower.includes('今天') || lower.includes('今日') || lower.includes('今晚') || lower.includes('today') || lower.includes('tonight')) {
+    return getTodayDateString(now);
+  }
+  if (lower.includes('明天') || lower.includes('tomorrow')) {
+    return getTodayDateString(now + MS_DAY);
+  }
+  if (lower.includes('后天')) {
+    return getTodayDateString(now + 2 * MS_DAY);
+  }
+  if (lower.includes('大后天')) {
+    return getTodayDateString(now + 3 * MS_DAY);
+  }
+  const fullDateMatch = title.match(/\b(20\d\d)-(\d{1,2})-(\d{1,2})\b/);
+  if (fullDateMatch) {
+    const y = fullDateMatch[1];
+    const m = fullDateMatch[2].padStart(2, '0');
+    const d = fullDateMatch[3].padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  return undefined;
+}
+
+/**
  * Detect recurring patterns, e.g. daily habits
  */
 export function detectRecurrence(title: string): 'daily' | undefined {
@@ -170,6 +200,7 @@ export class AnchorStore {
     recurrence?: 'daily';
     cwd?: string;
     project?: string;
+    targetDate?: string;
     files?: string[];
     tags?: string[];
     verifyCommand?: string;
@@ -186,6 +217,7 @@ export class AnchorStore {
       : (detectedProject || (cwd ? path.basename(cwd) : 'global'));
 
     const recurrence = input.recurrence || detectRecurrence(input.title);
+    const targetDate = input.targetDate || detectTargetDate(input.title, now);
     // Recurring tasks are always durable
     const durability = recurrence ? 'durable' : (input.durability || detectDurability(input.title));
     const decayPolicy = durability === 'ephemeral'
@@ -200,6 +232,7 @@ export class AnchorStore {
       status: 'active',
       durability,
       recurrence,
+      targetDate,
       project: projectName,
       cwd,
       createdAt: now,

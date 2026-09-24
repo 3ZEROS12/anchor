@@ -7,8 +7,8 @@ import { AnchorStore } from '../src/store.ts';
 import {
   updateAnchorStatusBar,
   openAnchorDashboard,
-  formatRemainingTtl,
-  formatRelativeTime,
+  formatTargetDate,
+  formatCreationTime,
   getDisplayWidth,
   padToWidth
 } from '../src/tui.ts';
@@ -52,23 +52,26 @@ test('AnchorTUI - status bar reflects active state cleanly with ⌖ N', () => {
   }
 });
 
-test('AnchorTUI - formatRemainingTtl and formatRelativeTime distinguish left vs ago', () => {
+test('AnchorTUI - formatTargetDate and formatCreationTime render clear dual-timeline', () => {
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
-    const baseTime = 100_000_000_000;
+    const now = 100_000_000_000;
 
-    const aEphemeral = store.create({ title: '明天吃香蕉' });
-    const aDurable = store.create({ title: '每天吃一个苹果' });
+    const aToday = store.create({ title: '今天完成优化' });
+    const aTomorrow = store.create({ title: '明天完成优化' });
+    const aIn2d = store.create({ title: '后天完成优化' });
+    const aDaily = store.create({ title: '每天吃苹果' });
+    const aLongTerm = store.create({ title: '重构底层架构' });
 
-    const ttlEphemeral = formatRemainingTtl(aEphemeral, aEphemeral.createdAt + 2 * 3600 * 1000);
-    const ttlDurable = formatRemainingTtl(aDurable, aDurable.createdAt + 2 * 3600 * 1000);
+    assert.strictEqual(formatTargetDate(aToday, aToday.createdAt), 'Today');
+    assert.strictEqual(formatTargetDate(aTomorrow, aTomorrow.createdAt), 'Tomorrow');
+    assert.strictEqual(formatTargetDate(aIn2d, aIn2d.createdAt), 'In 2d');
+    assert.strictEqual(formatTargetDate(aDaily, aDaily.createdAt), 'Daily');
+    assert.strictEqual(formatTargetDate(aLongTerm, aLongTerm.createdAt), 'Someday');
 
-    assert.strictEqual(ttlEphemeral, '46h left');
-    assert.strictEqual(ttlDurable, undefined);
-
-    const pastRel = formatRelativeTime(baseTime - 23 * 60 * 1000, baseTime);
-    assert.strictEqual(pastRel, '23m ago');
+    const createdStr = formatCreationTime(now, now);
+    assert.ok(createdStr.startsWith('Today '));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

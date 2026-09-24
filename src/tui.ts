@@ -1,5 +1,5 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { AnchorStore } from './store.ts';
+import { AnchorStore, getTodayDateString } from './store.ts';
 import type { Anchor } from './types.ts';
 import path from 'node:path';
 
@@ -35,45 +35,121 @@ export function padToWidth(str: string, targetWidth: number): string {
 }
 
 /**
- * Format relative past time in concise English (e.g. 'just now', '23m ago', '2h ago', '3d ago')
+ * Format expected completion date in human-intuitive terms:
+ * - 'Daily' for daily recurring habits
+ * - 'Today' if targetDate is today
+ * - 'Tomorrow' if targetDate is tomorrow
+ * - 'In 2d' / 'In 3d' for near-term dates
+ * - 'MM-DD' for future dates
+ * - 'Overdue' if targetDate is past
+ * - 'Someday' for open-ended architecture/long-term vision
+ */
+export function formatTargetDate(anchor: Anchor, now: number = Date.now()): string {
+  if (anchor.recurrence === 'daily') {
+    return 'Daily';
+  }
+  if (!anchor.targetDate) {
+    return 'Someday';
+  }
+
+  const todayStr = getTodayDateString(now);
+  if (anchor.targetDate === todayStr) {
+    return 'Today';
+  }
+
+  const MS_DAY = 24 * 60 * 60 * 1000;
+  const tomorrowStr = getTodayDateString(now + MS_DAY);
+  if (anchor.targetDate === tomorrowStr) {
+    return 'Tomorrow';
+  }
+
+  const in2dStr = getTodayDateString(now + 2 * MS_DAY);
+  if (anchor.targetDate === in2dStr) {
+    return 'In 2d';
+  }
+
+  const in3dStr = getTodayDateString(now + 3 * MS_DAY);
+  if (anchor.targetDate === in3dStr) {
+    return 'In 3d';
+  }
+
+  if (anchor.targetDate < todayStr) {
+    return 'Overdue';
+  }
+
+  const parts = anchor.targetDate.split('-');
+  if (parts.length === 3) {
+    return `${parts[1]}-${parts[2]}`;
+  }
+
+  return anchor.targetDate;
+}
+
+/**
+ * Format creation timestamp as concise date/time:
+ * - 'Today HH:MM' if created today
+ * - 'Yesterday HH:MM' if created yesterday
+ * - 'MM-DD HH:MM' if created this year
+ * - 'YYYY-MM-DD' if older
+ */
+export function formatCreationTime(timestamp: number, now: number = Date.now()): string {
+  const d = new Date(timestamp);
+  const nowD = new Date(now);
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+  const todayStr = getTodayDateString(now);
+  const createdDayStr = getTodayDateString(timestamp);
+
+  if (createdDayStr === todayStr) {
+    return `Today ${timeStr}`;
+  }
+
+  const yesterdayStr = getTodayDateString(now - 24 * 60 * 60 * 1000);
+  if (createdDayStr === yesterdayStr) {
+    return `Yesterday ${timeStr}`;
+  }
+
+  const mmdd = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  if (d.getFullYear() === nowD.getFullYear()) {
+    return `${mmdd} ${timeStr}`;
+  }
+
+  return `${d.getFullYear()}-${mmdd}`;
+}
+
+/**
+ * Backward compatibility alias
  */
 export function formatRelativeTime(timestamp: number, now: number = Date.now()): string {
-  const elapsedMs = Math.max(0, now - timestamp);
-  const minutes = Math.floor(elapsedMs / (60 * 1000));
-  const hours = Math.floor(elapsedMs / (60 * 60 * 1000));
-  const days = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
-
-  if (minutes < 1) return 'just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  if (days < 30) return `${days}d ago`;
-  return `${Math.floor(days / 30)}mo ago`;
+  return formatCreationTime(timestamp, now);
 }
 
 /**
- * Format remaining TTL for ephemeral tasks (e.g. '48h left')
+ * Backward compatibility alias (now returns target date representation)
  */
 export function formatRemainingTtl(anchor: Anchor, now: number = Date.now()): string | undefined {
-  if (anchor.durability !== 'ephemeral') return undefined;
-  const ttlMs = (anchor.decay.graveyardDays || 2) * 24 * 60 * 60 * 1000;
-  const elapsedMs = Math.max(0, now - anchor.createdAt);
-  const remainingMs = Math.max(0, ttlMs - elapsedMs);
-  const remainingHours = Math.ceil(remainingMs / (60 * 60 * 1000));
-  return `${remainingHours}h left`;
+  return formatTargetDate(anchor, now);
 }
 
 /**
- * Format origin workspace in concise English
+ * Format origin project or workspace
  */
-export function formatOrigin(cwd: string): string {
-  if (!cwd) return 'global';
-  return path.basename(cwd) || 'global';
+export function formatOrigin(anchor: Anchor | string): string {
+  if (typeof anchor === 'object') {
+    if (anchor.project && anchor.project !== 'global') {
+      return anchor.project;
+    }
+    if (!anchor.cwd) return 'global';
+    return path.basename(anchor.cwd) || 'global';
+  }
+  if (!anchor) return 'global';
+  return path.basename(anchor) || 'global';
 }
 
 /**
- * Update the footer status bar indicator
- * Clean, focused: `⌖ 1`
- * Completely hidden when 0 anchors exist.
+ * Update footer status bar capsule: `⌖ 1`
  */
 export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore): void {
   if (!ctx.hasUI || !ctx.ui) return;
@@ -88,7 +164,7 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
 }
 
 /**
- * Clean, columnar-aligned checklist with daily habit support
+ * Clean, columnar-aligned checklist with Target Date and Creation Time columns
  */
 export async function openAnchorDashboard(
   ctx: ExtensionContext,
@@ -109,29 +185,22 @@ export async function openAnchorDashboard(
     const a = list[i];
     const idNum = a.id.replace(/^anc-/, '');
     const num = idNum.padStart(2, '0');
-    const origin = formatOrigin(a.cwd);
-    const relTime = formatRelativeTime(a.createdAt);
-    const ttl = formatRemainingTtl(a);
-
-    let cadence = '';
-    if (a.recurrence === 'daily') {
-      cadence = 'daily';
-    } else if (ttl) {
-      cadence = ttl;
-    }
+    const origin = formatOrigin(a);
+    const target = formatTargetDate(a);
+    const created = formatCreationTime(a.createdAt);
 
     const titleWithFiles = (a.files && a.files.length > 0)
       ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
       : a.title;
 
-    // Clean tabular column alignment
+    // Clean tabular column alignment: ID, Title, Project, Target, Created
     const colNum = `${num}  `;
     const colTitle = padToWidth(titleWithFiles, 28);
     const colOrigin = padToWidth(origin, 10);
-    const colCadence = padToWidth(cadence, 12);
-    const colTime = relTime;
+    const colTarget = padToWidth(target, 12);
+    const colCreated = created;
 
-    const label = `${colNum}${colTitle}  ${colOrigin}  ${colCadence}  ${colTime}`.trimEnd();
+    const label = `${colNum}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
 
     optionMap.set(label, a);
     displayOptions.push(label);

@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 
 /**
- * Anchor CLI - Minimalist task pin for AI coding workflows
- * Production-ready executable with clean tabular columnar alignment
+ * Anchor CLI - Minimalist task protocol for AI coding workflows
+ * Production-ready executable with dual-timeline (Target Date + Creation Time)
  */
 
 import {
   AnchorStore,
   formatOrigin,
-  formatRelativeTime,
-  formatRemainingTtl,
+  formatTargetDate,
+  formatCreationTime,
   padToWidth
 } from '../dist/index.js';
 
@@ -29,16 +29,9 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
   active.forEach((a) => {
     const idNum = a.id.replace(/^anc-/, '');
     const num = idNum.padStart(2, '0');
-    const origin = formatOrigin(a.cwd);
-    const relTime = formatRelativeTime(a.createdAt);
-    const ttl = formatRemainingTtl(a);
-
-    let cadence = '';
-    if (a.recurrence === 'daily') {
-      cadence = 'daily';
-    } else if (ttl) {
-      cadence = ttl;
-    }
+    const origin = formatOrigin(a);
+    const target = formatTargetDate(a);
+    const created = formatCreationTime(a.createdAt);
 
     const titleWithFiles = (a.files && a.files.length > 0)
       ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
@@ -47,10 +40,10 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
     const colNum = `  ${num}  `;
     const colTitle = padToWidth(titleWithFiles, 28);
     const colOrigin = padToWidth(origin, 10);
-    const colCadence = padToWidth(cadence, 12);
-    const colTime = relTime;
+    const colTarget = padToWidth(target, 12);
+    const colCreated = created;
 
-    console.log(`${colNum}${colTitle}  ${colOrigin}  ${colCadence}  ${colTime}`);
+    console.log(`${colNum}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`);
   });
   console.log('\n  Use `anchor done <id>` to complete.\n');
   process.exit(0);
@@ -109,7 +102,5 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
 // 5. Pin new task: `anchor <task description>`
 const title = args.join(' ').trim();
 const anc = store.create({ title, cwd: process.cwd() });
-const expireBadge = anc.recurrence === 'daily'
-  ? ' · daily'
-  : (anc.durability === 'ephemeral' ? ' · 48h left' : '');
-console.log(`⌖ Pinned #${anc.id}: "${anc.title}"${expireBadge}`);
+const targetBadge = anc.targetDate ? ` · ${formatTargetDate(anc)}` : '';
+console.log(`⌖ Pinned #${anc.id}: "${anc.title}" [${anc.project}]${targetBadge}`);

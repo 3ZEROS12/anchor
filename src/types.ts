@@ -49,6 +49,8 @@ export interface Anchor {
   lastTouchedAt: number;
   /** Associated file paths or globs, e.g. ['src/auth/*.ts'] */
   files: string[];
+  /** Expected completion date in format 'YYYY-MM-DD' (e.g. '2026-09-24') */
+  targetDate?: string;
   /** Optional shell command for automated physical verification (e.g. 'npm test') */
   verifyCommand?: string;
   /** Topic or domain tags, e.g. ['auth', 'security'] */
