@@ -35,6 +35,7 @@ __export(index_exports, {
   DURABLE_DECAY_POLICY: () => DURABLE_DECAY_POLICY,
   EPHEMERAL_DECAY_POLICY: () => EPHEMERAL_DECAY_POLICY,
   SessionTouchObserver: () => SessionTouchObserver,
+  atomicRenameWithRetry: () => atomicRenameWithRetry,
   classifyAnchor: () => classifyAnchor,
   detectDurability: () => detectDurability,
   detectRecurrence: () => detectRecurrence,
@@ -326,6 +327,31 @@ function getDefaultStorageDir() {
   }
   return primaryDir;
 }
+function sleepSync(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+  }
+}
+function atomicRenameWithRetry(tempPath, targetPath, maxAttempts = 5) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      import_node_fs.default.renameSync(tempPath, targetPath);
+      return;
+    } catch (err) {
+      const code = err?.code;
+      if ((code === "EBUSY" || code === "EPERM" || code === "EACCES") && attempt < maxAttempts) {
+        const delay = Math.floor(attempt * 15 + Math.random() * 10);
+        sleepSync(delay);
+        continue;
+      }
+      try {
+        if (import_node_fs.default.existsSync(tempPath)) import_node_fs.default.unlinkSync(tempPath);
+      } catch {
+      }
+      throw err;
+    }
+  }
+}
 var AnchorStore = class {
   storageDir;
   statePath;
@@ -362,8 +388,22 @@ var AnchorStore = class {
         lastSweepAt: Date.now()
       };
     }
+    let raw = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        raw = import_node_fs.default.readFileSync(this.statePath, "utf-8");
+        break;
+      } catch (err) {
+        if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 3) {
+          sleepSync(15);
+          continue;
+        }
+      }
+    }
+    if (raw === null) {
+      return { version: 1, anchors: [], lastSweepAt: Date.now() };
+    }
     try {
-      const raw = import_node_fs.default.readFileSync(this.statePath, "utf-8");
       const data = JSON.parse(raw);
       if (!Array.isArray(data.anchors)) {
         throw new Error("Invalid state: anchors must be array");
@@ -383,13 +423,13 @@ var AnchorStore = class {
     }
   }
   /**
-   * Atomically save store state via temp file + atomic rename
+   * Atomically save store state via temp file + atomic rename with Windows NTFS spin-retry
    */
   saveState(state) {
     this.ensureDirs();
     const tempPath = import_node_path2.default.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}`);
     import_node_fs.default.writeFileSync(tempPath, JSON.stringify(state, null, 2), "utf-8");
-    import_node_fs.default.renameSync(tempPath, this.statePath);
+    atomicRenameWithRetry(tempPath, this.statePath);
   }
   generateId(existingAnchors) {
     const numbers = existingAnchors.map((a) => {
@@ -923,27 +963,48 @@ async function openAnchorDashboard(ctx, store) {
 }
 
 // src/observer.ts
+var MUTATION_TOOLS = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
 var SessionTouchObserver = class {
   touchedFiles = /* @__PURE__ */ new Set();
+  modifiedFiles = /* @__PURE__ */ new Set();
+  inspectedFiles = /* @__PURE__ */ new Set();
   committed = false;
   commitMessages = [];
+  clear() {
+    this.touchedFiles.clear();
+    this.modifiedFiles.clear();
+    this.inspectedFiles.clear();
+    this.committed = false;
+    this.commitMessages = [];
+  }
   /**
-   * Observe and record a tool call invocation
+   * Observe and record a tool call invocation, separating inspection from mutation
    */
   recordToolCall(toolName, input) {
     if (!input || typeof input !== "object") return;
+    const lowerTool = (toolName || "").toLowerCase();
+    const isMutation = MUTATION_TOOLS.has(lowerTool);
+    const paths = [];
     const pathField = input.path || input.filePath || input.file;
     if (typeof pathField === "string") {
-      this.touchedFiles.add(normalizePath(pathField));
+      paths.push(normalizePath(pathField));
     }
     if (Array.isArray(input.paths)) {
       for (const p of input.paths) {
         if (typeof p === "string") {
-          this.touchedFiles.add(normalizePath(p));
+          paths.push(normalizePath(p));
         }
       }
     }
-    if (toolName === "bash" || toolName === "powershell") {
+    for (const p of paths) {
+      this.touchedFiles.add(p);
+      if (isMutation) {
+        this.modifiedFiles.add(p);
+      } else {
+        this.inspectedFiles.add(p);
+      }
+    }
+    if (lowerTool === "bash" || lowerTool === "powershell") {
       const cmd = String(input.command || "");
       if (cmd.includes("git commit")) {
         this.committed = true;
@@ -957,10 +1018,22 @@ var SessionTouchObserver = class {
   /**
    * Add a file path manually (e.g. from git status diff)
    */
-  addTouchedFile(filePath) {
+  addTouchedFile(filePath, isModified = true) {
     if (filePath) {
-      this.touchedFiles.add(normalizePath(filePath));
+      const norm = normalizePath(filePath);
+      this.touchedFiles.add(norm);
+      if (isModified) {
+        this.modifiedFiles.add(norm);
+      } else {
+        this.inspectedFiles.add(norm);
+      }
     }
+  }
+  getModifiedFiles() {
+    return Array.from(this.modifiedFiles);
+  }
+  getInspectedFiles() {
+    return Array.from(this.inspectedFiles);
   }
   getTouchedFiles() {
     return Array.from(this.touchedFiles);
@@ -1001,11 +1074,6 @@ var SessionTouchObserver = class {
       }
     }
     return { matched: false };
-  }
-  clear() {
-    this.touchedFiles.clear();
-    this.committed = false;
-    this.commitMessages = [];
   }
 };
 
@@ -1069,6 +1137,7 @@ var renderActiveAnchorsContext = renderColdStartAnchorsContext;
   DURABLE_DECAY_POLICY,
   EPHEMERAL_DECAY_POLICY,
   SessionTouchObserver,
+  atomicRenameWithRetry,
   classifyAnchor,
   detectDurability,
   detectRecurrence,

@@ -111,6 +111,10 @@ declare function getTodayDateString(timestamp?: number): string;
  * 3. Legacy Pi harness fallback: ~/.pi/agent/anchors/ (migrates automatically if present)
  */
 declare function getDefaultStorageDir(): string;
+/**
+ * Windows-tolerant atomic rename with exponential spin-retry to combat NTFS EBUSY/EPERM file locks
+ */
+declare function atomicRenameWithRetry(tempPath: string, targetPath: string, maxAttempts?: number): void;
 declare class AnchorStore {
     readonly storageDir: string;
     readonly statePath: string;
@@ -123,7 +127,7 @@ declare class AnchorStore {
      */
     loadState(): AnchorStoreState;
     /**
-     * Atomically save store state via temp file + atomic rename
+     * Atomically save store state via temp file + atomic rename with Windows NTFS spin-retry
      */
     saveState(state: AnchorStoreState): void;
     private generateId;
@@ -322,16 +326,21 @@ declare function openAnchorDashboard(ctx: ExtensionContext, store: AnchorStore):
 
 declare class SessionTouchObserver {
     private touchedFiles;
+    private modifiedFiles;
+    private inspectedFiles;
     private committed;
     private commitMessages;
+    clear(): void;
     /**
-     * Observe and record a tool call invocation
+     * Observe and record a tool call invocation, separating inspection from mutation
      */
     recordToolCall(toolName: string, input: Record<string, unknown>): void;
     /**
      * Add a file path manually (e.g. from git status diff)
      */
-    addTouchedFile(filePath: string): void;
+    addTouchedFile(filePath: string, isModified?: boolean): void;
+    getModifiedFiles(): string[];
+    getInspectedFiles(): string[];
     getTouchedFiles(): string[];
     hasCommitted(): boolean;
     getCommitMessages(): string[];
@@ -342,7 +351,6 @@ declare class SessionTouchObserver {
         matched: boolean;
         message?: string;
     };
-    clear(): void;
 }
 
 /**
@@ -354,4 +362,4 @@ declare function renderColdStartAnchorsContext(store: AnchorStore, cwdOrNow?: st
 /** Legacy alias for backwards compatibility */
 declare const renderActiveAnchorsContext: typeof renderColdStartAnchorsContext;
 
-export { type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, sweepStore, updateAnchorStatusBar, updateStartupBanner };
+export { type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, sweepStore, updateAnchorStatusBar, updateStartupBanner };

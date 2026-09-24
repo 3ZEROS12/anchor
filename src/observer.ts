@@ -1,34 +1,56 @@
 import { normalizePath } from './matcher.ts';
 import type { Anchor } from './types.ts';
 
+const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
+
 export class SessionTouchObserver {
   private touchedFiles: Set<string> = new Set();
+  private modifiedFiles: Set<string> = new Set();
+  private inspectedFiles: Set<string> = new Set();
   private committed: boolean = false;
   private commitMessages: string[] = [];
 
+  public clear(): void {
+    this.touchedFiles.clear();
+    this.modifiedFiles.clear();
+    this.inspectedFiles.clear();
+    this.committed = false;
+    this.commitMessages = [];
+  }
+
   /**
-   * Observe and record a tool call invocation
+   * Observe and record a tool call invocation, separating inspection from mutation
    */
   public recordToolCall(toolName: string, input: Record<string, unknown>): void {
     if (!input || typeof input !== 'object') return;
+    const lowerTool = (toolName || '').toLowerCase();
+    const isMutation = MUTATION_TOOLS.has(lowerTool);
 
-    // File inspection or editing tools (read, write, edit, replace, etc.)
+    const paths: string[] = [];
     const pathField = (input as any).path || (input as any).filePath || (input as any).file;
     if (typeof pathField === 'string') {
-      this.touchedFiles.add(normalizePath(pathField));
+      paths.push(normalizePath(pathField));
     }
 
-    // Multiple paths in single call
     if (Array.isArray((input as any).paths)) {
       for (const p of (input as any).paths) {
         if (typeof p === 'string') {
-          this.touchedFiles.add(normalizePath(p));
+          paths.push(normalizePath(p));
         }
       }
     }
 
+    for (const p of paths) {
+      this.touchedFiles.add(p);
+      if (isMutation) {
+        this.modifiedFiles.add(p);
+      } else {
+        this.inspectedFiles.add(p);
+      }
+    }
+
     // Shell executions that might involve git commits
-    if (toolName === 'bash' || toolName === 'powershell') {
+    if (lowerTool === 'bash' || lowerTool === 'powershell') {
       const cmd = String((input as any).command || '');
       if (cmd.includes('git commit')) {
         this.committed = true;
@@ -43,10 +65,24 @@ export class SessionTouchObserver {
   /**
    * Add a file path manually (e.g. from git status diff)
    */
-  public addTouchedFile(filePath: string): void {
+  public addTouchedFile(filePath: string, isModified = true): void {
     if (filePath) {
-      this.touchedFiles.add(normalizePath(filePath));
+      const norm = normalizePath(filePath);
+      this.touchedFiles.add(norm);
+      if (isModified) {
+        this.modifiedFiles.add(norm);
+      } else {
+        this.inspectedFiles.add(norm);
+      }
     }
+  }
+
+  public getModifiedFiles(): string[] {
+    return Array.from(this.modifiedFiles);
+  }
+
+  public getInspectedFiles(): string[] {
+    return Array.from(this.inspectedFiles);
   }
 
   public getTouchedFiles(): string[] {
@@ -101,11 +137,5 @@ export class SessionTouchObserver {
     }
 
     return { matched: false };
-  }
-
-  public clear(): void {
-    this.touchedFiles.clear();
-    this.committed = false;
-    this.commitMessages = [];
   }
 }

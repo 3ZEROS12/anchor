@@ -20,7 +20,7 @@
   </a>
   <img src="https://img.shields.io/badge/Node-v20+-22c55e.svg" alt="Node v20+">
   <img src="https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg" alt="TypeScript Strict">
-  <img src="https://img.shields.io/badge/Tests-18%20通过-22c55e.svg" alt="Tests: 18 Passed">
+  <img src="https://img.shields.io/badge/Tests-20%20通过-22c55e.svg" alt="Tests: 18 Passed">
   <img src="https://img.shields.io/badge/启动耗时-%3C%2090ms-success.svg" alt="启动耗时: < 90ms">
   <img src="https://img.shields.io/badge/存储-零仓库污染-success.svg" alt="零仓库污染">
   <img src="https://img.shields.io/badge/开源协议-MIT-f97316.svg" alt="License: MIT">

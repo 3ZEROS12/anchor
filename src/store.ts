@@ -160,6 +160,37 @@ export function getDefaultStorageDir(): string {
   return primaryDir;
 }
 
+/**
+ * Synchronous sleep for spin-retry delay
+ */
+function sleepSync(ms: number): void {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {}
+}
+
+/**
+ * Windows-tolerant atomic rename with exponential spin-retry to combat NTFS EBUSY/EPERM file locks
+ */
+export function atomicRenameWithRetry(tempPath: string, targetPath: string, maxAttempts = 5): void {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      fs.renameSync(tempPath, targetPath);
+      return;
+    } catch (err: any) {
+      const code = err?.code;
+      if ((code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') && attempt < maxAttempts) {
+        const delay = Math.floor(attempt * 15 + Math.random() * 10);
+        sleepSync(delay);
+        continue;
+      }
+      try {
+        if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+      } catch {}
+      throw err;
+    }
+  }
+}
+
 export class AnchorStore {
   public readonly storageDir: string;
   public readonly statePath: string;
@@ -199,8 +230,24 @@ export class AnchorStore {
       };
     }
 
+    let raw: string | null = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        raw = fs.readFileSync(this.statePath, 'utf-8');
+        break;
+      } catch (err: any) {
+        if ((err?.code === 'EBUSY' || err?.code === 'EPERM') && attempt < 3) {
+          sleepSync(15);
+          continue;
+        }
+      }
+    }
+
+    if (raw === null) {
+      return { version: 1, anchors: [], lastSweepAt: Date.now() };
+    }
+
     try {
-      const raw = fs.readFileSync(this.statePath, 'utf-8');
       const data = JSON.parse(raw);
       if (!Array.isArray(data.anchors)) {
         throw new Error('Invalid state: anchors must be array');
@@ -220,13 +267,13 @@ export class AnchorStore {
   }
 
   /**
-   * Atomically save store state via temp file + atomic rename
+   * Atomically save store state via temp file + atomic rename with Windows NTFS spin-retry
    */
   public saveState(state: AnchorStoreState): void {
     this.ensureDirs();
     const tempPath = path.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}`);
     fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8');
-    fs.renameSync(tempPath, this.statePath);
+    atomicRenameWithRetry(tempPath, this.statePath);
   }
 
   private generateId(existingAnchors: Anchor[]): string {

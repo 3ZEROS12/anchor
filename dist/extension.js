@@ -10,11 +10,12 @@ import {
   sweepStore,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-4K3MZSXW.js";
+} from "./chunk-4KCI6C5H.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
 import { execSync } from "child_process";
+var MUTATION_TOOLS = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
 function extension_default(pi) {
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
@@ -57,10 +58,13 @@ ${contextSnippet}`
     const anchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
     const matches = findMatchedAnchors(anchors, [touchedPath]);
     if (matches.length > 0) {
-      for (const m of matches) {
-        store.touch(m.anchor.id);
+      const isMutation = MUTATION_TOOLS.has((event.toolName || "").toLowerCase());
+      if (isMutation) {
+        for (const m of matches) {
+          store.touch(m.anchor.id);
+        }
+        updateAnchorStatusBar(ctx, store);
       }
-      updateAnchorStatusBar(ctx, store);
       const a = matches[0].anchor;
       const alert = `
 
@@ -89,9 +93,9 @@ ${contextSnippet}`
       }
     } catch {
     }
-    const touched = observer.getTouchedFiles();
-    if (touched.length === 0) return;
-    const proposals = generateSettlementProposals(store, touched, ctx.cwd);
+    const modified = observer.getModifiedFiles();
+    if (modified.length === 0) return;
+    const proposals = generateSettlementProposals(store, modified, ctx.cwd);
     if (proposals.length === 0) return;
     for (const prop of proposals) {
       const a = prop.anchor;

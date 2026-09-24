@@ -4,6 +4,7 @@ import {
   DURABLE_DECAY_POLICY,
   EPHEMERAL_DECAY_POLICY,
   SessionTouchObserver,
+  atomicRenameWithRetry,
   classifyAnchor,
   detectDurability,
   detectRecurrence,
@@ -33,13 +34,14 @@ import {
   sweepStore,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-4K3MZSXW.js";
+} from "./chunk-4KCI6C5H.js";
 export {
   AnchorStore,
   DEFAULT_DECAY_POLICY,
   DURABLE_DECAY_POLICY,
   EPHEMERAL_DECAY_POLICY,
   SessionTouchObserver,
+  atomicRenameWithRetry,
   classifyAnchor,
   detectDurability,
   detectRecurrence,

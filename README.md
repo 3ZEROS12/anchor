@@ -20,7 +20,7 @@
   </a>
   <img src="https://img.shields.io/badge/Node-v20+-22c55e.svg" alt="Node v20+">
   <img src="https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg" alt="TypeScript Strict">
-  <img src="https://img.shields.io/badge/Tests-18%20Passed-22c55e.svg" alt="Tests: 18 Passed">
+  <img src="https://img.shields.io/badge/Tests-20%20Passed-22c55e.svg" alt="Tests: 20 Passed">
   <img src="https://img.shields.io/badge/Startup-%3C%2090ms-success.svg" alt="Startup: < 90ms">
   <img src="https://img.shields.io/badge/Storage-Zero%20Repo%20Pollution-success.svg" alt="Zero Repo Pollution">
   <img src="https://img.shields.io/badge/License-MIT-f97316.svg" alt="License: MIT">

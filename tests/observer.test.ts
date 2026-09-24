@@ -48,3 +48,29 @@ test('SessionTouchObserver - matches CJK commit messages with segmentation', () 
   assert.strictEqual(match.matched, true);
   assert.ok(match.message?.includes('鉴权漏洞'));
 });
+
+test('SessionTouchObserver - separates read inspection from edit mutation', () => {
+  const obs = new SessionTouchObserver();
+
+  // Read: inspection only
+  obs.recordToolCall('read', { path: 'src/config.ts' });
+  obs.recordToolCall('grep', { path: 'src/utils.ts' });
+
+  // Edit / write: mutation
+  obs.recordToolCall('edit', { path: 'src/main.ts' });
+  obs.recordToolCall('write', { path: 'src/new.ts' });
+
+  const inspected = obs.getInspectedFiles();
+  const modified = obs.getModifiedFiles();
+
+  assert.strictEqual(inspected.length, 2);
+  assert.ok(inspected.includes('src/config.ts'));
+  assert.ok(inspected.includes('src/utils.ts'));
+
+  assert.strictEqual(modified.length, 2);
+  assert.ok(modified.includes('src/main.ts'));
+  assert.ok(modified.includes('src/new.ts'));
+
+  // Touched files contains all
+  assert.strictEqual(obs.getTouchedFiles().length, 4);
+});

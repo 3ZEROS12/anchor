@@ -9,6 +9,8 @@ import { sweepStore } from './decay.ts';
 import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner } from './tui.ts';
 import { execSync } from 'node:child_process';
 
+const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
+
 export default function (pi: ExtensionAPI) {
   // Global authoritative store in ~/.anchor/ (0 workspace clutter)
   const store = new AnchorStore();
@@ -65,10 +67,16 @@ export default function (pi: ExtensionAPI) {
     const matches = findMatchedAnchors(anchors, [touchedPath]);
 
     if (matches.length > 0) {
-      for (const m of matches) {
-        store.touch(m.anchor.id);
+      const isMutation = MUTATION_TOOLS.has((event.toolName || '').toLowerCase());
+
+      // Only physical mutations (edit, write) refresh decay timer and wake sleeping anchors!
+      // Read-only inspection (read, grep) provides JIT context without fake lifecycle extension.
+      if (isMutation) {
+        for (const m of matches) {
+          store.touch(m.anchor.id);
+        }
+        updateAnchorStatusBar(ctx, store);
       }
-      updateAnchorStatusBar(ctx, store);
 
       const a = matches[0].anchor;
       const alert = `\n\n// ⌖ anchor context: #${a.id} ${a.title} (${a.priority.toUpperCase()})`;
@@ -103,10 +111,10 @@ export default function (pi: ExtensionAPI) {
       }
     } catch {}
 
-    const touched = observer.getTouchedFiles();
-    if (touched.length === 0) return;
+    const modified = observer.getModifiedFiles();
+    if (modified.length === 0) return;
 
-    const proposals = generateSettlementProposals(store, touched, ctx.cwd);
+    const proposals = generateSettlementProposals(store, modified, ctx.cwd);
     if (proposals.length === 0) return;
 
     // Check proposals for automated verification or one-tap settlement

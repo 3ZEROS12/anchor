@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   AnchorStore,
+  atomicRenameWithRetry,
   detectDurability,
   getEphemeralDecayPolicy
 } from '../src/store.ts';
@@ -165,6 +166,24 @@ test('AnchorStore - temporal durability keywords and project detection', () => {
       cwd: 'C:/Users/Jason/Desktop'
     });
     assert.strictEqual(a2.project, 'custom-proj');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('AnchorStore - atomicRenameWithRetry successfully replaces files atomically', () => {
+  const tempDir = createTempDir();
+  try {
+    const src = path.join(tempDir, 'temp.json');
+    const target = path.join(tempDir, 'final.json');
+
+    fs.writeFileSync(src, JSON.stringify({ ok: true }));
+    atomicRenameWithRetry(src, target);
+
+    assert.ok(!fs.existsSync(src));
+    assert.ok(fs.existsSync(target));
+    const content = JSON.parse(fs.readFileSync(target, 'utf-8'));
+    assert.strictEqual(content.ok, true);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
