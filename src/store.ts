@@ -30,6 +30,28 @@ export function detectDurability(title: string): AnchorDurability {
   return 'durable';
 }
 
+/**
+ * Detect recurring patterns, e.g. daily habits
+ */
+export function detectRecurrence(title: string): 'daily' | undefined {
+  const lower = title.toLowerCase();
+  if (lower.includes('每天') || lower.includes('每日') || lower.includes('daily') || lower.includes('every day')) {
+    return 'daily';
+  }
+  return undefined;
+}
+
+/**
+ * Get current date string 'YYYY-MM-DD' in local timezone
+ */
+export function getTodayDateString(timestamp: number = Date.now()): string {
+  const d = new Date(timestamp);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export class AnchorStore {
   public readonly storageDir: string;
   public readonly statePath: string;
@@ -118,6 +140,7 @@ export class AnchorStore {
     description?: string;
     priority?: AnchorPriority;
     durability?: AnchorDurability;
+    recurrence?: 'daily';
     cwd?: string;
     project?: string;
     files?: string[];
@@ -134,7 +157,9 @@ export class AnchorStore {
       ? input.project.trim()
       : (cwd ? path.basename(cwd) : 'global');
 
-    const durability = input.durability || detectDurability(input.title);
+    const recurrence = input.recurrence || detectRecurrence(input.title);
+    // Recurring tasks are always durable
+    const durability = recurrence ? 'durable' : (input.durability || detectDurability(input.title));
     const decayPolicy = durability === 'ephemeral' ? EPHEMERAL_DECAY_POLICY : DURABLE_DECAY_POLICY;
 
     const anchor: Anchor = {
@@ -144,6 +169,7 @@ export class AnchorStore {
       priority: input.priority || 'p1',
       status: 'active',
       durability,
+      recurrence,
       project: projectName,
       cwd,
       createdAt: now,
@@ -187,11 +213,18 @@ export class AnchorStore {
     priority?: AnchorPriority;
     cwd?: string;
     all?: boolean;
+    now?: number;
   }): Anchor[] {
     const state = this.loadState();
     const targetCwd = filter?.cwd ? normalizePath(filter.cwd) : null;
+    const today = getTodayDateString(filter?.now);
 
     return state.anchors.filter(a => {
+      // Recurring task completed today is hidden from active list
+      if (!filter?.all && filter?.status === 'active' && a.recurrence === 'daily' && a.lastCompletedDate === today) {
+        return false;
+      }
+
       if (filter?.status && a.status !== filter.status) return false;
       if (filter?.priority && a.priority !== filter.priority) return false;
 
@@ -257,28 +290,49 @@ export class AnchorStore {
   }
 
   /**
-   * Settle and archive an anchor
+   * Settle an anchor (recurring daily habits complete for today and wake up tomorrow)
    */
-  public settle(id: string, evidence: AnchorEvidence = {}): Anchor {
+  public settle(id: string, evidence: AnchorEvidence = {}, now: number = Date.now()): Anchor {
     const state = this.loadState();
     const idx = this.findAnchorIndex(state.anchors, id);
     if (idx === -1) {
       throw new Error(`Anchor not found: ${id}`);
     }
 
-    const [anchor] = state.anchors.splice(idx, 1);
-    anchor.status = 'settled';
-    anchor.updatedAt = Date.now();
-    anchor.evidence = {
+    const anchor = state.anchors[idx];
+    const today = getTodayDateString(now);
+
+    // If it's a recurring daily habit:
+    if (anchor.recurrence === 'daily') {
+      anchor.lastCompletedDate = today;
+      anchor.lastTouchedAt = now;
+      anchor.updatedAt = now;
+      anchor.evidence = {
+        ...evidence,
+        settledAt: now,
+        settledBy: evidence.settledBy || 'manual-command'
+      };
+
+      this.ensureDirs();
+      fs.appendFileSync(this.archivePath, JSON.stringify({ ...anchor, settledForDate: today }) + '\n', 'utf-8');
+      this.saveState(state);
+      return anchor;
+    }
+
+    // Normal one-off task: remove from state and archive
+    const [settled] = state.anchors.splice(idx, 1);
+    settled.status = 'settled';
+    settled.updatedAt = now;
+    settled.evidence = {
       ...evidence,
-      settledAt: Date.now(),
+      settledAt: now,
       settledBy: evidence.settledBy || 'manual-command'
     };
 
     this.ensureDirs();
-    fs.appendFileSync(this.archivePath, JSON.stringify(anchor) + '\n', 'utf-8');
+    fs.appendFileSync(this.archivePath, JSON.stringify(settled) + '\n', 'utf-8');
     this.saveState(state);
-    return anchor;
+    return settled;
   }
 
   /**

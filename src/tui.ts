@@ -4,6 +4,37 @@ import type { Anchor } from './types.ts';
 import path from 'node:path';
 
 /**
+ * Calculate display width in terminal columns, accounting for CJK full-width characters (width 2)
+ */
+export function getDisplayWidth(str: string): number {
+  let width = 0;
+  for (const char of str) {
+    const code = char.codePointAt(0) || 0;
+    if (
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x20000 && code <= 0x2a6df) ||
+      (code >= 0xff01 && code <= 0xff60) ||
+      (code >= 0x3000 && code <= 0x303f)
+    ) {
+      width += 2;
+    } else {
+      width += 1;
+    }
+  }
+  return width;
+}
+
+/**
+ * Pad string to target visual column width using spaces for clean vertical alignment
+ */
+export function padToWidth(str: string, targetWidth: number): string {
+  const current = getDisplayWidth(str);
+  if (current >= targetWidth) return str;
+  return str + ' '.repeat(targetWidth - current);
+}
+
+/**
  * Format relative past time in concise English (e.g. 'just now', '23m ago', '2h ago', '3d ago')
  */
 export function formatRelativeTime(timestamp: number, now: number = Date.now()): string {
@@ -57,7 +88,7 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
 }
 
 /**
- * Clean, minimalist checklist with explicit `left` vs `ago` time distinction
+ * Clean, columnar-aligned checklist with daily habit support
  */
 export async function openAnchorDashboard(
   ctx: ExtensionContext,
@@ -76,21 +107,31 @@ export async function openAnchorDashboard(
 
   for (let i = 0; i < list.length; i++) {
     const a = list[i];
-    const num = (i + 1).toString().padStart(2, '0');
+    const idNum = a.id.replace(/^anc-/, '');
+    const num = idNum.padStart(2, '0');
     const origin = formatOrigin(a.cwd);
     const relTime = formatRelativeTime(a.createdAt);
     const ttl = formatRemainingTtl(a);
 
-    const metaParts: string[] = [origin];
-    if (a.files && a.files.length > 0) {
-      metaParts.push(a.files.slice(0, 1).join(', '));
+    let cadence = '';
+    if (a.recurrence === 'daily') {
+      cadence = 'daily';
+    } else if (ttl) {
+      cadence = ttl;
     }
-    if (ttl) {
-      metaParts.push(ttl);
-    }
-    metaParts.push(relTime);
 
-    const label = `${num}  ${a.title}  · ${metaParts.join(' · ')}`;
+    const titleWithFiles = (a.files && a.files.length > 0)
+      ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
+      : a.title;
+
+    // Clean tabular column alignment
+    const colNum = `${num}  `;
+    const colTitle = padToWidth(titleWithFiles, 28);
+    const colOrigin = padToWidth(origin, 10);
+    const colCadence = padToWidth(cadence, 12);
+    const colTime = relTime;
+
+    const label = `${colNum}${colTitle}  ${colOrigin}  ${colCadence}  ${colTime}`.trimEnd();
 
     optionMap.set(label, a);
     displayOptions.push(label);
@@ -103,6 +144,9 @@ export async function openAnchorDashboard(
   if (!anchor) return;
 
   store.settle(anchor.id, { settledBy: 'manual-command' });
-  ctx.ui.notify(`⌖ Settled: "${anchor.title}"`, 'info');
+  const successMsg = anchor.recurrence === 'daily'
+    ? `⌖ Completed for today: "${anchor.title}" (resets tomorrow)`
+    : `⌖ Settled: "${anchor.title}"`;
+  ctx.ui.notify(successMsg, 'info');
   updateAnchorStatusBar(ctx, store);
 }

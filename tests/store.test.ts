@@ -94,3 +94,37 @@ test('AnchorStore - corrupt state recovery', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('AnchorStore - daily recurring task completes for today and wakes tomorrow', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const day1 = 100_000_000_000;
+    const day2 = day1 + 24 * 3600 * 1000;
+
+    // 1. Create recurring daily task
+    const task = store.create({ title: '每天吃一个苹果' });
+    assert.strictEqual(task.recurrence, 'daily');
+    assert.strictEqual(task.durability, 'durable');
+
+    // Day 1: Active before completion
+    const list1 = store.list({ status: 'active', now: day1 });
+    assert.strictEqual(list1.length, 1);
+
+    // Day 1: Settle for today
+    const settled = store.settle(task.id, { settledBy: 'manual-command' }, day1);
+    assert.strictEqual(settled.recurrence, 'daily');
+    assert.ok(settled.lastCompletedDate);
+
+    // Day 1: Disappears from active list for today!
+    const listToday = store.list({ status: 'active', now: day1 });
+    assert.strictEqual(listToday.length, 0);
+
+    // Day 2 (Tomorrow): Naturally reappears in active list!
+    const listTomorrow = store.list({ status: 'active', now: day2 });
+    assert.strictEqual(listTomorrow.length, 1);
+    assert.strictEqual(listTomorrow[0].title, '每天吃一个苹果');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

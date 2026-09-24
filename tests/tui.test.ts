@@ -4,7 +4,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { AnchorStore } from '../src/store.ts';
-import { updateAnchorStatusBar, openAnchorDashboard, formatRemainingTtl, formatRelativeTime } from '../src/tui.ts';
+import {
+  updateAnchorStatusBar,
+  openAnchorDashboard,
+  formatRemainingTtl,
+  formatRelativeTime,
+  getDisplayWidth,
+  padToWidth
+} from '../src/tui.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 function createTempDir(): string {
@@ -111,4 +118,16 @@ test('AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with fol
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
+});
+
+test('AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width columns', () => {
+  const cjk = '每天吃苹果';
+  assert.strictEqual(getDisplayWidth(cjk), 10);
+  assert.strictEqual(getDisplayWidth('hello'), 5);
+
+  const paddedCjk = padToWidth(cjk, 16);
+  assert.strictEqual(getDisplayWidth(paddedCjk), 16);
+
+  const paddedAscii = padToWidth('hello', 16);
+  assert.strictEqual(getDisplayWidth(paddedAscii), 16);
 });

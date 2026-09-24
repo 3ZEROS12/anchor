@@ -53,6 +53,10 @@ export interface Anchor {
   verifyCommand?: string;
   /** Topic or domain tags, e.g. ['auth', 'security'] */
   tags: string[];
+  /** Optional recurrence pattern: 'daily' for recurring daily habits */
+  recurrence?: 'daily';
+  /** Last completed date string 'YYYY-MM-DD' for recurring tasks */
+  lastCompletedDate?: string;
   /** Decay policy overrides */
   decay: AnchorDecayPolicy;
   /** Settlement evidence metadata upon closure */

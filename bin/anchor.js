@@ -2,10 +2,16 @@
 
 /**
  * Anchor CLI - Minimalist task pin for AI coding workflows
- * Production-ready executable importing from prebuilt dist/
+ * Production-ready executable with clean tabular columnar alignment
  */
 
-import { AnchorStore, formatOrigin, formatRelativeTime, formatRemainingTtl } from '../dist/index.js';
+import {
+  AnchorStore,
+  formatOrigin,
+  formatRelativeTime,
+  formatRemainingTtl,
+  padToWidth
+} from '../dist/index.js';
 
 const store = new AnchorStore();
 const args = process.argv.slice(2);
@@ -20,22 +26,31 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
   }
 
   console.log('\n⌖ Anchors:');
-  active.forEach((a, i) => {
-    const num = (i + 1).toString().padStart(2, '0');
+  active.forEach((a) => {
+    const idNum = a.id.replace(/^anc-/, '');
+    const num = idNum.padStart(2, '0');
     const origin = formatOrigin(a.cwd);
     const relTime = formatRelativeTime(a.createdAt);
     const ttl = formatRemainingTtl(a);
 
-    const metaParts = [origin];
-    if (a.files && a.files.length > 0) {
-      metaParts.push(a.files.slice(0, 1).join(', '));
+    let cadence = '';
+    if (a.recurrence === 'daily') {
+      cadence = 'daily';
+    } else if (ttl) {
+      cadence = ttl;
     }
-    if (ttl) {
-      metaParts.push(ttl);
-    }
-    metaParts.push(relTime);
 
-    console.log(`  ${num}  ${a.title.padEnd(28, ' ')} · ${metaParts.join(' · ')}`);
+    const titleWithFiles = (a.files && a.files.length > 0)
+      ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
+      : a.title;
+
+    const colNum = `  ${num}  `;
+    const colTitle = padToWidth(titleWithFiles, 28);
+    const colOrigin = padToWidth(origin, 10);
+    const colCadence = padToWidth(cadence, 12);
+    const colTime = relTime;
+
+    console.log(`${colNum}${colTitle}  ${colOrigin}  ${colCadence}  ${colTime}`);
   });
   console.log('\n  Use `anchor done <id>` to complete.\n');
   process.exit(0);
@@ -80,7 +95,10 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
   }
   try {
     const settled = store.settle(id, { settledBy: 'manual-command' });
-    console.log(`⌖ Settled: "${settled.title}"`);
+    const successMsg = settled.recurrence === 'daily'
+      ? `⌖ Completed for today: "${settled.title}" (resets tomorrow)`
+      : `⌖ Settled: "${settled.title}"`;
+    console.log(successMsg);
   } catch (err) {
     console.error(`Error: ${err.message}`);
     process.exit(1);
@@ -88,8 +106,10 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
   process.exit(0);
 }
 
-// 3. Pin new task: `anchor <task description>`
+// 5. Pin new task: `anchor <task description>`
 const title = args.join(' ').trim();
 const anc = store.create({ title, cwd: process.cwd() });
-const expireBadge = anc.durability === 'ephemeral' ? ' · 48h left' : '';
+const expireBadge = anc.recurrence === 'daily'
+  ? ' · daily'
+  : (anc.durability === 'ephemeral' ? ' · 48h left' : '');
 console.log(`⌖ Pinned #${anc.id}: "${anc.title}"${expireBadge}`);
