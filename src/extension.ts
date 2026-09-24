@@ -24,34 +24,24 @@ import { pathToFileURL } from 'node:url';
 
 let isStartupHooked = false;
 
-/**
- * Dynamically hook Pi's InteractiveMode.prototype.showLoadedResources
- * to display [Anchors] with the exact same first-class status, styling,
- * expandable toggling (Ctrl+O), and quietStartup hiding behavior as [Skills].
- */
-function installStartupAnchorSection(store: AnchorStore) {
-  if (isStartupHooked) return;
-  isStartupHooked = true;
-
-  try {
-    const candidates = [
-      path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'modes', 'interactive', 'interactive-mode.js'),
-      path.join(process.execPath, '..', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'modes', 'interactive', 'interactive-mode.js')
-    ];
-    let filePath: string | null = null;
-    for (const c of candidates) {
-      if (fs.existsSync(c)) {
-        filePath = c;
-        break;
-      }
+// 0. Top-level sync hook installation before Pi ever calls showLoadedResources
+try {
+  const candidates = [
+    path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'modes', 'interactive', 'interactive-mode.js'),
+    path.join(process.execPath, '..', 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'modes', 'interactive', 'interactive-mode.js')
+  ];
+  let filePath: string | null = null;
+  for (const c of candidates) {
+    if (fs.existsSync(c)) {
+      filePath = c;
+      break;
     }
-    if (!filePath) return;
-
+  }
+  if (filePath && !isStartupHooked) {
     const modUrl = pathToFileURL(filePath).href;
-    import(modUrl).then((mod) => {
-      const InteractiveMode = mod.InteractiveMode;
-      if (!InteractiveMode?.prototype?.showLoadedResources) return;
-
+    const mod = await import(modUrl);
+    const InteractiveMode = mod.InteractiveMode;
+    if (InteractiveMode?.prototype?.showLoadedResources) {
       const origShow = InteractiveMode.prototype.showLoadedResources;
       InteractiveMode.prototype.showLoadedResources = function (options: any) {
         // 1. Call original Pi method first
@@ -62,13 +52,23 @@ function installStartupAnchorSection(store: AnchorStore) {
         if (!showListing) return;
 
         // 3. Fetch active anchors for current workspace
+        const store = new AnchorStore();
         const active = store.list({ status: 'active', cwd: this.session?.cwd || process.cwd() });
         if (active.length === 0) return;
 
         // 4. Extract existing ExpandableText and Spacer classes from Pi's container
-        if (!this.loadedResourcesContainer?.children || this.loadedResourcesContainer.children.length < 2) return;
-        const ExpandableTextClass = this.loadedResourcesContainer.children[0].constructor;
-        const SpacerClass = this.loadedResourcesContainer.children[1].constructor;
+        if (!this.loadedResourcesContainer?.children || this.loadedResourcesContainer.children.length === 0) return;
+        let ExpandableTextClass: any = null;
+        let SpacerClass: any = null;
+        for (const child of this.loadedResourcesContainer.children) {
+          if (child && typeof child.setExpanded === 'function' && !ExpandableTextClass) {
+            ExpandableTextClass = child.constructor;
+          }
+          if (child && child.constructor && child.constructor.name === 'Spacer' && !SpacerClass) {
+            SpacerClass = child.constructor;
+          }
+        }
+        if (!ExpandableTextClass) return;
 
         // 5. Build Collapsed & Expanded representations
         const groups = groupAnchorsByQuadrant(active);
@@ -118,21 +118,21 @@ function installStartupAnchorSection(store: AnchorStore) {
         );
 
         this.loadedResourcesContainer.addChild(section);
-        this.loadedResourcesContainer.addChild(new SpacerClass(1));
+        if (SpacerClass) {
+          this.loadedResourcesContainer.addChild(new SpacerClass(1));
+        }
       };
-    }).catch(() => {});
-  } catch (_e) {
-    // Graceful fallback
+      isStartupHooked = true;
+    }
   }
+} catch (_e) {
+  // Graceful fallback
 }
 
 export default function (pi: ExtensionAPI) {
   // Global authoritative store in ~/.pi/agent/anchors/ (0 workspace clutter)
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
-
-  // Install startup hook to display [Anchors] with identical status to [Skills]
-  installStartupAnchorSection(store);
 
   // 1. Session start: sweep stale tasks and update TUI status bar for current workspace
   pi.on('session_start', async (_event: any, ctx: ExtensionContext) => {
