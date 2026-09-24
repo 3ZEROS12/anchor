@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 430" width="840" height="430">
+  <defs>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="115%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.45" />
+    </filter>
+    <linearGradient id="headerGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#2b3339" />
+      <stop offset="100%" stop-color="#232a2e" />
+    </linearGradient>
+  </defs>
+
+  <!-- Window Container with Shadow -->
+  <g filter="url(#shadow)">
+    <rect x="20" y="15" width="800" height="390" rx="12" fill="#1e2326" stroke="#343f44" stroke-width="1.2" />
+    
+    <!-- Titlebar -->
+    <path d="M 20,27 A 12,12 0 0,1 32,15 L 808,15 A 12,12 0 0,1 820,27 L 820,52 L 20,52 Z" fill="url(#headerGrad)" stroke="#343f44" stroke-width="1" />
+    <line x1="20" y1="52" x2="820" y2="52" stroke="#2d353b" stroke-width="1" />
+
+    <!-- Window Controls (macOS Dots) -->
+    <circle cx="42" cy="33.5" r="5.5" fill="#e67e80" />
+    <circle cx="60" cy="33.5" r="5.5" fill="#dbbc7f" />
+    <circle cx="78" cy="33.5" r="5.5" fill="#a7c080" />
+
+    <!-- Window Title -->
+    <text x="420" y="38" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="500" fill="#859289" letter-spacing="0.3">
+      Jason@laptop ~ ⌖ anchor (v0.1.0)
+    </text>
+  </g>
+
+  <!-- Terminal Text Content -->
+  <g font-family="'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Consolas, monospace" font-size="13" xml:space="preserve">
+    <!-- Prompt Command Line -->
+    <text x="45" y="85">
+      <tspan fill="#a7c080" font-weight="bold">~/Workspace</tspan>
+      <tspan fill="#7fbbb3"> ❯ </tspan>
+      <tspan fill="#d3c6aa" font-weight="bold">anchor</tspan>
+    </text>
+
+    <!-- Header Line -->
+    <text x="45" y="118">
+      <tspan fill="#7fbbb3" font-weight="bold">⌖ Anchors </tspan>
+      <tspan fill="#859289">(4 active):</tspan>
+    </text>
+
+    <!-- Today Section Header -->
+    <text x="45" y="152" fill="#e67e80" font-weight="bold">  [Today · 今日聚焦]</text>
+
+    <!-- Today Item -->
+    <text x="45" y="178">
+      <tspan fill="#859289">  01  </tspan>
+      <tspan fill="#e67e80" font-weight="bold">[Today]     </tspan>
+      <tspan fill="#d3c6aa">今天完成anchor项目后端优化  </tspan>
+      <tspan fill="#859289">  Desktop     </tspan>
+      <tspan fill="#e67e80" font-weight="bold">Today       </tspan>
+      <tspan fill="#7a8478">Today 10:02</tspan>
+    </text>
+
+    <!-- Upcoming Section Header -->
+    <text x="45" y="218" fill="#dbbc7f" font-weight="bold">  [Upcoming · 近期排期]</text>
+
+    <!-- Upcoming Items -->
+    <text x="45" y="244">
+      <tspan fill="#859289">  02  </tspan>
+      <tspan fill="#dbbc7f">[Upcoming]  </tspan>
+      <tspan fill="#d3c6aa">明天吃香蕉                  </tspan>
+      <tspan fill="#859289">  Desktop     </tspan>
+      <tspan fill="#dbbc7f">Tomorrow    </tspan>
+      <tspan fill="#7a8478">Yesterday 21:34</tspan>
+    </text>
+
+    <text x="45" y="270">
+      <tspan fill="#859289">  03  </tspan>
+      <tspan fill="#dbbc7f">[Upcoming]  </tspan>
+      <tspan fill="#d3c6aa">明天完成anchor项目前端优化  </tspan>
+      <tspan fill="#859289">  Desktop     </tspan>
+      <tspan fill="#dbbc7f">Tomorrow    </tspan>
+      <tspan fill="#7a8478">Today 10:02</tspan>
+    </text>
+
+    <text x="45" y="296">
+      <tspan fill="#859289">  04  </tspan>
+      <tspan fill="#dbbc7f">[Upcoming]  </tspan>
+      <tspan fill="#d3c6aa">后天完成anchor项目上传优化  </tspan>
+      <tspan fill="#859289">  Desktop     </tspan>
+      <tspan fill="#dbbc7f">In 2d       </tspan>
+      <tspan fill="#7a8478">Today 10:02</tspan>
+    </text>
+
+    <!-- Footer Action -->
+    <text x="45" y="340" fill="#7a8478">
+      <tspan>  Use </tspan>
+      <tspan fill="#7fbbb3" font-weight="bold">`anchor done &lt;id&gt;`</tspan>
+      <tspan> to complete.</tspan>
+    </text>
+
+    <!-- Active Input Cursor -->
+    <text x="45" y="378">
+      <tspan fill="#a7c080" font-weight="bold">~/Workspace</tspan>
+      <tspan fill="#7fbbb3"> ❯ </tspan>
+      <tspan fill="#7fbbb3">⌖</tspan>
+      <tspan fill="#d3c6aa"> </tspan>
+      <rect x="175" y="364" width="8" height="16" fill="#a7c080" opacity="0.8">
+        <animate attributeName="opacity" values="0.8;0.1;0.8" dur="1.1s" repeatCount="indefinite" />
+      </rect>
+    </text>
+  </g>
+</svg>

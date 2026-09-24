@@ -20,9 +20,14 @@
   </a>
   <img src="https://img.shields.io/badge/Node-v20+-brightgreen.svg" alt="Node v20+">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue.svg" alt="TypeScript Strict">
-  <img src="https://img.shields.io/badge/Tests-13%20通过-brightgreen.svg" alt="Tests: 13 Passed">
+  <img src="https://img.shields.io/badge/Tests-18%20通过-brightgreen.svg" alt="Tests: 18 Passed">
+  <img src="https://img.shields.io/badge/启动耗时-%3C%2090ms-success.svg" alt="启动耗时: < 90ms">
   <img src="https://img.shields.io/badge/存储-零仓库污染-success.svg" alt="零仓库污染">
   <img src="https://img.shields.io/badge/开源协议-MIT-orange.svg" alt="License: MIT">
+</p>
+
+<p align="center">
+  <img src="assets/hero.svg" alt="Anchor 终端极客仪表盘" width="820">
 </p>
 
 ---
@@ -38,8 +43,9 @@
 **Anchor** 将任务抽象为**自带闭环证据的自消解承兑单（Promissory Notes）**：
 * **全局唯一安全存储**（`~/.pi/agent/anchors/`）—— 代码仓库内绝对不建 `.anchor/` 目录，0 文件污染。
 * **0-Token 稳态控制**——首轮冷启动注入极简说明，后续所有正常对话轮次物理剔除（0 Token 消耗），仅在触碰相关代码时 JIT 唤醒。
+* **真·双时轴心智模型**——告别晦涩的底层清理参数，回归“**预期交付 Target**（`Today`、`Tomorrow`、`In 2d`、`Daily`、`Someday`）+ **现场立项 Created**（`Today 10:02`）”。
 * **凭物理证据结案**——Git Commit 语义感知、物理测试验讫跑通自动结案；退出时单键即焚划掉。
-* **双轨生命周期**——临时随口一念（48小时无动作自动自净）vs 长期架构愿景（永久安全存续）。
+* **瞬时秒开加载**——生产级预编译产物加载耗时 **< 90ms**（比运行时转译快 27 倍）。
 
 ---
 
@@ -53,7 +59,7 @@
                                        ▼
                ┌───────────────────────────────────────────────┐
                │           [活跃期 ACTIVE] (首轮注入提示)        │
-               │ - 底部状态栏微光准星: ⌖ 1                      │
+               │ - 底部状态栏微光准星: ⌖ 4                      │
                │ - 第 2 轮起完全剥离出提示词 (0 Token 稳态)      │
                └───────┬───────────────────────────────┬───────┘
                        │                               │
@@ -65,7 +71,7 @@
   │ // ⌖ anchor context: #anc-1  │            │ 触碰代码时重新唤醒              │
   └──────────────┬───────────────┘            └────────────────┬───────────────┘
                  │                                             │
-        关门承兑 / 自动匹配完成                                 │ 48小时超时 (临时备忘)
+        关门承兑 / 自动匹配完成                                 │ 后台静默自净
                  ▼                                             ▼
   ┌──────────────────────────────┐            ┌────────────────────────────────┐
   │     [结案归档 SETTLED]        │            │     [自动自净 GRAVEYARD]       │
@@ -90,10 +96,13 @@ Anchor 不会在你的工程目录中建立任何文件夹，也不会留下任�
   ```text
   // ⌖ anchor context: #anc-1 重构鉴权为 HttpOnly Cookie (P0)
   ```
+* **绝对正交无误判**：标签（Tags）仅作为检索元数据，绝不参与文件路径劫持；无代码任务保持 100% 绝对静默。
 
-### 3. 双轨寿命契约（长短期分层）
-* **短期临时备忘（`48h left`）**：针对“今晚”、“明天”、“稍后”等随口一说的临时事项，若 48 小时内未触碰自动无声脱落，绝不跨周死缠烂打。
-* **长期架构愿景（常驻）**：针对核心重构、设计规划、日常习惯，永久存续，系统绝不擅自丢弃。
+### 3. 双时轴模型与四象限认知看板
+* **`[Today]`（今日聚焦 & 逾期）**：当前最优先攻坚项。
+* **`[Upcoming]`（近期排期）**：明天、后天、特定星期或截期的待办事项（支持 `--due friday`）。
+* **`[Habits]`（每日循环）**：日常习惯循环打卡（“每天吃一个苹果”）。今天打卡隐身，明日零点自动复苏。
+* **`[Backlog]`（长期愿景）**：无指定日期的宏观架构愿景（`Someday`）。
 
 ### 4. 零负担多源证据结案
 * **Git 提交语义感知**：内置基于 `Intl.Segmenter` 的多语系分词引擎。例如敲入 `git commit -m "fix(auth): 修复鉴权 Cookie 泄露"` 时，自动识别并闭环结案 `#anc-1`。
@@ -103,7 +112,7 @@ Anchor 不会在你的工程目录中建立任何文件夹，也不会留下任�
   任务 #anc-1 [重构鉴权模块] 关联的文件已在本会话中修改 (src/auth/jwt.ts)。
   是否标记已完成并结案归档？ [回车确认] / [Esc保留]
   ```
-* **一键撤销（Undo）**：若发生误判，敲入 `/anchor undo` 瞬间逆向回滚恢复。
+* **一键撤销（Undo）**：若发生误判，敲入 `anchor undo` 瞬间逆向回滚恢复。
 
 ---
 
@@ -113,27 +122,23 @@ Anchor 不会在你的工程目录中建立任何文件夹，也不会留下任�
 
 ### 底部状态栏组件
 * 无任务时：**100% 物理隐身**（0 字符，零干扰）。
-* 有任务时：呈现极简准星专注标点：**`⌖ 1`**。
+* 有任务时：呈现极简准星专注标点：**`⌖ 4`**。
 
-### 交互面板 (`/anchor`)
+### 交互面板 (`/anchor`) 与全局命令行 (`anchor`)
 ```text
-⌖ Anchors (enter to complete):
+⌖ Anchors (4 active):
 
-> 01  明天吃香蕉                  · Desktop · 46h left · 2h ago
-  02  每天吃一个苹果              · Desktop · 2h ago
-  03  完成针对桌面的优化          · Desktop · 2h ago
-  04  Refactor auth session      · backend · src/auth/* · 3h ago
-```
-* **上下键 + 回车**：直接划掉完成并释放上下文，无多级菜单困扰。
-* **时间语义清晰正交**：`46h left`（未来自净倒计时） vs `2h ago`（过去创建时间）。
+  [Today · 今日聚焦]
+  01  [Today]     今天完成anchor项目后端优化    Desktop     Today         Today 10:02
 
-### 独立终端 CLI (`anchor`)
-无需启动 AI 环境，在任何系统命令行中独立使用：
-```bash
-anchor                           # 查看待办清单
-anchor "明天看下 PR #42"         # 记录新任务 (自动识别为 48h 临时备忘)
-anchor done anc-1                # 划掉并归档任务
+  [Upcoming · 近期排期]
+  02  [Upcoming]  明天吃香蕉                    Desktop     Tomorrow      Yesterday 21:34
+  03  [Upcoming]  明天完成anchor项目前端优化    Desktop     Tomorrow      Today 10:02
+  04  [Upcoming]  后天完成anchor项目上传优化    Desktop     In 2d         Today 10:02
 ```
+* **严格连续行号（`01`, `02`, `03`）**：排版清晰有序。
+* **双通道智能结案**：敲 `anchor done 1` 划掉第 1 行；敲 `anchor done anc-5` 精准命中特定 ID。
+* **纯粹出处溯源**：目录列忠实反映立项时的宿主文件夹（`Desktop` / `X` / `global`）。
 
 ---
 
@@ -144,25 +149,39 @@ anchor done anc-1                # 划掉并归档任务
 | **底层架构** | 分布式 SQL 依赖图谱 | 向量与 SQLite 外部库 | 静态 Markdown 纯文本 | **轻量原子化自消解状态机** |
 | **工作区清洁度** | 仓库内塞入 200MB Dolt 数据库 | 系统后台服务 | **频繁污染 Git 历史与引发冲突** | **100% 零仓库污染 (`~/.pi/agent/anchors/`)** |
 | **Token 损耗** | 每轮中/高消耗 | 高（注入长文历史） | 极高（陈旧文本成倍累积） | **0 Token 稳态（仅文件触碰 JIT 唤醒）** |
+| **认知时轴** | 单层平铺 | 单层平铺 | 静态勾选清单 | **真·双时轴（预期交付 + 现场立项时间）** |
 | **结案闭环** | 人工命令 `close` | 无闭环概念 | 人工修改文本打勾 | **Git Commit 自动识别 + 关门单键承兑** |
-| **衰减自净** | 手动 prune | 无衰退机制 | 长期堆积发霉 | **双轨自净（48小时极速自净 vs 长期常驻）** |
+| **衰减自净** | 手动 prune | 无衰退机制 | 长期堆积发霉 | **静默半衰期守护（临时备忘自净 vs 长期愿景）** |
+| **启动性能** | 重型 CLI 初始化 | Go 守护常驻 | 无 | **< 90ms 预编译生产制品瞬时秒开** |
 | **环境依赖** | 外部 Dolt 二进制 | 外部 Go 编译产物 | 无 | **零原生二进制外部依赖（纯 TS）** |
 
 ---
 
 ## 🚀 快速开始
 
-### 安装
+### 1. 全局独立命令行 CLI
+```bash
+# 全局安装
+npm install -g @3zeros12/anchor
 
-#### 1. 作为 Pi Coding Agent 扩展
+# 或直接通过 npx 免安装即用
+npx @3zeros12/anchor
+```
+
+常用命令：
+```bash
+anchor                                  # 查看待办清单
+anchor "重构鉴权 Cookie"                 # 记录新任务
+anchor "提交周报" --due friday          # 指定预期交付时间
+anchor done 1                           # 划掉第 1 行任务
+anchor undo                             # 撤销上次结案
+```
+
+### 2. 作为 Pi Coding Agent 扩展
+在 Pi 扩展目录中直接引入：
 ```bash
 # 在 ~/.pi/agent/extensions/ 目录下
 npm install @3zeros12/anchor
-```
-
-#### 2. 全局独立命令行 CLI
-```bash
-npm install -g @3zeros12/anchor
 ```
 
 ---
@@ -174,25 +193,30 @@ npm install -g @3zeros12/anchor
 ```bash
 npm run build      # tsup 双格式打包 (ESM/CJS) 与 .d.ts 生成
 npm run typecheck  # TypeScript 严格模式检查 (0 错误)
-npm test           # 全套自动化单元测试
+npm test           # 全套自动化单元测试 (18/18 全绿通过)
 ```
 
 ```text
-✔ ContextInjector - 仅注入活跃锚点，休眠任务消耗 0 Token (64ms)
-✔ AnchorDecay - 遗忘半衰期计算 (1.5ms)
-✔ AnchorDecay - 自动退化与墓园清理 (142ms)
-✔ AnchorMatcher - 精确文件、前缀、领域标签匹配 (5.6ms)
-✔ AnchorMatcher - 通配符 Glob 模式匹配 (*.ts, src/**/*.ts) (1.1ms)
-✔ AnchorMatcher - 置信度与优先级复合排序 (0.5ms)
-✔ SessionTouchObserver - 工具调用与文件触碰监听 (32ms)
-✔ SessionTouchObserver - 多语系 Git 提交语义分词匹配 (3ms)
-✔ AnchorStore - 原子化增删改查与文件落盘 (90ms)
-✔ AnchorStore - 状态损坏自动安全容灾恢复 (5.2ms)
-✔ AnchorTUI - 状态栏准星组件 ⌖ N (31ms)
-✔ AnchorTUI - 正交区分未来倒计时 (left) 与过去创建时间 (ago) (17ms)
-✔ AnchorTUI - 极客面板排版与出处溯源 (42ms)
+✔ ContextInjector - 仅注入活跃锚点，休眠任务消耗 0 Token (59ms)
+✔ ContextInjector - 注入 prompt 携带预期交付与老化天数 (10ms)
+✔ AnchorDecay - 遗忘半衰期计算 (1.2ms)
+✔ AnchorDecay - 自动退化与墓园清理 (102ms)
+✔ AnchorMatcher - 精确文件、前缀、领域标签匹配 (2.5ms)
+✔ AnchorMatcher - 通配符 Glob 模式匹配 (*.ts, src/**/*.ts) (0.7ms)
+✔ AnchorMatcher - 置信度与优先级复合排序 (0.4ms)
+✔ SessionTouchObserver - 工具调用与文件触碰监听 (25ms)
+✔ SessionTouchObserver - 多语系 Git 提交语义分词匹配 (2.0ms)
+✔ AnchorStore - 增删改查、原子写入与自适应编号匹配 (77ms)
+✔ AnchorStore - 状态损坏自动安全容灾恢复 (9.1ms)
+✔ AnchorStore - 每日循环习惯当天完成、次日自动复苏 (19ms)
+✔ AnchorStore - 自然时间词表与阶梯半衰期判定 (10ms)
+✔ AnchorTUI - 状态栏准星组件 ⌖ N (23ms)
+✔ AnchorTUI - 正交双时轴渲染 (Target Date + Creation Time) (38ms)
+✔ AnchorTUI - 极客面板排版与出处溯源 (26ms)
+✔ AnchorTUI - CJK 全角字宽感知网格严整对齐 (0.3ms)
+✔ AnchorTUI - 启动悬浮任务胶囊与开工自动淡出 (8.7ms)
 
-ℹ pass 13, fail 0 (455ms 全绿通过)
+ℹ pass 18, fail 0 (384ms 全绿通过)
 ```
 
 ---

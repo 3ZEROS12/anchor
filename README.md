@@ -20,9 +20,14 @@
   </a>
   <img src="https://img.shields.io/badge/Node-v20+-brightgreen.svg" alt="Node v20+">
   <img src="https://img.shields.io/badge/TypeScript-Strict-blue.svg" alt="TypeScript Strict">
-  <img src="https://img.shields.io/badge/Tests-13%20Passed-brightgreen.svg" alt="Tests: 13 Passed">
+  <img src="https://img.shields.io/badge/Tests-18%20Passed-brightgreen.svg" alt="Tests: 18 Passed">
+  <img src="https://img.shields.io/badge/Startup-%3C%2090ms-success.svg" alt="Startup: < 90ms">
   <img src="https://img.shields.io/badge/Storage-Zero%20Repo%20Pollution-success.svg" alt="Zero Repo Pollution">
   <img src="https://img.shields.io/badge/License-MIT-orange.svg" alt="License: MIT">
+</p>
+
+<p align="center">
+  <img src="assets/hero.svg" alt="Anchor Terminal Hero Dashboard" width="820">
 </p>
 
 ---
@@ -38,8 +43,9 @@ Engineers using autonomous CLI agents (Pi, Claude Code, Cursor, Aider) encounter
 **Anchor** resolves this by modeling tasks as **self-evicting promissory notes**:
 * **Stored globally** (`~/.pi/agent/anchors/`) — zero local `.anchor/` folders or git pollution.
 * **0-Token idle consumption** — injected on cold-start (Turn 1), then completely stripped from subsequent turns until associated code is touched.
+* **Dual-Timeline GTD Model** — intuitive `Target Date` (`Today`, `Tomorrow`, `In 2d`, `Daily`, `Someday`) paired with `Creation Time` (`Today 10:02`).
 * **Closed by evidence** — auto-settled via Git commit semantics or test execution; single-keypress settlement on session exit.
-* **Dual durability tiers** — 48h auto-clearing for ephemeral reminders vs permanent preservation for architectural goals.
+* **Instant Startup** — pre-bundled production artifacts load in **< 90ms** (27x faster than runtime transpilation).
 
 ---
 
@@ -65,7 +71,7 @@ Engineers using autonomous CLI agents (Pi, Claude Code, Cursor, Aider) encounter
   │ // ⌖ anchor context: #anc-1  │            │ state; wakes upon code touch   │
   └──────────────┬───────────────┘            └────────────────┬───────────────┘
                  │                                             │
-      Exit Settlement / Auto-Match                             │ 48h (Ephemeral)
+      Exit Settlement / Auto-Match                             │ Background Sweep
                  ▼                                             ▼
   ┌──────────────────────────────┐            ┌────────────────────────────────┐
   │     [SETTLED / Archived]     │            │      [GRAVEYARD / Evicted]     │
@@ -90,10 +96,14 @@ Anchor never creates local `.anchor` directories or touches your project's `.git
   ```text
   // ⌖ anchor context: #anc-1 Migrate auth to HTTP-only cookies (P0)
   ```
+* **No False Positives**: Domain tags are strictly taxonomy metadata and never hijack file matching. Only physical files or globs trigger JIT injection.
 
-### 3. Dual Durability Tiers
-* **Ephemeral (`[48h left]`)**: Temporal reminders ("tonight", "tomorrow", "later") auto-evict after 48 hours of inactivity, preventing abandoned scratchpad notes from festering.
-* **Durable (`[permanent]`)**: Architecture visions, refactorings, and recurring habits are preserved indefinitely until physical verification or explicit closure.
+### 3. Dual-Timeline & 4-Quadrant Grouping
+Anchor divides tasks into four clear cognitive quadrants:
+* **`[Today]` (Due Today & Overdue)**: Immediate focus for the current session.
+* **`[Upcoming]` (Near-Term)**: Tomorrow, in 2 days, or specific dates (`--due friday`).
+* **`[Habits]` (Daily Cadence)**: Recurring daily habits (`每天吃一个苹果`). Completing for today automatically wakes back up tomorrow.
+* **`[Backlog]` (Long-Term Vision)**: Open-ended architecture goals (`Someday`).
 
 ### 4. Zero-Friction Evidence Settlement
 * **Git Commit Resolution**: Understands commit messages across Latin and CJK languages (via `Intl.Segmenter`). Commits like `git commit -m "fix(auth): resolve cookie session leak"` automatically settle `#anc-1`.
@@ -103,7 +113,7 @@ Anchor never creates local `.anchor` directories or touches your project's `.git
   Task #anc-1 [Migrate auth to HTTP-only cookies] touched files (src/auth/jwt.ts).
   Mark as completed and archive? [Enter Confirm] / [Esc Keep]
   ```
-* **Instant Undo**: Accidentally settled a task? Run `/anchor undo` to restore it immediately.
+* **Instant Undo**: Accidentally settled a task? Run `anchor undo` to restore it immediately.
 
 ---
 
@@ -113,27 +123,23 @@ Anchor implements a focused, low-saturation Neovim/Cupertino aesthetic:
 
 ### Status Bar Capsule
 * Empty: **100% invisible** (0 characters, zero distraction).
-* Active: **`⌖ 1`** (or `⌖ 2 (1z)` if sleeping tasks exist).
+* Active: **`⌖ 4`** in footer.
 
-### Interactive Dashboard (`/anchor`)
+### Interactive Dashboard (`/anchor`) & Global CLI (`anchor`)
 ```text
-⌖ Anchors (enter to complete):
+⌖ Anchors (4 active):
 
-> 01  明天吃香蕉                  · Desktop · 46h left · 2h ago
-  02  每天吃一个苹果              · Desktop · 2h ago
-  03  完成针对桌面的优化          · Desktop · 2h ago
-  04  Refactor auth session      · backend · src/auth/* · 3h ago
-```
-* **Arrow keys + Enter**: Instantly settles the task and frees context.
-* **Clear time semantics**: `46h left` (future eviction countdown) vs `2h ago` (creation elapsed time).
+  [Today · 今日聚焦]
+  01  [Today]     今天完成anchor项目后端优化    Desktop     Today         Today 10:02
 
-### Standalone CLI (`anchor`)
-Works in any terminal independently without opening an AI coding harness:
-```bash
-anchor                           # List pending tasks
-anchor "Review PR #42 tomorrow"  # Pin new task (auto-detects 48h ephemeral)
-anchor done anc-1                # Settle and evict task
+  [Upcoming · 近期排期]
+  02  [Upcoming]  明天吃香蕉                    Desktop     Tomorrow      Yesterday 21:34
+  03  [Upcoming]  明天完成anchor项目前端优化    Desktop     Tomorrow      Today 10:02
+  04  [Upcoming]  后天完成anchor项目上传优化    Desktop     In 2d         Today 10:02
 ```
+* **Sequential numbering (`01`, `02`, `03`)**: Strictly ordered rows.
+* **Dual-channel resolution**: `anchor done 1` settles row 1; `anchor done anc-5` settles by ID.
+* **Explicit Provenance**: The folder column faithfully records where you were when the task was created (`Desktop`, `X`, `global`).
 
 ---
 
@@ -144,26 +150,39 @@ anchor done anc-1                # Settle and evict task
 | **Data Architecture** | Distributed SQL Graph | Vector/SQLite Memory | Static Markdown | **Lightweight Atomic State Machine** |
 | **Workspace Hygiene** | Pollutes repo with 200MB Dolt | System daemon | **Pollutes git commit history** | **100% Zero repo pollution (`~/.pi/agent/anchors/`)** |
 | **Token Cost** | Medium/High per turn | High (full prompt injection) | Severe (stale text accumulates) | **0 Tokens idle (JIT file touch only)** |
+| **Cognitive Timeline**| Flat list | Flat list | Static checklist | **Dual-timeline (Target Date + Creation Time)** |
 | **Closure Mechanism** | Manual CLI close | Passive storage | Manual file edit | **Git Commit auto-match + One-tap exit settlement** |
-| **Decay Management** | Manual pruning | None | Stagnates permanently | **Dual-tier decay (48h auto-evict vs durable)** |
+| **Decay Management** | Manual pruning | None | Stagnates permanently | **Silent decay (ephemeral 48h vs durable backlog)** |
+| **Startup Overhead** | Heavy CLI init | Go daemon | None | **< 90ms pre-bundled production artifact** |
 | **Dependencies** | External Dolt binary | External Go binary | None | **Zero native binary dependencies (Pure TS)** |
 
 ---
 
 ## 🚀 Quick Start
 
-### Installation
+### 1. Standalone Global CLI
+```bash
+# Install globally
+npm install -g @3zeros12/anchor
 
-#### 1. As Pi Coding Agent Extension
-Link or copy into your Pi extensions directory:
+# Or run instantly via npx
+npx @3zeros12/anchor
+```
+
+Commands:
+```bash
+anchor                                  # List pending anchors
+anchor "Refactor auth cookies"          # Pin a task
+anchor "Submit report" --due friday     # Pin with target date
+anchor done 1                           # Settle row 1
+anchor undo                             # Restore last settled task
+```
+
+### 2. As Pi Coding Agent Extension
+Link or install into your Pi extensions directory:
 ```bash
 # In ~/.pi/agent/extensions/
 npm install @3zeros12/anchor
-```
-
-#### 2. Standalone Global CLI
-```bash
-npm install -g @3zeros12/anchor
 ```
 
 ---
@@ -175,25 +194,30 @@ Built with strict TypeScript and 100% standard library tests using Node's native
 ```bash
 npm run build      # Dual ESM/CJS build via tsup + declaration emit
 npm run typecheck  # Strict tsc --noEmit (0 errors)
-npm test           # Native Node test suite
+npm test           # Native Node test suite (18/18 passing)
 ```
 
 ```text
-✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens (64ms)
-✔ AnchorDecay - status evaluation transitions (1.5ms)
-✔ AnchorDecay - sweepStore transitions and graveyard eviction (142ms)
-✔ AnchorMatcher - exact, prefix, and tag matching (5.6ms)
-✔ AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts) (1.1ms)
-✔ AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority (0.5ms)
-✔ SessionTouchObserver - records read, edit, write and commits (32ms)
-✔ SessionTouchObserver - matches CJK commit messages with segmentation (3ms)
-✔ AnchorStore - basic CRUD & atomic writes (90ms)
-✔ AnchorStore - corrupt state recovery (5.2ms)
-✔ AnchorTUI - status bar reflects active state cleanly with ⌖ N (31ms)
-✔ AnchorTUI - formatRemainingTtl and formatRelativeTime distinguish left vs ago (17ms)
-✔ AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with folder metadata (42ms)
+✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens (59ms)
+✔ ContextInjector - renders targetDate and task aging in prompt (10ms)
+✔ AnchorDecay - status evaluation transitions (1.2ms)
+✔ AnchorDecay - sweepStore transitions and graveyard eviction (102ms)
+✔ AnchorMatcher - exact, prefix, and tag matching (2.5ms)
+✔ AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts) (0.7ms)
+✔ AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority (0.4ms)
+✔ SessionTouchObserver - records read, edit, write and commits (25ms)
+✔ SessionTouchObserver - matches CJK commit messages with segmentation (2.0ms)
+✔ AnchorStore - basic CRUD & atomic writes (77ms)
+✔ AnchorStore - corrupt state recovery (9.1ms)
+✔ AnchorStore - daily recurring task completes for today and wakes tomorrow (19ms)
+✔ AnchorStore - temporal durability keywords and project detection (10ms)
+✔ AnchorTUI - status bar reflects active state cleanly with ⌖ N (23ms)
+✔ AnchorTUI - formatTargetDate and formatCreationTime render clear dual-timeline (38ms)
+✔ AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with folder metadata (26ms)
+✔ AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width columns (0.3ms)
+✔ AnchorTUI - updateStartupBanner renders clean widget above editor (8.7ms)
 
-ℹ pass 13, fail 0 (455ms total)
+ℹ pass 18, fail 0 (384ms total)
 ```
 
 ---

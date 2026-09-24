@@ -40,6 +40,17 @@
   ],
   "author": "Jason Song <jiaxinsong312@gmail.com>",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/3ZEROS12/anchor.git"
+  },
+  "homepage": "https://github.com/3ZEROS12/anchor#readme",
+  "bugs": {
+    "url": "https://github.com/3ZEROS12/anchor/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "devDependencies": {
     "@types/node": "^26.6.2",
     "tsup": "^8.5.1",
