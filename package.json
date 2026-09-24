@@ -25,7 +25,7 @@
   "scripts": {
     "build": "tsup src/index.ts src/extension.ts --format esm,cjs --dts --clean",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/**/*.test.ts",
+    "test": "tsx --test",
     "prepack": "npm run build"
   },
   "keywords": [
