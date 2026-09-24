@@ -20,7 +20,8 @@
   "pi": {
     "extensions": [
       "dist/extension.js"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/3ZEROS12/anchor/main/assets/hero.svg"
   },
   "scripts": {
     "build": "tsup src/index.ts src/extension.ts --format esm,cjs --dts --clean",
