@@ -174,6 +174,7 @@ export default function (pi: ExtensionAPI) {
       ]),
       title: Type.Optional(Type.String({ description: 'Short imperative task title (for pin)' })),
       priority: Type.Optional(Type.Union([Type.Literal('p0'), Type.Literal('p1'), Type.Literal('p2')])),
+      project: Type.Optional(Type.String({ description: 'Target project name or workspace (defaults to current directory if omitted)' })),
       files: Type.Optional(Type.Array(Type.String(), { description: 'Associated file paths or directory prefixes' })),
       tags: Type.Optional(Type.Array(Type.String(), { description: 'Domain tags' })),
       verifyCommand: Type.Optional(Type.String({ description: 'Optional shell command for automated physical verification' })),
@@ -188,6 +189,7 @@ export default function (pi: ExtensionAPI) {
         const anc = store.create({
           title: params.title,
           priority: params.priority || 'p1',
+          project: params.project,
           cwd: ctx.cwd,
           files: params.files || [],
           tags: params.tags || [],

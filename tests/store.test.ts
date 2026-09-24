@@ -3,7 +3,12 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { AnchorStore } from '../src/store.ts';
+import {
+  AnchorStore,
+  detectDurability,
+  detectProjectFromTitle,
+  getEphemeralDecayPolicy
+} from '../src/store.ts';
 
 function createTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-test-'));
@@ -124,6 +129,47 @@ test('AnchorStore - daily recurring task completes for today and wakes tomorrow'
     const listTomorrow = store.list({ status: 'active', now: day2 });
     assert.strictEqual(listTomorrow.length, 1);
     assert.strictEqual(listTomorrow[0].title, '每天吃一个苹果');
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('AnchorStore - temporal durability keywords and project detection', () => {
+  // 1. Durability keyword detection
+  assert.strictEqual(detectDurability('今天完成后端优化'), 'ephemeral');
+  assert.strictEqual(detectDurability('明天完成前端优化'), 'ephemeral');
+  assert.strictEqual(detectDurability('后天完成上传优化'), 'ephemeral');
+  assert.strictEqual(detectDurability('大后天完成测试'), 'ephemeral');
+  assert.strictEqual(detectDurability('重构鉴权架构'), 'durable');
+
+  // 2. Ephemeral TTL decay scaling
+  assert.strictEqual(getEphemeralDecayPolicy('今天完成优化').graveyardDays, 2);
+  assert.strictEqual(getEphemeralDecayPolicy('后天完成优化').graveyardDays, 3);
+  assert.strictEqual(getEphemeralDecayPolicy('大后天完成优化').graveyardDays, 4);
+
+  // 3. Project name smart detection from title
+  assert.strictEqual(detectProjectFromTitle('今天完成anchor项目后端优化'), 'anchor');
+  assert.strictEqual(detectProjectFromTitle('优化PPT工程动画性能'), 'PPT');
+  assert.strictEqual(detectProjectFromTitle('[X] 修复Cookie问题'), 'X');
+  assert.strictEqual(detectProjectFromTitle('普通任务标题'), undefined);
+
+  // 4. Store respects project detection when cwd is Desktop
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const a1 = store.create({
+      title: '今天完成anchor项目后端优化',
+      cwd: 'C:/Users/Jason/Desktop'
+    });
+    assert.strictEqual(a1.project, 'anchor');
+    assert.strictEqual(a1.durability, 'ephemeral');
+
+    const a2 = store.create({
+      title: '明天完成前端优化',
+      project: 'custom-proj',
+      cwd: 'C:/Users/Jason/Desktop'
+    });
+    assert.strictEqual(a2.project, 'custom-proj');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

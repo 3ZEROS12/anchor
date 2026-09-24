@@ -18,8 +18,8 @@ import { normalizePath } from './matcher.ts';
  */
 export function detectDurability(title: string): AnchorDurability {
   const temporalKeywords = [
-    '晚上', '今晚', '明天', '稍后', '待会', '下午', '临时', '一会儿', '等等',
-    'tonight', 'tomorrow', 'later', 'temp', 'today', 'soon'
+    '今天', '今日', '晚上', '今晚', '明天', '后天', '大后天', '稍后', '待会', '下午', '上午', '临时', '一会儿', '等等',
+    'today', 'tonight', 'tomorrow', 'later', 'temp', 'soon'
   ];
   const lower = title.toLowerCase();
   for (const kw of temporalKeywords) {
@@ -28,6 +28,33 @@ export function detectDurability(title: string): AnchorDurability {
     }
   }
   return 'durable';
+}
+
+/**
+ * Get custom ephemeral decay policy based on temporal span (e.g. 后天, 大后天)
+ */
+export function getEphemeralDecayPolicy(title: string): AnchorDecayPolicy {
+  const lower = title.toLowerCase();
+  if (lower.includes('大后天')) {
+    return { activeDays: 3, sleepDays: 1, graveyardDays: 4 };
+  }
+  if (lower.includes('后天')) {
+    return { activeDays: 2, sleepDays: 1, graveyardDays: 3 };
+  }
+  return { ...EPHEMERAL_DECAY_POLICY };
+}
+
+/**
+ * Detect target project name from title, e.g. "完成 anchor 项目...", "[PPT] 重构...", "backend: 优化..."
+ */
+export function detectProjectFromTitle(title: string): string | undefined {
+  const match = title.match(/(?:完成|优化|重构|修改|调试|测试)\s*([a-zA-Z0-9_-]+)\s*(?:项目|工程|仓库)/i)
+    || title.match(/^\[([a-zA-Z0-9_-]+)\]/i)
+    || title.match(/^([a-zA-Z0-9_-]+):/i);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return undefined;
 }
 
 /**
@@ -153,14 +180,17 @@ export class AnchorStore {
     const id = this.generateId(state.anchors);
 
     const cwd = input.cwd ? normalizePath(input.cwd) : '';
+    const detectedProject = detectProjectFromTitle(input.title);
     const projectName = input.project
       ? input.project.trim()
-      : (cwd ? path.basename(cwd) : 'global');
+      : (detectedProject || (cwd ? path.basename(cwd) : 'global'));
 
     const recurrence = input.recurrence || detectRecurrence(input.title);
     // Recurring tasks are always durable
     const durability = recurrence ? 'durable' : (input.durability || detectDurability(input.title));
-    const decayPolicy = durability === 'ephemeral' ? EPHEMERAL_DECAY_POLICY : DURABLE_DECAY_POLICY;
+    const decayPolicy = durability === 'ephemeral'
+      ? getEphemeralDecayPolicy(input.title)
+      : DURABLE_DECAY_POLICY;
 
     const anchor: Anchor = {
       id,
