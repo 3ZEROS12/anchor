@@ -129,7 +129,7 @@ export function getTodayDateString(timestamp: number = Date.now()): string {
 }
 
 /**
- * Resolve the canonical sovereign storage directory for Anchor.
+ * Resolve the default storage directory for Anchor (~/.anchor).
  * Hierarchy:
  * 1. Process environment: ANCHOR_DIR
  * 2. Canonical user-global store: ~/.anchor/

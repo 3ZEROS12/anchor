@@ -184,7 +184,7 @@ export default function (pi: ExtensionAPI) {
     name: 'anchor',
     label: 'Anchor (Cross-session Task Protocol)',
     description:
-      'Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Stored in the global ledger (~/.anchor/) with zero project repository pollution.',
+      'Manage cross-session persistent tasks that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Stored in ~/.anchor/ with zero project repository pollution.',
     promptSnippet: 'Anchor cross-session task contracts that survive terminal restarts and auto-evict',
     promptGuidelines: [
       'Use `anchor` when the user asks to retain a goal across sessions or record a reminder for later/tonight/tomorrow (e.g. "晚上清理垃圾", "明天优化X", "保留任务直到完成").',
@@ -233,7 +233,7 @@ export default function (pi: ExtensionAPI) {
         return {
           content: [{
             type: 'text',
-            text: `Successfully anchored task #${anc.id}: "${anc.title}" [${anc.project}]. Stored in global ledger (~/.anchor/).`
+            text: `Successfully anchored task #${anc.id}: "${anc.title}" [${anc.project}]. Stored in ~/.anchor/.`
           }],
           isError: false
         };

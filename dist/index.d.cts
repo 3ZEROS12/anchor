@@ -104,7 +104,7 @@ declare function detectRecurrence(title: string): 'daily' | undefined;
  */
 declare function getTodayDateString(timestamp?: number): string;
 /**
- * Resolve the canonical sovereign storage directory for Anchor.
+ * Resolve the default storage directory for Anchor (~/.anchor).
  * Hierarchy:
  * 1. Process environment: ANCHOR_DIR
  * 2. Canonical user-global store: ~/.anchor/
@@ -411,7 +411,7 @@ interface AgentAdapter {
     notify?(message: string, level: 'info' | 'warn' | 'error'): void;
 }
 /**
- * The Sovereign Anchor Protocol Engine.
+ * Anchor protocol engine for cross-session task management.
  * Decoupled, harness-agnostic core managing state, decay, JIT annotations, and settlement.
  */
 declare class AnchorProtocol {

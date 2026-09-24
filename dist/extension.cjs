@@ -1398,7 +1398,7 @@ Mark as completed and archive?`
   pi.registerTool({
     name: "anchor",
     label: "Anchor (Cross-session Task Protocol)",
-    description: "Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Stored in the global ledger (~/.anchor/) with zero project repository pollution.",
+    description: "Manage cross-session persistent tasks that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Stored in ~/.anchor/ with zero project repository pollution.",
     promptSnippet: "Anchor cross-session task contracts that survive terminal restarts and auto-evict",
     promptGuidelines: [
       'Use `anchor` when the user asks to retain a goal across sessions or record a reminder for later/tonight/tomorrow (e.g. "\u665A\u4E0A\u6E05\u7406\u5783\u573E", "\u660E\u5929\u4F18\u5316X", "\u4FDD\u7559\u4EFB\u52A1\u76F4\u5230\u5B8C\u6210").',
@@ -1447,7 +1447,7 @@ Mark as completed and archive?`
         return {
           content: [{
             type: "text",
-            text: `Successfully anchored task #${anc.id}: "${anc.title}" [${anc.project}]. Stored in global ledger (~/.anchor/).`
+            text: `Successfully anchored task #${anc.id}: "${anc.title}" [${anc.project}]. Stored in ~/.anchor/.`
           }],
           isError: false
         };

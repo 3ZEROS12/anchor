@@ -28,7 +28,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/hero.svg" alt="Anchor Terminal Hero Dashboard" width="820">
+  <img src="assets/hero.svg" alt="Anchor Terminal Dashboard" width="820">
 </p>
 
 ---
@@ -59,7 +59,7 @@ Existing alternatives introduce heavy trade-offs:
                                        ▼
                ┌───────────────────────────────────────────────┐
                │         [ACTIVE Tier] (Turn 1 Injected)       │
-               │ - Status capsule: ⌖ 4                         │
+               │ - Status indicator: ⌖ 4                       │
                │ - Turn 2+ : Excluded from prompt (0 Tokens)   │
                └───────┬───────────────────────────────┬───────┘
                        │                               │
@@ -86,7 +86,7 @@ Anchor never creates local `.anchor` folders or touches your project git tree. A
 ~/.anchor/
 ├── state.json           # Active and sleeping task state (< 10KB, atomic write)
 ├── state.lock           # Cross-process sync atomic lock (Zero dependencies)
-├── archive.jsonl        # Append-only ledger of settled tasks
+├── archive.jsonl        # Append-only log of settled tasks
 └── graveyard.jsonl      # Append-only log of decayed and evicted items
 ```
 
@@ -117,7 +117,7 @@ Anchor organizes tasks along two complementary temporal axes:
 * **Target Delivery (`targetDate`)**: Expected completion date. Natural language keywords (today, tonight, tomorrow, friday, next week) map directly to structured ISO dates. Rendered in UI as `Today`, `Tomorrow`, `In 2d`, `Daily`, `Someday`.
 * **Creation Timestamp (`createdAt`)**: Physical creation time. Rendered in UI as `Today 10:02`, `Yesterday 21:34`, or `09-24 15:30`.
 
-The dashboard groups active tasks into four cognitive quadrants:
+The dashboard groups active tasks into four categories:
 * **`[Today]`**: Items due today or overdue. Priority target for the current session.
 * **`[Upcoming]`**: Scheduled future commitments (tomorrow, upcoming weekdays, specific dates via `--due friday`).
 * **`[Habits]`**: Recurring daily practices (such as regular backups or review habits). Completing today auto-reawakens the task tomorrow.
@@ -137,8 +137,8 @@ The dashboard groups active tasks into four cognitive quadrants:
 
 ## Interface Design
 
-### Minimal Status Bar Capsule
-* When active tasks exist: Displays a minimal crosshair capsule `⌖ 4` in the terminal status row.
+### Status Bar Indicator
+* When active tasks exist: Displays task count `⌖ 4` in the terminal status row.
 * Zero tasks: 100% invisible (0 characters rendered).
 
 ### Global CLI (`anchor`) & Interactive TUI (`/anchor`)

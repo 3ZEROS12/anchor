@@ -16,7 +16,7 @@ export interface AgentAdapter {
 }
 
 /**
- * The Sovereign Anchor Protocol Engine.
+ * Anchor protocol engine for cross-session task management.
  * Decoupled, harness-agnostic core managing state, decay, JIT annotations, and settlement.
  */
 export class AnchorProtocol {
