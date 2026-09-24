@@ -1,7 +1,7 @@
 {
   "name": "@3zeros12/anchor",
   "version": "0.1.0",
-  "description": "The zero-pollution, context-aware, self-evicting task protocol for AI coding agents",
+  "description": "Zero-pollution, 0-idle-token task memory for AI coding agents",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
