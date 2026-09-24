@@ -134,14 +134,11 @@ export function formatRemainingTtl(anchor: Anchor, now: number = Date.now()): st
 }
 
 /**
- * Format origin project or workspace
+ * Format origin creation workspace folder (provenance: where the task was born/created)
  */
 export function formatOrigin(anchor: Anchor | string): string {
   if (typeof anchor === 'object') {
-    if (anchor.project && anchor.project !== 'global') {
-      return anchor.project;
-    }
-    if (!anchor.cwd) return 'global';
+    if (!anchor.cwd) return anchor.project || 'global';
     return path.basename(anchor.cwd) || 'global';
   }
   if (!anchor) return 'global';

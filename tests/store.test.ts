@@ -6,7 +6,6 @@ import os from 'node:os';
 import {
   AnchorStore,
   detectDurability,
-  detectProjectFromTitle,
   getEphemeralDecayPolicy
 } from '../src/store.ts';
 
@@ -147,13 +146,7 @@ test('AnchorStore - temporal durability keywords and project detection', () => {
   assert.strictEqual(getEphemeralDecayPolicy('后天完成优化').graveyardDays, 3);
   assert.strictEqual(getEphemeralDecayPolicy('大后天完成优化').graveyardDays, 4);
 
-  // 3. Project name smart detection from title
-  assert.strictEqual(detectProjectFromTitle('今天完成anchor项目后端优化'), 'anchor');
-  assert.strictEqual(detectProjectFromTitle('优化PPT工程动画性能'), 'PPT');
-  assert.strictEqual(detectProjectFromTitle('[X] 修复Cookie问题'), 'X');
-  assert.strictEqual(detectProjectFromTitle('普通任务标题'), undefined);
-
-  // 4. Store respects project detection when cwd is Desktop
+  // 3. Provenance folder reflects creation cwd faithfully
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
@@ -161,9 +154,11 @@ test('AnchorStore - temporal durability keywords and project detection', () => {
       title: '今天完成anchor项目后端优化',
       cwd: 'C:/Users/Jason/Desktop'
     });
-    assert.strictEqual(a1.project, 'anchor');
+    // Faithfully records creation folder
+    assert.strictEqual(a1.project, 'Desktop');
     assert.strictEqual(a1.durability, 'ephemeral');
 
+    // Allows explicit project if specified
     const a2 = store.create({
       title: '明天完成前端优化',
       project: 'custom-proj',

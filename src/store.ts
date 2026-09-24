@@ -45,19 +45,6 @@ export function getEphemeralDecayPolicy(title: string): AnchorDecayPolicy {
 }
 
 /**
- * Detect target project name from title, e.g. "完成 anchor 项目...", "[PPT] 重构...", "backend: 优化..."
- */
-export function detectProjectFromTitle(title: string): string | undefined {
-  const match = title.match(/(?:完成|优化|重构|修改|调试|测试)\s*([a-zA-Z0-9_-]+)\s*(?:项目|工程|仓库)/i)
-    || title.match(/^\[([a-zA-Z0-9_-]+)\]/i)
-    || title.match(/^([a-zA-Z0-9_-]+):/i);
-  if (match && match[1]) {
-    return match[1];
-  }
-  return undefined;
-}
-
-/**
  * Detect expected completion date from title keywords, returning 'YYYY-MM-DD'
  */
 export function detectTargetDate(title: string, now: number = Date.now()): string | undefined {
@@ -211,10 +198,9 @@ export class AnchorStore {
     const id = this.generateId(state.anchors);
 
     const cwd = input.cwd ? normalizePath(input.cwd) : '';
-    const detectedProject = detectProjectFromTitle(input.title);
     const projectName = input.project
       ? input.project.trim()
-      : (detectedProject || (cwd ? path.basename(cwd) : 'global'));
+      : (cwd ? path.basename(cwd) : 'global');
 
     const recurrence = input.recurrence || detectRecurrence(input.title);
     const targetDate = input.targetDate || detectTargetDate(input.title, now);
