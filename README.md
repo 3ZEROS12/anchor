@@ -80,7 +80,7 @@ Anchor models cross-session engineering tasks as self-evicting promissory notes.
 ### 1. Zero Repository Contamination
 Anchor never creates local `.anchor` folders or touches your project git tree. All state resides in user-global storage:
 ```text
-~/.pi/agent/anchors/
+~/.anchor/
 ├── state.json           # Active and sleeping task state (< 10KB, atomic write)
 ├── archive.jsonl        # Append-only ledger of settled contracts
 └── graveyard.jsonl      # Append-only log of decayed and evicted items
@@ -152,7 +152,7 @@ The dashboard groups active tasks into four cognitive quadrants:
 | Feature | `gastownhall/beads` | `Gentleman-Programming/engram` | `AGENTS.md` / `TODO.md` | **Anchor ⚓** |
 | :--- | :--- | :--- | :--- | :--- |
 | **Data Architecture** | Distributed SQL Graph | Vector/SQLite Memory | Static Markdown | **Lightweight Atomic State Machine** |
-| **Workspace Hygiene** | Pollutes repo with 200MB Dolt | System daemon | **Pollutes git commit history** | **100% Zero repo pollution (`~/.pi/agent/anchors/`)** |
+| **Workspace Hygiene** | Pollutes repo with 200MB Dolt | System daemon | **Pollutes git commit history** | **100% Zero repo pollution (`~/.anchor/`)** |
 | **Token Cost** | Medium/High per turn | High (full prompt injection) | Severe (stale text accumulates) | **0 Tokens idle (JIT file touch only)** |
 | **Cognitive Timeline**| Flat list | Flat list | Static checklist | **Dual-timeline (Target Date + Creation Time)** |
 | **Closure Mechanism** | Manual CLI close | Passive storage | Manual file edit | **Git Commit auto-match + One-tap exit settlement** |

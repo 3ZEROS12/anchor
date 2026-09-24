@@ -128,6 +128,38 @@ export function getTodayDateString(timestamp: number = Date.now()): string {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * Resolve the canonical sovereign storage directory for Anchor.
+ * Hierarchy:
+ * 1. Process environment: ANCHOR_DIR
+ * 2. Canonical user-global store: ~/.anchor/
+ * 3. Legacy Pi harness fallback: ~/.pi/agent/anchors/ (migrates automatically if present)
+ */
+export function getDefaultStorageDir(): string {
+  if (process.env.ANCHOR_DIR) {
+    return path.resolve(process.env.ANCHOR_DIR);
+  }
+
+  const primaryDir = path.join(os.homedir(), '.anchor');
+  const legacyPiDir = path.join(os.homedir(), '.pi', 'agent', 'anchors');
+
+  // Automatic seamless migration from legacy Pi directory if present
+  if (!fs.existsSync(primaryDir) && fs.existsSync(legacyPiDir)) {
+    try {
+      fs.mkdirSync(primaryDir, { recursive: true });
+      for (const file of ['state.json', 'archive.jsonl', 'graveyard.jsonl']) {
+        const src = path.join(legacyPiDir, file);
+        const dest = path.join(primaryDir, file);
+        if (fs.existsSync(src) && !fs.existsSync(dest)) {
+          fs.copyFileSync(src, dest);
+        }
+      }
+    } catch {}
+  }
+
+  return primaryDir;
+}
+
 export class AnchorStore {
   public readonly storageDir: string;
   public readonly statePath: string;
@@ -138,7 +170,7 @@ export class AnchorStore {
     if (customStorageDir) {
       this.storageDir = path.resolve(customStorageDir);
     } else {
-      this.storageDir = path.join(os.homedir(), '.pi', 'agent', 'anchors');
+      this.storageDir = getDefaultStorageDir();
     }
     this.statePath = path.join(this.storageDir, 'state.json');
     this.archivePath = path.join(this.storageDir, 'archive.jsonl');

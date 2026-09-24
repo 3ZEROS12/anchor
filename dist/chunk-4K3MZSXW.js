@@ -234,6 +234,27 @@ function getTodayDateString(timestamp = Date.now()) {
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+function getDefaultStorageDir() {
+  if (process.env.ANCHOR_DIR) {
+    return path2.resolve(process.env.ANCHOR_DIR);
+  }
+  const primaryDir = path2.join(os.homedir(), ".anchor");
+  const legacyPiDir = path2.join(os.homedir(), ".pi", "agent", "anchors");
+  if (!fs.existsSync(primaryDir) && fs.existsSync(legacyPiDir)) {
+    try {
+      fs.mkdirSync(primaryDir, { recursive: true });
+      for (const file of ["state.json", "archive.jsonl", "graveyard.jsonl"]) {
+        const src = path2.join(legacyPiDir, file);
+        const dest = path2.join(primaryDir, file);
+        if (fs.existsSync(src) && !fs.existsSync(dest)) {
+          fs.copyFileSync(src, dest);
+        }
+      }
+    } catch {
+    }
+  }
+  return primaryDir;
+}
 var AnchorStore = class {
   storageDir;
   statePath;
@@ -243,7 +264,7 @@ var AnchorStore = class {
     if (customStorageDir) {
       this.storageDir = path2.resolve(customStorageDir);
     } else {
-      this.storageDir = path2.join(os.homedir(), ".pi", "agent", "anchors");
+      this.storageDir = getDefaultStorageDir();
     }
     this.statePath = path2.join(this.storageDir, "state.json");
     this.archivePath = path2.join(this.storageDir, "archive.jsonl");
@@ -984,6 +1005,7 @@ export {
   detectTargetDate,
   detectRecurrence,
   getTodayDateString,
+  getDefaultStorageDir,
   AnchorStore,
   SessionTouchObserver,
   evaluateAnchorDecay,

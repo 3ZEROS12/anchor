@@ -48,6 +48,7 @@ __export(index_exports, {
   formatSettlementCard: () => formatSettlementCard,
   formatTargetDate: () => formatTargetDate,
   generateSettlementProposals: () => generateSettlementProposals,
+  getDefaultStorageDir: () => getDefaultStorageDir,
   getDisplayWidth: () => getDisplayWidth,
   getEphemeralDecayPolicy: () => getEphemeralDecayPolicy,
   getTodayDateString: () => getTodayDateString,
@@ -304,6 +305,27 @@ function getTodayDateString(timestamp = Date.now()) {
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+function getDefaultStorageDir() {
+  if (process.env.ANCHOR_DIR) {
+    return import_node_path2.default.resolve(process.env.ANCHOR_DIR);
+  }
+  const primaryDir = import_node_path2.default.join(import_node_os.default.homedir(), ".anchor");
+  const legacyPiDir = import_node_path2.default.join(import_node_os.default.homedir(), ".pi", "agent", "anchors");
+  if (!import_node_fs.default.existsSync(primaryDir) && import_node_fs.default.existsSync(legacyPiDir)) {
+    try {
+      import_node_fs.default.mkdirSync(primaryDir, { recursive: true });
+      for (const file of ["state.json", "archive.jsonl", "graveyard.jsonl"]) {
+        const src = import_node_path2.default.join(legacyPiDir, file);
+        const dest = import_node_path2.default.join(primaryDir, file);
+        if (import_node_fs.default.existsSync(src) && !import_node_fs.default.existsSync(dest)) {
+          import_node_fs.default.copyFileSync(src, dest);
+        }
+      }
+    } catch {
+    }
+  }
+  return primaryDir;
+}
 var AnchorStore = class {
   storageDir;
   statePath;
@@ -313,7 +335,7 @@ var AnchorStore = class {
     if (customStorageDir) {
       this.storageDir = import_node_path2.default.resolve(customStorageDir);
     } else {
-      this.storageDir = import_node_path2.default.join(import_node_os.default.homedir(), ".pi", "agent", "anchors");
+      this.storageDir = getDefaultStorageDir();
     }
     this.statePath = import_node_path2.default.join(this.storageDir, "state.json");
     this.archivePath = import_node_path2.default.join(this.storageDir, "archive.jsonl");
@@ -1060,6 +1082,7 @@ var renderActiveAnchorsContext = renderColdStartAnchorsContext;
   formatSettlementCard,
   formatTargetDate,
   generateSettlementProposals,
+  getDefaultStorageDir,
   getDisplayWidth,
   getEphemeralDecayPolicy,
   getTodayDateString,

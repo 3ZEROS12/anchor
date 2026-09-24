@@ -268,6 +268,27 @@ function getTodayDateString(timestamp = Date.now()) {
   const day = String(d.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+function getDefaultStorageDir() {
+  if (process.env.ANCHOR_DIR) {
+    return import_node_path2.default.resolve(process.env.ANCHOR_DIR);
+  }
+  const primaryDir = import_node_path2.default.join(import_node_os.default.homedir(), ".anchor");
+  const legacyPiDir = import_node_path2.default.join(import_node_os.default.homedir(), ".pi", "agent", "anchors");
+  if (!import_node_fs.default.existsSync(primaryDir) && import_node_fs.default.existsSync(legacyPiDir)) {
+    try {
+      import_node_fs.default.mkdirSync(primaryDir, { recursive: true });
+      for (const file of ["state.json", "archive.jsonl", "graveyard.jsonl"]) {
+        const src = import_node_path2.default.join(legacyPiDir, file);
+        const dest = import_node_path2.default.join(primaryDir, file);
+        if (import_node_fs.default.existsSync(src) && !import_node_fs.default.existsSync(dest)) {
+          import_node_fs.default.copyFileSync(src, dest);
+        }
+      }
+    } catch {
+    }
+  }
+  return primaryDir;
+}
 var AnchorStore = class {
   storageDir;
   statePath;
@@ -277,7 +298,7 @@ var AnchorStore = class {
     if (customStorageDir) {
       this.storageDir = import_node_path2.default.resolve(customStorageDir);
     } else {
-      this.storageDir = import_node_path2.default.join(import_node_os.default.homedir(), ".pi", "agent", "anchors");
+      this.storageDir = getDefaultStorageDir();
     }
     this.statePath = import_node_path2.default.join(this.storageDir, "state.json");
     this.archivePath = import_node_path2.default.join(this.storageDir, "archive.jsonl");
@@ -1107,7 +1128,7 @@ Mark as completed and archive?`
   pi.registerTool({
     name: "anchor",
     label: "Anchor (Cross-session Task Protocol)",
-    description: "Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Stored in the global ledger (~/.pi/agent/anchors/) with zero project repository pollution.",
+    description: "Manage cross-session persistent task contracts that survive terminal restarts and auto-evict upon code changes or settlement. Use when the user asks to retain, pin, remember, or track a multi-session goal across sessions, or when an ongoing commitment must not be forgotten. Actions: pin (create new cross-session anchor), list (view active and sleeping anchors), settle (close and archive a completed anchor), touch (refresh activity), sweep (run decay cleanup). Stored in the global ledger (~/.anchor/) with zero project repository pollution.",
     promptSnippet: "Anchor cross-session task contracts that survive terminal restarts and auto-evict",
     promptGuidelines: [
       'Use `anchor` when the user asks to retain a goal across sessions or record a reminder for later/tonight/tomorrow (e.g. "\u665A\u4E0A\u6E05\u7406\u5783\u573E", "\u660E\u5929\u4F18\u5316X", "\u4FDD\u7559\u4EFB\u52A1\u76F4\u5230\u5B8C\u6210").',
@@ -1154,7 +1175,7 @@ Mark as completed and archive?`
         return {
           content: [{
             type: "text",
-            text: `Successfully anchored task #${anc.id}: "${anc.title}" [${anc.project}]. Stored in global ledger (~/.pi/agent/anchors/).`
+            text: `Successfully anchored task #${anc.id}: "${anc.title}" [${anc.project}]. Stored in global ledger (~/.anchor/).`
           }],
           isError: false
         };

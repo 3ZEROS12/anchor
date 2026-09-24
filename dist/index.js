@@ -17,6 +17,7 @@ import {
   formatSettlementCard,
   formatTargetDate,
   generateSettlementProposals,
+  getDefaultStorageDir,
   getDisplayWidth,
   getEphemeralDecayPolicy,
   getTodayDateString,
@@ -32,7 +33,7 @@ import {
   sweepStore,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-7KT74MHZ.js";
+} from "./chunk-4K3MZSXW.js";
 export {
   AnchorStore,
   DEFAULT_DECAY_POLICY,
@@ -52,6 +53,7 @@ export {
   formatSettlementCard,
   formatTargetDate,
   generateSettlementProposals,
+  getDefaultStorageDir,
   getDisplayWidth,
   getEphemeralDecayPolicy,
   getTodayDateString,

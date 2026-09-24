@@ -103,6 +103,14 @@ declare function detectRecurrence(title: string): 'daily' | undefined;
  * Get current date string 'YYYY-MM-DD' in local timezone
  */
 declare function getTodayDateString(timestamp?: number): string;
+/**
+ * Resolve the canonical sovereign storage directory for Anchor.
+ * Hierarchy:
+ * 1. Process environment: ANCHOR_DIR
+ * 2. Canonical user-global store: ~/.anchor/
+ * 3. Legacy Pi harness fallback: ~/.pi/agent/anchors/ (migrates automatically if present)
+ */
+declare function getDefaultStorageDir(): string;
 declare class AnchorStore {
     readonly storageDir: string;
     readonly statePath: string;
@@ -346,4 +354,4 @@ declare function renderColdStartAnchorsContext(store: AnchorStore, cwdOrNow?: st
 /** Legacy alias for backwards compatibility */
 declare const renderActiveAnchorsContext: typeof renderColdStartAnchorsContext;
 
-export { type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, sweepStore, updateAnchorStatusBar, updateStartupBanner };
+export { type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, sweepStore, updateAnchorStatusBar, updateStartupBanner };
