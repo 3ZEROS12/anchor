@@ -1,5 +1,6 @@
 import type { AnchorStore } from './store.ts';
 import { sweepStore } from './decay.ts';
+import { getTodayDateString } from './store.ts';
 
 /**
  * Render ultra-compact cold-start context block for session turn 1.
@@ -36,8 +37,28 @@ export function renderColdStartAnchorsContext(
     const fileHint = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(', ')})` : '';
     const tagHint = a.tags.length > 0 ? ` [${a.tags.join(', ')}]` : '';
     const projHint = a.cwd ? `[${a.project}]` : '[global]';
-    const duraHint = a.durability === 'ephemeral' ? ' [短期备忘]' : ' [长期目标]';
-    return `• #${a.id} ${projHint}${duraHint} [${a.priority.toUpperCase()}] ${a.title}${tagHint}${fileHint}`;
+
+    // Target cadence hint
+    let targetHint = '';
+    if (a.recurrence === 'daily') {
+      targetHint = ' [今日循环·Daily]';
+    } else if (a.targetDate) {
+      const todayStr = getTodayDateString(now);
+      if (a.targetDate === todayStr) {
+        targetHint = ' [今日聚焦·Due Today]';
+      } else if (a.targetDate < todayStr) {
+        targetHint = ' [已逾期·Overdue]';
+      } else {
+        targetHint = ` [排期:${a.targetDate}]`;
+      }
+    } else {
+      targetHint = ' [长期愿景·Someday]';
+    }
+
+    const ageDays = Math.floor((now - a.createdAt) / (24 * 60 * 60 * 1000));
+    const ageHint = ageDays > 0 ? ` (${ageDays}d old)` : '';
+
+    return `• #${a.id} ${projHint}${targetHint} [${a.priority.toUpperCase()}] ${a.title}${ageHint}${tagHint}${fileHint}`;
   });
 
   return [
@@ -46,7 +67,7 @@ export function renderColdStartAnchorsContext(
     lines.join('\n'),
     ``,
     `CONVERSATIONAL PROTOCOL (HUMAN PARTNER TONE):`,
-    `- If the user opens the session with a casual greeting or continuation ("hi", "在吗", "继续", "早上好"), naturally mention the pending item in a friendly assistant tone (e.g. "嗨！上次提到的【...】现在处理还是看别的？").`,
+    `- If the user opens the session with a casual greeting or continuation ("hi", "在吗", "继续", "早上好"), naturally prioritize items tagged [今日聚焦·Due Today] in a friendly assistant tone (e.g. "嗨！今天规划的【...】现在处理还是看别的？").`,
     `- If the user issues a direct, concrete new instruction (e.g. "帮我查下这个报错"), DO NOT interrupt their flow. Focus directly on their instruction.`,
     `- When a commitment is satisfied during work, automatically call anchor(action="settle", id=...) to clear it.`,
     `</active-anchors>`

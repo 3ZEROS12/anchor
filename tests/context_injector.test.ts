@@ -35,3 +35,17 @@ test('ContextInjector - renders only active anchors, sleeping consume 0 tokens',
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('ContextInjector - renders targetDate and task aging in prompt', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const now = 100_000_000_000;
+
+    store.create({ title: '今天完成优化' });
+    const rendered = renderActiveAnchorsContext(store, now);
+    assert.ok(rendered.includes('[今日聚焦·Due Today]'));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

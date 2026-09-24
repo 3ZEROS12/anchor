@@ -45,16 +45,16 @@ export function getEphemeralDecayPolicy(title: string): AnchorDecayPolicy {
 }
 
 /**
- * Detect expected completion date from title keywords, returning 'YYYY-MM-DD'
+ * Detect expected completion date from title keywords or explicit date string, returning 'YYYY-MM-DD'
  */
-export function detectTargetDate(title: string, now: number = Date.now()): string | undefined {
-  const lower = title.toLowerCase();
+export function detectTargetDate(titleOrDate: string, now: number = Date.now()): string | undefined {
+  const lower = titleOrDate.toLowerCase().trim();
   const MS_DAY = 24 * 60 * 60 * 1000;
 
-  if (lower.includes('今天') || lower.includes('今日') || lower.includes('今晚') || lower.includes('today') || lower.includes('tonight')) {
+  if (lower.includes('今天') || lower.includes('今日') || lower.includes('今晚') || lower === 'today' || lower === 'tonight') {
     return getTodayDateString(now);
   }
-  if (lower.includes('明天') || lower.includes('tomorrow')) {
+  if (lower.includes('明天') || lower === 'tomorrow') {
     return getTodayDateString(now + MS_DAY);
   }
   if (lower.includes('后天')) {
@@ -63,12 +63,44 @@ export function detectTargetDate(title: string, now: number = Date.now()): strin
   if (lower.includes('大后天')) {
     return getTodayDateString(now + 3 * MS_DAY);
   }
-  const fullDateMatch = title.match(/\b(20\d\d)-(\d{1,2})-(\d{1,2})\b/);
+
+  // Weekdays (e.g. 周五, 星期五, 下周一, friday)
+  const weekdayMap: Record<string, number> = {
+    '周日': 0, '星期日': 0, 'sunday': 0, 'sun': 0,
+    '周一': 1, '星期一': 1, 'monday': 1, 'mon': 1,
+    '周二': 2, '星期二': 2, 'tuesday': 2, 'tue': 2,
+    '周三': 3, '星期三': 3, 'wednesday': 3, 'wed': 3,
+    '周四': 4, '星期四': 4, 'thursday': 4, 'thu': 4,
+    '周五': 5, '星期五': 5, 'friday': 5, 'fri': 5,
+    '周六': 6, '星期六': 6, 'saturday': 6, 'sat': 6,
+  };
+
+  const isNextWeek = lower.includes('下周') || lower.includes('next');
+  for (const [name, targetDay] of Object.entries(weekdayMap)) {
+    if (lower.includes(name)) {
+      const curDay = new Date(now).getDay();
+      let diff = targetDay - curDay;
+      if (diff <= 0 || isNextWeek) {
+        diff += 7;
+      }
+      return getTodayDateString(now + diff * MS_DAY);
+    }
+  }
+
+  const fullDateMatch = titleOrDate.match(/\b(20\d\d)-(\d{1,2})-(\d{1,2})\b/);
   if (fullDateMatch) {
     const y = fullDateMatch[1];
     const m = fullDateMatch[2].padStart(2, '0');
     const d = fullDateMatch[3].padStart(2, '0');
     return `${y}-${m}-${d}`;
+  }
+
+  const mmddMatch = titleOrDate.match(/\b(\d{1,2})-(\d{1,2})\b/);
+  if (mmddMatch) {
+    const curYear = new Date(now).getFullYear();
+    const m = mmddMatch[1].padStart(2, '0');
+    const d = mmddMatch[2].padStart(2, '0');
+    return `${curYear}-${m}-${d}`;
   }
 
   return undefined;

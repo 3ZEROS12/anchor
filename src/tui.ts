@@ -3,6 +3,60 @@ import { AnchorStore, getTodayDateString } from './store.ts';
 import type { Anchor } from './types.ts';
 import path from 'node:path';
 
+export type AnchorQuadrant = 'Today' | 'Upcoming' | 'Habits' | 'Backlog';
+
+export interface GroupedAnchors {
+  today: Anchor[];
+  upcoming: Anchor[];
+  habits: Anchor[];
+  backlog: Anchor[];
+}
+
+/**
+ * Classify anchor into one of four cognitive quadrants:
+ * - 'Today': Due today or overdue
+ * - 'Upcoming': Due in the future (tomorrow, in 2d, specific dates)
+ * - 'Habits': Daily recurring habits
+ * - 'Backlog': Open-ended long-term vision
+ */
+export function classifyAnchor(anchor: Anchor, now: number = Date.now()): AnchorQuadrant {
+  if (anchor.recurrence === 'daily') {
+    return 'Habits';
+  }
+  if (!anchor.targetDate) {
+    return 'Backlog';
+  }
+
+  const todayStr = getTodayDateString(now);
+  if (anchor.targetDate <= todayStr) {
+    return 'Today';
+  }
+
+  return 'Upcoming';
+}
+
+/**
+ * Group active anchors by cognitive quadrant
+ */
+export function groupAnchorsByQuadrant(anchors: Anchor[], now: number = Date.now()): GroupedAnchors {
+  const groups: GroupedAnchors = {
+    today: [],
+    upcoming: [],
+    habits: [],
+    backlog: []
+  };
+
+  for (const a of anchors) {
+    const q = classifyAnchor(a, now);
+    if (q === 'Today') groups.today.push(a);
+    else if (q === 'Upcoming') groups.upcoming.push(a);
+    else if (q === 'Habits') groups.habits.push(a);
+    else groups.backlog.push(a);
+  }
+
+  return groups;
+}
+
 /**
  * Calculate display width in terminal columns, accounting for CJK full-width characters (width 2)
  */
@@ -175,11 +229,19 @@ export async function openAnchorDashboard(
     return;
   }
 
+  const groups = groupAnchorsByQuadrant(list);
+  const sortedList = [
+    ...groups.today,
+    ...groups.upcoming,
+    ...groups.habits,
+    ...groups.backlog
+  ];
+
   const optionMap = new Map<string, Anchor>();
   const displayOptions: string[] = [];
 
-  for (let i = 0; i < list.length; i++) {
-    const a = list[i];
+  for (let i = 0; i < sortedList.length; i++) {
+    const a = sortedList[i];
     const idNum = a.id.replace(/^anc-/, '');
     const num = idNum.padStart(2, '0');
     const origin = formatOrigin(a);

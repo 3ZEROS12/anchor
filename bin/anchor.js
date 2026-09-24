@@ -10,6 +10,7 @@ import {
   formatOrigin,
   formatTargetDate,
   formatCreationTime,
+  groupAnchorsByQuadrant,
   padToWidth
 } from '../dist/index.js';
 
@@ -25,27 +26,42 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
     process.exit(0);
   }
 
-  console.log('\n⌖ Anchors:');
-  active.forEach((a) => {
-    const idNum = a.id.replace(/^anc-/, '');
-    const num = idNum.padStart(2, '0');
-    const origin = formatOrigin(a);
-    const target = formatTargetDate(a);
-    const created = formatCreationTime(a.createdAt);
+  console.log(`\n⌖ Anchors (${active.length} active):\n`);
 
-    const titleWithFiles = (a.files && a.files.length > 0)
-      ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
-      : a.title;
+  const groups = groupAnchorsByQuadrant(active);
+  const sections = [
+    { title: 'Today · 今日聚焦', list: groups.today },
+    { title: 'Upcoming · 近期排期', list: groups.upcoming },
+    { title: 'Habits · 每日循环', list: groups.habits },
+    { title: 'Backlog · 长期愿景', list: groups.backlog },
+  ];
 
-    const colNum = `  ${num}  `;
-    const colTitle = padToWidth(titleWithFiles, 28);
-    const colOrigin = padToWidth(origin, 10);
-    const colTarget = padToWidth(target, 12);
-    const colCreated = created;
+  for (const sec of sections) {
+    if (sec.list.length === 0) continue;
+    console.log(`  [${sec.title}]`);
+    sec.list.forEach((a) => {
+      const idNum = a.id.replace(/^anc-/, '');
+      const num = idNum.padStart(2, '0');
+      const origin = formatOrigin(a);
+      const target = formatTargetDate(a);
+      const created = formatCreationTime(a.createdAt);
 
-    console.log(`${colNum}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`);
-  });
-  console.log('\n  Use `anchor done <id>` to complete.\n');
+      const titleWithFiles = (a.files && a.files.length > 0)
+        ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
+        : a.title;
+
+      const colNum = `  ${num}  `;
+      const colTitle = padToWidth(titleWithFiles, 28);
+      const colOrigin = padToWidth(origin, 10);
+      const colTarget = padToWidth(target, 12);
+      const colCreated = created;
+
+      console.log(`${colNum}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`);
+    });
+    console.log('');
+  }
+
+  console.log('  Use `anchor done <id>` to complete.\n');
   process.exit(0);
 }
 
@@ -99,8 +115,24 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
   process.exit(0);
 }
 
-// 5. Pin new task: `anchor <task description>`
+// 5. Pin new task: `anchor <task description> [--due <date>]`
+let targetDateFlag;
+const dueIdx = args.findIndex(a => a === '--due' || a === '-d');
+if (dueIdx !== -1 && args[dueIdx + 1]) {
+  targetDateFlag = args[dueIdx + 1];
+  args.splice(dueIdx, 2);
+}
+
 const title = args.join(' ').trim();
-const anc = store.create({ title, cwd: process.cwd() });
+if (!title) {
+  console.error('Error: task description cannot be empty.');
+  process.exit(1);
+}
+
+const anc = store.create({
+  title,
+  targetDate: targetDateFlag,
+  cwd: process.cwd()
+});
 const targetBadge = anc.targetDate ? ` · ${formatTargetDate(anc)}` : '';
 console.log(`⌖ Pinned #${anc.id}: "${anc.title}" [${anc.project}]${targetBadge}`);
