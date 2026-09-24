@@ -33,15 +33,18 @@ test('AnchorMatcher - exact, prefix, and tag matching', () => {
   assert.strictEqual(match2!.score, 0.85);
   assert.strictEqual(match2!.reason, 'dir-prefix');
 
-  // 3. Tag keyword match
+  // 3. Tags do NOT hijack file touches (robustness against false positive matching)
   const match3 = matchAnchorAgainstTouchedFiles(anchor, ['src/lib/session_cache.ts']);
-  assert.ok(match3);
-  assert.strictEqual(match3!.score, 0.5);
-  assert.strictEqual(match3!.reason, 'tag-keyword');
+  assert.strictEqual(match3, null);
 
-  // 4. No match
-  const match4 = matchAnchorAgainstTouchedFiles(anchor, ['docs/readme.md']);
-  assert.strictEqual(match4, null);
+  // 4. Fileless anchor NEVER matches arbitrary files
+  const filelessAnchor: Anchor = { ...anchor, id: 'anc-fileless', files: [] };
+  const matchFileless = matchAnchorAgainstTouchedFiles(filelessAnchor, ['src/auth/jwt.ts']);
+  assert.strictEqual(matchFileless, null);
+
+  // 5. Unrelated file
+  const match5 = matchAnchorAgainstTouchedFiles(anchor, ['docs/readme.md']);
+  assert.strictEqual(match5, null);
 });
 
 test('AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts)', () => {

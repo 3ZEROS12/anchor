@@ -31,21 +31,24 @@ export function normalizePath(filePath: string, baseCwd?: string): string {
 }
 
 /**
- * Match touched files against an anchor's registered patterns and tags
+ * Match touched files against an anchor's registered physical patterns
+ * Only anchors with explicit files/globs/prefixes are matched against file touches.
+ * Anchors with files: [] (pure mental notes or macro tasks) NEVER trigger on file operations.
  */
 export function matchAnchorAgainstTouchedFiles(
   anchor: Anchor,
   touchedFiles: string[]
 ): TouchMatchResult | null {
+  if (!anchor.files || anchor.files.length === 0) return null;
+
   const normTouched = touchedFiles.map(f => normalizePath(f, anchor.cwd)).filter(Boolean);
   if (normTouched.length === 0) return null;
 
   const matchedExact: string[] = [];
   const matchedPrefix: string[] = [];
-  const matchedKeyword: string[] = [];
 
   for (const touched of normTouched) {
-    // 1. Exact match or configured glob match
+    // Exact match or configured glob match
     for (const pattern of anchor.files) {
       const normPattern = normalizePath(pattern, anchor.cwd);
       if (normPattern === touched) {
@@ -69,16 +72,6 @@ export function matchAnchorAgainstTouchedFiles(
         break;
       }
     }
-
-    // 2. Tag / Domain keyword match across file path parts
-    const touchedLower = touched.toLowerCase();
-    for (const tag of anchor.tags) {
-      const tagLower = tag.toLowerCase();
-      if (touchedLower.includes(tagLower)) {
-        matchedKeyword.push(touched);
-        break;
-      }
-    }
   }
 
   if (matchedExact.length > 0) {
@@ -96,15 +89,6 @@ export function matchAnchorAgainstTouchedFiles(
       score: 0.85,
       matchedFiles: Array.from(new Set(matchedPrefix)),
       reason: 'dir-prefix'
-    };
-  }
-
-  if (matchedKeyword.length > 0) {
-    return {
-      anchor,
-      score: 0.5,
-      matchedFiles: Array.from(new Set(matchedKeyword)),
-      reason: 'tag-keyword'
     };
   }
 
