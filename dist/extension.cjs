@@ -1205,22 +1205,32 @@ function updateStartupBanner(ctx, store) {
   }
   const groups = groupAnchorsByQuadrant(active);
   const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
-  const lines = [
-    `\u2316 Anchor \xB7 ${active.length} active commitments:`
-  ];
   const topItems = sorted.slice(0, 3);
-  for (let i = 0; i < topItems.length; i++) {
-    const a = topItems[i];
-    const num = (i + 1).toString().padStart(2, "0");
-    const q = classifyAnchor(a);
-    const tgt = formatTargetDate(a);
-    const titlePadded = a.title.length > 34 ? a.title.slice(0, 32) + ".." : a.title;
-    lines.push(`  \u2022 [${q}]  ${num} ${titlePadded} (${tgt})`);
-  }
-  if (sorted.length > 3) {
-    lines.push(`  (+${sorted.length - 3} more \xB7 run /anchor to inspect)`);
-  }
-  ctx.ui.setWidget("anchor-startup", lines, { placement: "aboveEditor" });
+  const factory = (_tui, theme) => ({
+    render: (width) => {
+      const maxTitleWidth = Math.max(16, width - 36);
+      const fg = theme?.fg ? theme.fg.bind(theme) : (_c, text) => text;
+      const lines = [
+        fg("accent", `\u2316 Anchor \xB7 ${active.length} active commitments:`)
+      ];
+      for (let i = 0; i < topItems.length; i++) {
+        const a = topItems[i];
+        const num = (i + 1).toString().padStart(2, "0");
+        const q = classifyAnchor(a);
+        const tgt = formatTargetDate(a);
+        const titlePadded = truncateToWidth(a.title, maxTitleWidth);
+        lines.push(`  \u2022 ${fg("muted", `[${q}]`)}  ${fg("dim", num)} ${titlePadded} ${fg("dim", `(${tgt})`)}`);
+      }
+      if (sorted.length > 3) {
+        lines.push(fg("dim", `  (+${sorted.length - 3} more \xB7 run /anchor to inspect)`));
+      }
+      return lines;
+    },
+    invalidate: () => {
+    }
+  });
+  const content = ctx.ui?.theme ? factory : factory().render(80);
+  ctx.ui.setWidget("anchor-startup", content, { placement: "aboveEditor" });
 }
 async function openAnchorDashboard(ctx, store) {
   if (!ctx.hasUI || !ctx.ui) return;
@@ -1426,6 +1436,42 @@ Mark as completed and archive?`
       verifyCommand: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Optional shell command for automated physical verification" })),
       id: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Anchor ID, e.g. anc-1 (for settle or touch)" }))
     }),
+    renderCall(args, theme) {
+      const action = args.action || "list";
+      let title = theme.fg("toolTitle", theme.bold("\u2316 anchor ")) + theme.fg("accent", action);
+      if (action === "pin" && args.title) {
+        const due = args.targetDate ? ` ${theme.fg("dim", `[${args.targetDate}]`)}` : "";
+        const files = args.files && args.files.length > 0 ? ` ${theme.fg("muted", `(${args.files.slice(0, 2).join(", ")})`)}` : "";
+        title += ` "${args.title}"${due}${files}`;
+      } else if (action === "settle" && args.id) {
+        title += ` ${theme.fg("dim", `#${args.id}`)}`;
+      } else if (action === "touch" && args.id) {
+        title += ` ${theme.fg("dim", `#${args.id}`)}`;
+      } else if (action === "list") {
+        if (args.priority) title += ` ${theme.fg("muted", `[${args.priority}]`)}`;
+      }
+      return {
+        render: () => [title],
+        invalidate: () => {
+        }
+      };
+    },
+    renderResult(result, _options, theme) {
+      if (result.isError) {
+        const errText = result.content?.[0]?.text || "Execution failed";
+        return {
+          render: () => [theme.fg("error", `\u2717 ${errText}`)],
+          invalidate: () => {
+          }
+        };
+      }
+      const text = result.content?.[0]?.text || "OK";
+      return {
+        render: () => [theme.fg("success", `\u2714 ${text}`)],
+        invalidate: () => {
+        }
+      };
+    },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       if (!ctx) return { content: [{ type: "text", text: "Error: context required" }], isError: true };
       if (params.action === "pin") {

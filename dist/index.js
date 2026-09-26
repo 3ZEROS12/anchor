@@ -39,7 +39,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-NNYUD5O7.js";
+} from "./chunk-QKBUATPO.js";
 
 // src/protocol.ts
 var AnchorProtocol = class {

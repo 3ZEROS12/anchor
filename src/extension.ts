@@ -212,6 +212,44 @@ export default function (pi: ExtensionAPI) {
       verifyCommand: Type.Optional(Type.String({ description: 'Optional shell command for automated physical verification' })),
       id: Type.Optional(Type.String({ description: 'Anchor ID, e.g. anc-1 (for settle or touch)' }))
     }),
+    renderCall(args: any, theme: any) {
+      const action = args.action || 'list';
+      let title = theme.fg('toolTitle', theme.bold('⌖ anchor ')) + theme.fg('accent', action);
+
+      if (action === 'pin' && args.title) {
+        const due = args.targetDate ? ` ${theme.fg('dim', `[${args.targetDate}]`)}` : '';
+        const files = (args.files && args.files.length > 0)
+          ? ` ${theme.fg('muted', `(${args.files.slice(0, 2).join(', ')})`)}`
+          : '';
+        title += ` "${args.title}"${due}${files}`;
+      } else if (action === 'settle' && args.id) {
+        title += ` ${theme.fg('dim', `#${args.id}`)}`;
+      } else if (action === 'touch' && args.id) {
+        title += ` ${theme.fg('dim', `#${args.id}`)}`;
+      } else if (action === 'list') {
+        if (args.priority) title += ` ${theme.fg('muted', `[${args.priority}]`)}`;
+      }
+
+      return {
+        render: () => [title],
+        invalidate: () => {}
+      };
+    },
+    renderResult(result: any, _options: any, theme: any) {
+      if (result.isError) {
+        const errText = result.content?.[0]?.text || 'Execution failed';
+        return {
+          render: () => [theme.fg('error', `✗ ${errText}`)],
+          invalidate: () => {}
+        };
+      }
+
+      const text = result.content?.[0]?.text || 'OK';
+      return {
+        render: () => [theme.fg('success', `✔ ${text}`)],
+        invalidate: () => {}
+      };
+    },
     async execute(_toolCallId: string, params: any, _signal?: AbortSignal, _onUpdate?: (partial: any) => void, ctx?: ExtensionContext) {
       if (!ctx) return { content: [{ type: 'text', text: 'Error: context required' }], isError: true };
       if (params.action === 'pin') {

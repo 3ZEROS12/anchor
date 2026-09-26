@@ -18,6 +18,8 @@ declare module '@earendil-works/pi-coding-agent' {
     promptSnippet?: string;
     promptGuidelines?: string[];
     parameters: unknown;
+    renderCall?: (args: any, theme: any, context?: any) => any;
+    renderResult?: (result: any, options: any, theme: any, context?: any) => any;
     execute: (
       toolCallId: string,
       params: any,

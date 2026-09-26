@@ -1191,22 +1191,32 @@ function updateStartupBanner(ctx, store) {
   }
   const groups = groupAnchorsByQuadrant(active);
   const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
-  const lines = [
-    `\u2316 Anchor \xB7 ${active.length} active commitments:`
-  ];
   const topItems = sorted.slice(0, 3);
-  for (let i = 0; i < topItems.length; i++) {
-    const a = topItems[i];
-    const num = (i + 1).toString().padStart(2, "0");
-    const q = classifyAnchor(a);
-    const tgt = formatTargetDate(a);
-    const titlePadded = a.title.length > 34 ? a.title.slice(0, 32) + ".." : a.title;
-    lines.push(`  \u2022 [${q}]  ${num} ${titlePadded} (${tgt})`);
-  }
-  if (sorted.length > 3) {
-    lines.push(`  (+${sorted.length - 3} more \xB7 run /anchor to inspect)`);
-  }
-  ctx.ui.setWidget("anchor-startup", lines, { placement: "aboveEditor" });
+  const factory = (_tui, theme) => ({
+    render: (width) => {
+      const maxTitleWidth = Math.max(16, width - 36);
+      const fg = theme?.fg ? theme.fg.bind(theme) : (_c, text) => text;
+      const lines = [
+        fg("accent", `\u2316 Anchor \xB7 ${active.length} active commitments:`)
+      ];
+      for (let i = 0; i < topItems.length; i++) {
+        const a = topItems[i];
+        const num = (i + 1).toString().padStart(2, "0");
+        const q = classifyAnchor(a);
+        const tgt = formatTargetDate(a);
+        const titlePadded = truncateToWidth(a.title, maxTitleWidth);
+        lines.push(`  \u2022 ${fg("muted", `[${q}]`)}  ${fg("dim", num)} ${titlePadded} ${fg("dim", `(${tgt})`)}`);
+      }
+      if (sorted.length > 3) {
+        lines.push(fg("dim", `  (+${sorted.length - 3} more \xB7 run /anchor to inspect)`));
+      }
+      return lines;
+    },
+    invalidate: () => {
+    }
+  });
+  const content = ctx.ui?.theme ? factory : factory().render(80);
+  ctx.ui.setWidget("anchor-startup", content, { placement: "aboveEditor" });
 }
 async function openAnchorDashboard(ctx, store) {
   if (!ctx.hasUI || !ctx.ui) return;
