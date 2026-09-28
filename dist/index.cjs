@@ -1286,16 +1286,16 @@ function makeSafeTaskAnnotation(filePath, anchor) {
   }
   return "\n\n" + formatter(`\u2316 anchor context: #${anchor.id} ${anchor.title} (${anchor.priority.toUpperCase()})`);
 }
-function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
+function renderColdStartAnchorsContext(store, cwdOrNow, nowArg, preflightFailures) {
   let cwd;
   let now = Date.now();
   if (typeof cwdOrNow === "number") {
     now = cwdOrNow;
   } else if (typeof cwdOrNow === "string") {
     cwd = cwdOrNow;
-    if (typeof nowArg === "number") {
-      now = nowArg;
-    }
+  }
+  if (typeof nowArg === "number") {
+    now = nowArg;
   }
   sweepStore(store, now);
   const activeAnchors = store.list({ status: "active", cwd });
@@ -1323,7 +1323,9 @@ function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
     }
     const ageDays = Math.floor((now - a.createdAt) / (24 * 60 * 60 * 1e3));
     const ageHint = ageDays > 0 ? ` (${ageDays}d old)` : "";
-    return `\u2022 #${a.id} ${projHint}${targetHint} [${a.priority.toUpperCase()}] ${a.title}${ageHint}${tagHint}${fileHint}`;
+    const failureSnippet = preflightFailures?.get(a.id);
+    const verifyHint = failureSnippet ? ` [\u26A1 \u7269\u7406\u9A8C\u8BC1\u5931\u8D25: ${failureSnippet.replace(/\s+/g, " ").slice(-100)}]` : a.verifyCommand ? ` [verify: ${a.verifyCommand}]` : "";
+    return `\u2022 #${a.id} ${projHint}${targetHint} [${a.priority.toUpperCase()}] ${a.title}${verifyHint}${ageHint}${tagHint}${fileHint}`;
   });
   return [
     `<active-anchors count="${activeAnchors.length}">`,
@@ -1332,6 +1334,7 @@ function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
     ``,
     `CONVERSATIONAL PROTOCOL (HUMAN PARTNER TONE):`,
     `- If the user opens the session with a casual greeting or continuation ("hi", "\u5728\u5417", "\u7EE7\u7EED", "\u65E9\u4E0A\u597D"), naturally prioritize items tagged [\u4ECA\u65E5\u805A\u7126\xB7Due Today] in a friendly assistant tone (e.g. "\u55E8\uFF01\u4ECA\u5929\u89C4\u5212\u7684\u3010...\u3011\u73B0\u5728\u5904\u7406\u8FD8\u662F\u770B\u522B\u7684\uFF1F").`,
+    `- If an anchor has [\u26A1 \u7269\u7406\u9A8C\u8BC1\u5931\u8D25], its verifyCommand failed on session start. Target the failing assertion directly.`,
     `- If the user issues a direct, concrete new instruction (e.g. "\u5E2E\u6211\u67E5\u4E0B\u8FD9\u4E2A\u62A5\u9519"), DO NOT interrupt their flow. Focus directly on their instruction.`,
     `- When a commitment is satisfied during work, automatically call anchor(action="settle", id=...) to clear it.`,
     `</active-anchors>`

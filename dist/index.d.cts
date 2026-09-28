@@ -397,7 +397,7 @@ declare function makeSafeTaskAnnotation(filePath: string, anchor: Anchor): strin
  * Only active anchors for the current project context are injected.
  * From turn 2 onwards, this returns empty string (0 tokens).
  */
-declare function renderColdStartAnchorsContext(store: AnchorStore, cwdOrNow?: string | number, nowArg?: number): string;
+declare function renderColdStartAnchorsContext(store: AnchorStore, cwdOrNow?: string | number, nowArg?: number, preflightFailures?: Map<string, string>): string;
 /** Legacy alias for backwards compatibility */
 declare const renderActiveAnchorsContext: typeof renderColdStartAnchorsContext;
 

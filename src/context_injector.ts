@@ -89,7 +89,8 @@ export function makeSafeTaskAnnotation(filePath: string, anchor: Anchor): string
 export function renderColdStartAnchorsContext(
   store: AnchorStore,
   cwdOrNow?: string | number,
-  nowArg?: number
+  nowArg?: number,
+  preflightFailures?: Map<string, string>
 ): string {
   let cwd: string | undefined;
   let now = Date.now();
@@ -98,9 +99,9 @@ export function renderColdStartAnchorsContext(
     now = cwdOrNow;
   } else if (typeof cwdOrNow === 'string') {
     cwd = cwdOrNow;
-    if (typeof nowArg === 'number') {
-      now = nowArg;
-    }
+  }
+  if (typeof nowArg === 'number') {
+    now = nowArg;
   }
 
   // 1. Run opportunistic sweep to ensure expired anchors don't leak into context
@@ -137,7 +138,14 @@ export function renderColdStartAnchorsContext(
     const ageDays = Math.floor((now - a.createdAt) / (24 * 60 * 60 * 1000));
     const ageHint = ageDays > 0 ? ` (${ageDays}d old)` : '';
 
-    return `• #${a.id} ${projHint}${targetHint} [${a.priority.toUpperCase()}] ${a.title}${ageHint}${tagHint}${fileHint}`;
+    const failureSnippet = preflightFailures?.get(a.id);
+    const verifyHint = failureSnippet
+      ? ` [⚡ 物理验证失败: ${failureSnippet.replace(/\s+/g, ' ').slice(-100)}]`
+      : a.verifyCommand
+        ? ` [verify: ${a.verifyCommand}]`
+        : '';
+
+    return `• #${a.id} ${projHint}${targetHint} [${a.priority.toUpperCase()}] ${a.title}${verifyHint}${ageHint}${tagHint}${fileHint}`;
   });
 
   return [
@@ -147,6 +155,7 @@ export function renderColdStartAnchorsContext(
     ``,
     `CONVERSATIONAL PROTOCOL (HUMAN PARTNER TONE):`,
     `- If the user opens the session with a casual greeting or continuation ("hi", "在吗", "继续", "早上好"), naturally prioritize items tagged [今日聚焦·Due Today] in a friendly assistant tone (e.g. "嗨！今天规划的【...】现在处理还是看别的？").`,
+    `- If an anchor has [⚡ 物理验证失败], its verifyCommand failed on session start. Target the failing assertion directly.`,
     `- If the user issues a direct, concrete new instruction (e.g. "帮我查下这个报错"), DO NOT interrupt their flow. Focus directly on their instruction.`,
     `- When a commitment is satisfied during work, automatically call anchor(action="settle", id=...) to clear it.`,
     `</active-anchors>`

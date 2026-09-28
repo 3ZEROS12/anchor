@@ -8,6 +8,7 @@ import { normalizePath, findMatchedAnchors } from './matcher.ts';
 import { sweepStore } from './decay.ts';
 import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner } from './tui.ts';
 import { execSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 
 const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
@@ -17,16 +18,51 @@ export default function (pi: ExtensionAPI) {
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
   const annotatedThisSession = new Set<string>();
+  const preflightFailures = new Map<string, string>();
 
-  // 1. Session start: sweep stale tasks, update TUI status bar, and render startup banner
+  // 1. Session start: sweep stale tasks, run physical pre-flight tests, update TUI status bar
   pi.on('session_start', async (event: any, ctx: ExtensionContext) => {
     observer.clear();
     annotatedThisSession.clear();
+    preflightFailures.clear();
+
     const sweep = sweepStore(store);
 
     if (sweep.transitionedToSleeping.length > 0) {
       ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} 个非活跃任务已进入休眠`, 'info');
     }
+
+    // Physical Pre-flight Verification: auto-settle passing tasks or record failing output
+    const activeAnchors = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active');
+    for (const a of activeAnchors) {
+      if (a.verifyCommand) {
+        try {
+          const res = runPhysicalVerification(a, ctx.cwd);
+          if (res.success) {
+            store.settle(a.id, {
+              settledBy: 'verification-test',
+              summary: `Physical pre-flight test passed: ${a.verifyCommand}`
+            });
+            ctx.ui.notify(`⚓ 物理验证通过！锚点 #${a.id} ("${a.title}") 已自动结案归档。`, 'info');
+          } else {
+            preflightFailures.set(a.id, res.output.slice(-250));
+          }
+        } catch (_) {}
+      }
+    }
+
+    // Exit Guard notification check
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || '';
+      const pendingPath = path.join(home, '.anchor', 'pending_exit.json');
+      if (fs.existsSync(pendingPath)) {
+        const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf-8'));
+        if (pending.cwd === ctx.cwd && Date.now() - pending.timestamp < 24 * 60 * 60 * 1000) {
+          ctx.ui.notify(`⌖ [Anchor 退出守护] 检测到上次异常退出且有 ${pending.modifiedCount} 个未提交改动，可用 anchor(action="pin") 固化任务。`, 'info');
+        }
+        fs.unlinkSync(pendingPath);
+      }
+    } catch (_) {}
 
     updateAnchorStatusBar(ctx, store);
 
@@ -50,7 +86,7 @@ export default function (pi: ExtensionAPI) {
     const isColdStart = messageTurns.length <= 1;
 
     if (isColdStart) {
-      const contextSnippet = renderColdStartAnchorsContext(store, ctx.cwd);
+      const contextSnippet = renderColdStartAnchorsContext(store, ctx.cwd, undefined, preflightFailures);
       if (contextSnippet) {
         return {
           systemPrompt: `${event.systemPrompt}\n\n${contextSnippet}`
@@ -396,6 +432,32 @@ export default function (pi: ExtensionAPI) {
       const anc = store.create({ title, cwd: ctx.cwd });
       ctx.ui.notify(`⌖ Pinned #${anc.id}: "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+
+  // 7. Exit Guard: detect uncommitted changes on abrupt session shutdown
+  pi.on('session_shutdown', async (event: any, ctx: ExtensionContext) => {
+    if (event.reason === 'quit') {
+      try {
+        const gitStatus = execSync('git status --porcelain', {
+          cwd: ctx.cwd,
+          encoding: 'utf-8',
+          timeout: 2000,
+          stdio: ['ignore', 'pipe', 'ignore']
+        }).trim();
+
+        const activeAnchors = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active');
+        if (gitStatus && activeAnchors.length === 0) {
+          const home = process.env.HOME || process.env.USERPROFILE || '';
+          const pendingPath = path.join(home, '.anchor', 'pending_exit.json');
+          const data = {
+            cwd: ctx.cwd,
+            timestamp: Date.now(),
+            modifiedCount: gitStatus.split('\n').filter(Boolean).length
+          };
+          fs.writeFileSync(pendingPath, JSON.stringify(data, null, 2), 'utf-8');
+        }
+      } catch (_) {}
     }
   });
 }

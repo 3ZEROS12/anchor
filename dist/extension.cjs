@@ -965,16 +965,16 @@ function makeSafeTaskAnnotation(filePath, anchor) {
   }
   return "\n\n" + formatter(`\u2316 anchor context: #${anchor.id} ${anchor.title} (${anchor.priority.toUpperCase()})`);
 }
-function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
+function renderColdStartAnchorsContext(store, cwdOrNow, nowArg, preflightFailures) {
   let cwd;
   let now = Date.now();
   if (typeof cwdOrNow === "number") {
     now = cwdOrNow;
   } else if (typeof cwdOrNow === "string") {
     cwd = cwdOrNow;
-    if (typeof nowArg === "number") {
-      now = nowArg;
-    }
+  }
+  if (typeof nowArg === "number") {
+    now = nowArg;
   }
   sweepStore(store, now);
   const activeAnchors = store.list({ status: "active", cwd });
@@ -1002,7 +1002,9 @@ function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
     }
     const ageDays = Math.floor((now - a.createdAt) / (24 * 60 * 60 * 1e3));
     const ageHint = ageDays > 0 ? ` (${ageDays}d old)` : "";
-    return `\u2022 #${a.id} ${projHint}${targetHint} [${a.priority.toUpperCase()}] ${a.title}${ageHint}${tagHint}${fileHint}`;
+    const failureSnippet = preflightFailures?.get(a.id);
+    const verifyHint = failureSnippet ? ` [\u26A1 \u7269\u7406\u9A8C\u8BC1\u5931\u8D25: ${failureSnippet.replace(/\s+/g, " ").slice(-100)}]` : a.verifyCommand ? ` [verify: ${a.verifyCommand}]` : "";
+    return `\u2022 #${a.id} ${projHint}${targetHint} [${a.priority.toUpperCase()}] ${a.title}${verifyHint}${ageHint}${tagHint}${fileHint}`;
   });
   return [
     `<active-anchors count="${activeAnchors.length}">`,
@@ -1011,6 +1013,7 @@ function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
     ``,
     `CONVERSATIONAL PROTOCOL (HUMAN PARTNER TONE):`,
     `- If the user opens the session with a casual greeting or continuation ("hi", "\u5728\u5417", "\u7EE7\u7EED", "\u65E9\u4E0A\u597D"), naturally prioritize items tagged [\u4ECA\u65E5\u805A\u7126\xB7Due Today] in a friendly assistant tone (e.g. "\u55E8\uFF01\u4ECA\u5929\u89C4\u5212\u7684\u3010...\u3011\u73B0\u5728\u5904\u7406\u8FD8\u662F\u770B\u522B\u7684\uFF1F").`,
+    `- If an anchor has [\u26A1 \u7269\u7406\u9A8C\u8BC1\u5931\u8D25], its verifyCommand failed on session start. Target the failing assertion directly.`,
     `- If the user issues a direct, concrete new instruction (e.g. "\u5E2E\u6211\u67E5\u4E0B\u8FD9\u4E2A\u62A5\u9519"), DO NOT interrupt their flow. Focus directly on their instruction.`,
     `- When a commitment is satisfied during work, automatically call anchor(action="settle", id=...) to clear it.`,
     `</active-anchors>`
@@ -1277,17 +1280,51 @@ async function openAnchorDashboard(ctx, store) {
 
 // src/extension.ts
 var import_node_child_process2 = require("child_process");
+var import_node_fs3 = __toESM(require("fs"), 1);
+var import_node_path5 = __toESM(require("path"), 1);
 var MUTATION_TOOLS2 = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
 function extension_default(pi) {
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
   const annotatedThisSession = /* @__PURE__ */ new Set();
+  const preflightFailures = /* @__PURE__ */ new Map();
   pi.on("session_start", async (event, ctx) => {
     observer.clear();
     annotatedThisSession.clear();
+    preflightFailures.clear();
     const sweep = sweepStore(store);
     if (sweep.transitionedToSleeping.length > 0) {
       ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} \u4E2A\u975E\u6D3B\u8DC3\u4EFB\u52A1\u5DF2\u8FDB\u5165\u4F11\u7720`, "info");
+    }
+    const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
+    for (const a of activeAnchors) {
+      if (a.verifyCommand) {
+        try {
+          const res = runPhysicalVerification(a, ctx.cwd);
+          if (res.success) {
+            store.settle(a.id, {
+              settledBy: "verification-test",
+              summary: `Physical pre-flight test passed: ${a.verifyCommand}`
+            });
+            ctx.ui.notify(`\u2693 \u7269\u7406\u9A8C\u8BC1\u901A\u8FC7\uFF01\u951A\u70B9 #${a.id} ("${a.title}") \u5DF2\u81EA\u52A8\u7ED3\u6848\u5F52\u6863\u3002`, "info");
+          } else {
+            preflightFailures.set(a.id, res.output.slice(-250));
+          }
+        } catch (_) {
+        }
+      }
+    }
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const pendingPath = import_node_path5.default.join(home, ".anchor", "pending_exit.json");
+      if (import_node_fs3.default.existsSync(pendingPath)) {
+        const pending = JSON.parse(import_node_fs3.default.readFileSync(pendingPath, "utf-8"));
+        if (pending.cwd === ctx.cwd && Date.now() - pending.timestamp < 24 * 60 * 60 * 1e3) {
+          ctx.ui.notify(`\u2316 [Anchor \u9000\u51FA\u5B88\u62A4] \u68C0\u6D4B\u5230\u4E0A\u6B21\u5F02\u5E38\u9000\u51FA\u4E14\u6709 ${pending.modifiedCount} \u4E2A\u672A\u63D0\u4EA4\u6539\u52A8\uFF0C\u53EF\u7528 anchor(action="pin") \u56FA\u5316\u4EFB\u52A1\u3002`, "info");
+        }
+        import_node_fs3.default.unlinkSync(pendingPath);
+      }
+    } catch (_) {
     }
     updateAnchorStatusBar(ctx, store);
     if (event.reason !== "resume") {
@@ -1304,7 +1341,7 @@ function extension_default(pi) {
     const messageTurns = entries.filter((e) => e.type === "message");
     const isColdStart = messageTurns.length <= 1;
     if (isColdStart) {
-      const contextSnippet = renderColdStartAnchorsContext(store, ctx.cwd);
+      const contextSnippet = renderColdStartAnchorsContext(store, ctx.cwd, void 0, preflightFailures);
       if (contextSnippet) {
         return {
           systemPrompt: `${event.systemPrompt}
@@ -1601,6 +1638,30 @@ Mark as completed and archive?`
       const anc = store.create({ title, cwd: ctx.cwd });
       ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"`, "info");
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.on("session_shutdown", async (event, ctx) => {
+    if (event.reason === "quit") {
+      try {
+        const gitStatus = (0, import_node_child_process2.execSync)("git status --porcelain", {
+          cwd: ctx.cwd,
+          encoding: "utf-8",
+          timeout: 2e3,
+          stdio: ["ignore", "pipe", "ignore"]
+        }).trim();
+        const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
+        if (gitStatus && activeAnchors.length === 0) {
+          const home = process.env.HOME || process.env.USERPROFILE || "";
+          const pendingPath = import_node_path5.default.join(home, ".anchor", "pending_exit.json");
+          const data = {
+            cwd: ctx.cwd,
+            timestamp: Date.now(),
+            modifiedCount: gitStatus.split("\n").filter(Boolean).length
+          };
+          import_node_fs3.default.writeFileSync(pendingPath, JSON.stringify(data, null, 2), "utf-8");
+        }
+      } catch (_) {
+      }
     }
   });
 }

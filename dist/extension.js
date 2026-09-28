@@ -11,22 +11,56 @@ import {
   sweepStore,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-QKBUATPO.js";
+} from "./chunk-T62PHIQI.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
 import { execSync } from "child_process";
+import fs from "fs";
+import path from "path";
 var MUTATION_TOOLS = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
 function extension_default(pi) {
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
   const annotatedThisSession = /* @__PURE__ */ new Set();
+  const preflightFailures = /* @__PURE__ */ new Map();
   pi.on("session_start", async (event, ctx) => {
     observer.clear();
     annotatedThisSession.clear();
+    preflightFailures.clear();
     const sweep = sweepStore(store);
     if (sweep.transitionedToSleeping.length > 0) {
       ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} \u4E2A\u975E\u6D3B\u8DC3\u4EFB\u52A1\u5DF2\u8FDB\u5165\u4F11\u7720`, "info");
+    }
+    const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
+    for (const a of activeAnchors) {
+      if (a.verifyCommand) {
+        try {
+          const res = runPhysicalVerification(a, ctx.cwd);
+          if (res.success) {
+            store.settle(a.id, {
+              settledBy: "verification-test",
+              summary: `Physical pre-flight test passed: ${a.verifyCommand}`
+            });
+            ctx.ui.notify(`\u2693 \u7269\u7406\u9A8C\u8BC1\u901A\u8FC7\uFF01\u951A\u70B9 #${a.id} ("${a.title}") \u5DF2\u81EA\u52A8\u7ED3\u6848\u5F52\u6863\u3002`, "info");
+          } else {
+            preflightFailures.set(a.id, res.output.slice(-250));
+          }
+        } catch (_) {
+        }
+      }
+    }
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || "";
+      const pendingPath = path.join(home, ".anchor", "pending_exit.json");
+      if (fs.existsSync(pendingPath)) {
+        const pending = JSON.parse(fs.readFileSync(pendingPath, "utf-8"));
+        if (pending.cwd === ctx.cwd && Date.now() - pending.timestamp < 24 * 60 * 60 * 1e3) {
+          ctx.ui.notify(`\u2316 [Anchor \u9000\u51FA\u5B88\u62A4] \u68C0\u6D4B\u5230\u4E0A\u6B21\u5F02\u5E38\u9000\u51FA\u4E14\u6709 ${pending.modifiedCount} \u4E2A\u672A\u63D0\u4EA4\u6539\u52A8\uFF0C\u53EF\u7528 anchor(action="pin") \u56FA\u5316\u4EFB\u52A1\u3002`, "info");
+        }
+        fs.unlinkSync(pendingPath);
+      }
+    } catch (_) {
     }
     updateAnchorStatusBar(ctx, store);
     if (event.reason !== "resume") {
@@ -43,7 +77,7 @@ function extension_default(pi) {
     const messageTurns = entries.filter((e) => e.type === "message");
     const isColdStart = messageTurns.length <= 1;
     if (isColdStart) {
-      const contextSnippet = renderColdStartAnchorsContext(store, ctx.cwd);
+      const contextSnippet = renderColdStartAnchorsContext(store, ctx.cwd, void 0, preflightFailures);
       if (contextSnippet) {
         return {
           systemPrompt: `${event.systemPrompt}
@@ -340,6 +374,30 @@ Mark as completed and archive?`
       const anc = store.create({ title, cwd: ctx.cwd });
       ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"`, "info");
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.on("session_shutdown", async (event, ctx) => {
+    if (event.reason === "quit") {
+      try {
+        const gitStatus = execSync("git status --porcelain", {
+          cwd: ctx.cwd,
+          encoding: "utf-8",
+          timeout: 2e3,
+          stdio: ["ignore", "pipe", "ignore"]
+        }).trim();
+        const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
+        if (gitStatus && activeAnchors.length === 0) {
+          const home = process.env.HOME || process.env.USERPROFILE || "";
+          const pendingPath = path.join(home, ".anchor", "pending_exit.json");
+          const data = {
+            cwd: ctx.cwd,
+            timestamp: Date.now(),
+            modifiedCount: gitStatus.split("\n").filter(Boolean).length
+          };
+          fs.writeFileSync(pendingPath, JSON.stringify(data, null, 2), "utf-8");
+        }
+      } catch (_) {
+      }
     }
   });
 }

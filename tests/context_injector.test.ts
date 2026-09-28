@@ -49,3 +49,24 @@ test('ContextInjector - renders targetDate and task aging in prompt', () => {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('ContextInjector - renders preflight failure hints into cold-start context', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const now = 100_000_000_000;
+
+    const a1 = store.create({ title: 'Failing test task', verifyCommand: 'npm test' });
+    store.touch(a1.id, now);
+
+    const failures = new Map<string, string>();
+    failures.set(a1.id, 'AssertionError: expected 200 to be 500');
+
+    const rendered = renderActiveAnchorsContext(store, undefined, now, failures);
+    assert.ok(rendered.includes('Failing test task'));
+    assert.ok(rendered.includes('物理验证失败'));
+    assert.ok(rendered.includes('AssertionError: expected 200 to be 500'));
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
