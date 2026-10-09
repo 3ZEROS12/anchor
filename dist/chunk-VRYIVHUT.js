@@ -1066,8 +1066,9 @@ function groupAnchorsByQuadrant(anchors, now = Date.now()) {
   }
   return groups;
 }
+var ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 function stripAnsi(str) {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
+  return str.replace(ANSI_REGEX, "");
 }
 function getDisplayWidth(str) {
   const clean = stripAnsi(str);
@@ -1086,22 +1087,35 @@ function getDisplayWidth(str) {
   return width;
 }
 function truncateToWidth(str, maxWidth, ellipsis = "\u2026") {
-  const current = getDisplayWidth(str);
-  if (current <= maxWidth) return str;
+  if (maxWidth <= 0) return "";
+  const totalWidth = getDisplayWidth(str);
+  if (totalWidth <= maxWidth) return str;
   const ellipsisWidth = getDisplayWidth(ellipsis);
-  const target = maxWidth - ellipsisWidth;
-  if (target <= 0) return ellipsis.slice(0, maxWidth);
+  const target = Math.max(0, maxWidth - ellipsisWidth);
+  if (target === 0) return ellipsis.slice(0, maxWidth);
   let accumulated = "";
   let accumWidth = 0;
-  for (const char of str) {
-    const charWidth = getDisplayWidth(char);
+  let i = 0;
+  while (i < str.length) {
+    ANSI_REGEX.lastIndex = i;
+    const match = ANSI_REGEX.exec(str);
+    if (match && match.index === i) {
+      accumulated += match[0];
+      i += match[0].length;
+      continue;
+    }
+    const codePoint = str.codePointAt(i) || 0;
+    const charLen = codePoint > 65535 ? 2 : 1;
+    const fullChar = str.slice(i, i + charLen);
+    const charWidth = getDisplayWidth(fullChar);
     if (accumWidth + charWidth > target) {
       break;
     }
-    accumulated += char;
+    accumulated += fullChar;
     accumWidth += charWidth;
+    i += charLen;
   }
-  return accumulated + ellipsis;
+  return accumulated + ellipsis + (str.includes("\x1B") ? "\x1B[0m" : "");
 }
 function padToWidth(str, targetWidth) {
   const truncated = truncateToWidth(str, targetWidth);

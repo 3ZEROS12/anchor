@@ -52,13 +52,14 @@
   "publishConfig": {
     "access": "public"
   },
+  "peerDependencies": {
+    "@sinclair/typebox": "*"
+  },
   "devDependencies": {
+    "@sinclair/typebox": "^0.34.52",
     "@types/node": "^26.6.2",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",
     "typescript": "^5.8.2"
-  },
-  "dependencies": {
-    "@sinclair/typebox": "^0.34.52"
   }
 }

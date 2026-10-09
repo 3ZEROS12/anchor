@@ -11,7 +11,8 @@ import {
   formatTargetDate,
   formatCreationTime,
   getDisplayWidth,
-  padToWidth
+  padToWidth,
+  truncateToWidth
 } from '../src/tui.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
@@ -169,3 +170,22 @@ test('AnchorTUI - updateStartupBanner renders clean widget above editor', () => 
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('AnchorTUI - truncateToWidth properly handles ANSI escape sequences and bounds width', () => {
+  const ansiStyled = '\x1b[38;2;131;192;146m\x1b[1m⌖ anchor \x1b[22m\x1b[39m\x1b[38;2;131;192;146mpin\x1b[39m "College重构前置查阅外部架构参考库" \x1b[38;2;133;146;137m(D:/College/优化/EXTERNAL_ARCHITECTURE_INSPIRATIONS.md, D:/College/优化/CURRENT_MISSION_STATE.md)\x1b[39m';
+
+  const origWidth = getDisplayWidth(ansiStyled);
+  assert.ok(origWidth > 120);
+
+  const truncated120 = truncateToWidth(ansiStyled, 120);
+  assert.ok(getDisplayWidth(truncated120) <= 120);
+  assert.ok(truncated120.includes('…'));
+
+  const truncated80 = truncateToWidth(ansiStyled, 80);
+  assert.ok(getDisplayWidth(truncated80) <= 80);
+  assert.ok(truncated80.includes('…'));
+
+  const shortStr = 'hello world';
+  assert.strictEqual(truncateToWidth(shortStr, 50), 'hello world');
+});
+

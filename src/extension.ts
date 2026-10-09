@@ -6,7 +6,7 @@ import { renderColdStartAnchorsContext, renderActiveAnchorsContext, makeSafeTask
 import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
 import { normalizePath, findMatchedAnchors } from './matcher.ts';
 import { sweepStore } from './decay.ts';
-import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner } from './tui.ts';
+import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner, truncateToWidth } from './tui.ts';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -267,7 +267,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       return {
-        render: () => [title],
+        render: (width: number) => [truncateToWidth(title, width)],
         invalidate: () => {}
       };
     },
@@ -275,14 +275,14 @@ export default function (pi: ExtensionAPI) {
       if (result.isError) {
         const errText = result.content?.[0]?.text || 'Execution failed';
         return {
-          render: () => [theme.fg('error', `✗ ${errText}`)],
+          render: (width: number) => [truncateToWidth(theme.fg('error', `✗ ${errText}`), width)],
           invalidate: () => {}
         };
       }
 
       const text = result.content?.[0]?.text || 'OK';
       return {
-        render: () => [theme.fg('success', `✔ ${text}`)],
+        render: (width: number) => [truncateToWidth(theme.fg('success', `✔ ${text}`), width)],
         invalidate: () => {}
       };
     },

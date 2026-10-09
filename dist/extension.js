@@ -9,9 +9,10 @@ import {
   renderColdStartAnchorsContext,
   runPhysicalVerification,
   sweepStore,
+  truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-T62PHIQI.js";
+} from "./chunk-VRYIVHUT.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
@@ -224,7 +225,7 @@ Mark as completed and archive?`
         if (args.priority) title += ` ${theme.fg("muted", `[${args.priority}]`)}`;
       }
       return {
-        render: () => [title],
+        render: (width) => [truncateToWidth(title, width)],
         invalidate: () => {
         }
       };
@@ -233,14 +234,14 @@ Mark as completed and archive?`
       if (result.isError) {
         const errText = result.content?.[0]?.text || "Execution failed";
         return {
-          render: () => [theme.fg("error", `\u2717 ${errText}`)],
+          render: (width) => [truncateToWidth(theme.fg("error", `\u2717 ${errText}`), width)],
           invalidate: () => {
           }
         };
       }
       const text = result.content?.[0]?.text || "OK";
       return {
-        render: () => [theme.fg("success", `\u2714 ${text}`)],
+        render: (width) => [truncateToWidth(theme.fg("success", `\u2714 ${text}`), width)],
         invalidate: () => {
         }
       };

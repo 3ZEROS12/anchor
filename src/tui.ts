@@ -57,11 +57,13 @@ export function groupAnchorsByQuadrant(anchors: Anchor[], now: number = Date.now
   return groups;
 }
 
+const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
+
 /**
  * Strip ANSI escape codes from string
  */
 export function stripAnsi(str: string): string {
-  return str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+  return str.replace(ANSI_REGEX, '');
 }
 
 /**
@@ -124,26 +126,41 @@ export function getDisplayWidth(str: string): number {
  * Truncate string to target terminal visual width with ellipsis
  */
 export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…'): string {
-  const current = getDisplayWidth(str);
-  if (current <= maxWidth) return str;
+  if (maxWidth <= 0) return '';
+  const totalWidth = getDisplayWidth(str);
+  if (totalWidth <= maxWidth) return str;
 
   const ellipsisWidth = getDisplayWidth(ellipsis);
-  const target = maxWidth - ellipsisWidth;
-  if (target <= 0) return ellipsis.slice(0, maxWidth);
+  const target = Math.max(0, maxWidth - ellipsisWidth);
+  if (target === 0) return ellipsis.slice(0, maxWidth);
 
   let accumulated = '';
   let accumWidth = 0;
+  let i = 0;
 
-  for (const char of str) {
-    const charWidth = getDisplayWidth(char);
+  while (i < str.length) {
+    ANSI_REGEX.lastIndex = i;
+    const match = ANSI_REGEX.exec(str);
+    if (match && match.index === i) {
+      accumulated += match[0];
+      i += match[0].length;
+      continue;
+    }
+
+    const codePoint = str.codePointAt(i) || 0;
+    const charLen = codePoint > 0xffff ? 2 : 1;
+    const fullChar = str.slice(i, i + charLen);
+    const charWidth = getDisplayWidth(fullChar);
+
     if (accumWidth + charWidth > target) {
       break;
     }
-    accumulated += char;
+    accumulated += fullChar;
     accumWidth += charWidth;
+    i += charLen;
   }
 
-  return accumulated + ellipsis;
+  return accumulated + ellipsis + (str.includes('\x1b') ? '\x1b[0m' : '');
 }
 
 /**

@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>面向 AI 编程智能体的零污染、零闲置 Token 跨会话任务记忆。</strong><br>
-  <em>告别发霉的 TODO.md。零 Git 历史污染，0 闲置 Token 损耗，写完代码自动闭环核销。</em>
+  <em>告别发霉的 TODO.md。零 Git 历史污染，0 闲置 Token 损耗，代码提交自动核销结算。</em>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
   </a>
   <img src="https://img.shields.io/badge/Node-v20+-22c55e.svg" alt="Node v20+">
   <img src="https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg" alt="TypeScript Strict">
-  <img src="https://img.shields.io/badge/Tests-24%20通过-22c55e.svg" alt="Tests: 24 Passed">
+  <img src="https://img.shields.io/badge/Tests-26%20通过-22c55e.svg" alt="Tests: 26 Passed">
   <img src="https://img.shields.io/badge/启动耗时-%3C%2090ms-success.svg" alt="启动耗时: < 90ms">
   <img src="https://img.shields.io/badge/存储-零仓库污染-success.svg" alt="零仓库污染">
   <img src="https://img.shields.io/badge/开源协议-MIT-f97316.svg" alt="License: MIT">
@@ -38,7 +38,7 @@
 使用终端编程智能体（Claude Code、Pi、Aider 等）进行实际项目开发时，开发者普遍面临三个摩擦：
 
 1. **终端退出即失忆**：按下 `Ctrl+C` 退出终端，Agent 内存中的上下文被全部清空。未完成的代码重构计划、临时交代的排期与多步约定瞬间丢失。
-2. **TODO.md 污染与 Token 泥潭**：直接在工程根目录写 `TODO.md` 或 `AGENTS.md`，不仅会产生大量 Git 杂质提交，而且**每一轮对话都要把几十行陈旧清单塞入 System Prompt**，白白消耗大量 Token 预算，并分散模型对当前核心代码的注意力。
+2. **TODO.md 污染与 Token 泥潭**：直接在工程根目录写 `TODO.md` 或 `AGENTS.md`，会产生大量 Git 杂质提交，且**每一轮对话都要把几十行陈旧清单塞入 System Prompt**，白白消耗大量 Token 预算，并分散模型对当前核心代码的注意力。
 3. **静态清单无限腐烂**：写完代码后，工程师极少会专程打开 Markdown 逐个打勾。未勾选的旧任务烂在仓库里，越积越多。
 
 现有的解决方案大多走向了两个重型极端：
@@ -122,7 +122,7 @@ Anchor 从两个正交的时间维度管理任务，兼顾“何时要交”与�
 * **`[Habits]`（每日循环）**：日常例行循环任务。当天打勾后隐身，明日零点自动复苏。
 * **`[Backlog]`（长期备忘）**：无指定日期的宏观架构愿景（`Someday`）。
 
-### 5. 零心智负担的自动核销闭环
+### 5. 零心智负担的自动核销与生命周期结算
 * **Git Commit 自动语义匹配**：内置基于标准 `Intl.Segmenter` 的多语系分词引擎。代码提交信息（如 `git commit -m "fix(auth): migrate to HttpOnly cookies"`）命中任务描述时自动核销结案。
 * **退出终端一键确认**：检测到本会话修改了任务关联的文件时，退出终端前弹出极简单键确认：
   ```text
@@ -170,7 +170,7 @@ Anchor 从两个正交的时间维度管理任务，兼顾“何时要交”与�
 | **Token 损耗** | 每轮中/高消耗 | 高（注入长文历史） | 极高（陈旧文本成倍累积） | **0 Token 闲置（仅文件触碰 JIT 唤醒）** |
 | **JIT 语法安全** | 不支持文件注释 | 无语法感知 | 静态文本无防护 | **精确匹配 30+ 语言注释，跳过 JSON** |
 | **任务时效** | 单层平铺 | 单层平铺 | 静态复选框 | **双时间维度（交付排期 + 立项时间）** |
-| **核销闭环** | 手动命令 `close` | 无闭环机制 | 人工修改文本打勾 | **Git Commit 自动识别 + 退出前一键核销** |
+| **任务结算与核销** | 手动命令 `close` | 无自动结算机制 | 人工修改文本打勾 | **Git Commit 自动识别 + 退出前一键核销** |
 | **衰减清理** | 手动 prune | 无衰退机制 | 长期堆积发霉 | **静默衰退（临时任务 48h 自动清理）** |
 | **启动耗时** | 重型 CLI 初始化 | Go 守护进程常驻 | 无 | **< 90ms 预打包瞬时秒开** |
 | **环境依赖** | 外部 Dolt 二进制 | 外部 Go 编译产物 | 无 | **零原生外部依赖（纯 TypeScript）** |
