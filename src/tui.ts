@@ -160,6 +160,9 @@ export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…')
     i += charLen;
   }
 
+  // Invariant 11: Guard against trailing open brackets right before ellipsis (e.g. "Fix auth (…" -> "Fix auth…")
+  accumulated = accumulated.replace(/\s*[\(\[\{（【]$/, '');
+
   return accumulated + ellipsis + (str.includes('\x1b') ? '\x1b[0m' : '');
 }
 
@@ -401,16 +404,38 @@ export async function openAnchorDashboard(
     displayOptions.push(label);
   }
 
-  const selected = await ctx.ui.select('⌖ Anchors (enter to complete):', displayOptions);
+  const selected = await ctx.ui.select('⌖ Anchors (select to inspect or settle):', displayOptions);
   if (!selected) return;
 
   const anchor = optionMap.get(selected);
   if (!anchor) return;
 
-  store.settle(anchor.id, { settledBy: 'manual-command' });
-  const successMsg = anchor.recurrence === 'daily'
-    ? `⌖ Completed for today: "${anchor.title}" (resets tomorrow)`
-    : `⌖ Settled: "${anchor.title}"`;
-  ctx.ui.notify(successMsg, 'info');
-  updateAnchorStatusBar(ctx, store);
+  const action = await ctx.ui.select(
+    `⌖ Anchor #${anchor.id}: "${anchor.title}"`,
+    [
+      '✓ Settle (Mark completed and archive)',
+      'ℹ View details & associated files',
+      '↩ Cancel'
+    ]
+  );
+  if (!action || action.startsWith('↩')) return;
+
+  if (action.startsWith('✓')) {
+    store.settle(anchor.id, { settledBy: 'manual-command' });
+    const successMsg = anchor.recurrence === 'daily'
+      ? `⌖ Completed for today: "${anchor.title}" (resets tomorrow)`
+      : `⌖ Settled #${anchor.id}: "${anchor.title}" (/anchor undo to revert)`;
+    ctx.ui.notify(successMsg, 'info');
+    updateAnchorStatusBar(ctx, store);
+  } else if (action.startsWith('ℹ')) {
+    const details = [
+      `#${anchor.id} [${anchor.priority.toUpperCase()}] ${anchor.title}`,
+      anchor.description ? `Description: ${anchor.description}` : null,
+      anchor.targetDate ? `Target Date: ${anchor.targetDate} (${formatTargetDate(anchor)})` : null,
+      anchor.files && anchor.files.length > 0 ? `Files: ${anchor.files.join(', ')}` : null,
+      anchor.verifyCommand ? `Verify Command: ${anchor.verifyCommand}` : null,
+      `Created: ${formatCreationTime(anchor.createdAt)} (in ${anchor.project || 'global'})`
+    ].filter(Boolean).join('\n');
+    ctx.ui.notify(details, 'info');
+  }
 }

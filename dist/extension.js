@@ -12,7 +12,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-VRYIVHUT.js";
+} from "./chunk-B652T7QR.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";

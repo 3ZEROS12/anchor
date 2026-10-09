@@ -83,8 +83,8 @@ test('AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with fol
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
-    let selectTitle = '';
-    let selectOptions: string[] = [];
+    const selectTitles: string[] = [];
+    let initialSelectOptions: string[] = [];
     let notifyMsg = '';
 
     const mockCtx = {
@@ -92,12 +92,14 @@ test('AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with fol
       hasUI: true,
       ui: {
         select: async (title: string, options: string[]) => {
-          selectTitle = title;
-          selectOptions = options;
+          selectTitles.push(title);
+          if (selectTitles.length === 1) {
+            initialSelectOptions = options;
+          }
           for (const opt of options) {
             assert.strictEqual(typeof opt, 'string');
           }
-          return options[0]; // pick first anchor -> directly settles it!
+          return options[0]; // 1st call picks first anchor; 2nd call picks '✓ Settle'
         },
         notify: (msg: string) => {
           notifyMsg = msg;
@@ -115,10 +117,10 @@ test('AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with fol
     store.create({ title: 'Global task', priority: 'p1' });
 
     await openAnchorDashboard(mockCtx, store);
-    assert.ok(selectTitle.includes('Anchors'));
-    assert.ok(selectOptions.some(o => o.includes('01') && o.includes('Refactor auth') && o.includes('project-a') && o.includes('src/auth/jwt.ts')));
-    assert.ok(selectOptions.some(o => o.includes('02') && o.includes('Global task') && o.includes('global')));
-    assert.ok(notifyMsg.includes('Settled:'));
+    assert.ok(selectTitles.some(t => t.includes('Anchors')));
+    assert.ok(initialSelectOptions.some(o => o.includes('01') && o.includes('Refactor auth') && o.includes('project-a') && o.includes('src/auth/jwt.ts')));
+    assert.ok(initialSelectOptions.some(o => o.includes('02') && o.includes('Global task') && o.includes('global')));
+    assert.ok(notifyMsg.includes('Settled'));
     assert.strictEqual(store.list({ cwd: '/workspace/project-a' }).length, 1);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });

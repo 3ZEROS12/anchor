@@ -1115,6 +1115,7 @@ function truncateToWidth(str, maxWidth, ellipsis = "\u2026") {
     accumWidth += charWidth;
     i += charLen;
   }
+  accumulated = accumulated.replace(/\s*[\(\[\{（【]$/, "");
   return accumulated + ellipsis + (str.includes("\x1B") ? "\x1B[0m" : "");
 }
 function padToWidth(str, targetWidth) {
@@ -1268,14 +1269,35 @@ async function openAnchorDashboard(ctx, store) {
     optionMap.set(label, a);
     displayOptions.push(label);
   }
-  const selected = await ctx.ui.select("\u2316 Anchors (enter to complete):", displayOptions);
+  const selected = await ctx.ui.select("\u2316 Anchors (select to inspect or settle):", displayOptions);
   if (!selected) return;
   const anchor = optionMap.get(selected);
   if (!anchor) return;
-  store.settle(anchor.id, { settledBy: "manual-command" });
-  const successMsg = anchor.recurrence === "daily" ? `\u2316 Completed for today: "${anchor.title}" (resets tomorrow)` : `\u2316 Settled: "${anchor.title}"`;
-  ctx.ui.notify(successMsg, "info");
-  updateAnchorStatusBar(ctx, store);
+  const action = await ctx.ui.select(
+    `\u2316 Anchor #${anchor.id}: "${anchor.title}"`,
+    [
+      "\u2713 Settle (Mark completed and archive)",
+      "\u2139 View details & associated files",
+      "\u21A9 Cancel"
+    ]
+  );
+  if (!action || action.startsWith("\u21A9")) return;
+  if (action.startsWith("\u2713")) {
+    store.settle(anchor.id, { settledBy: "manual-command" });
+    const successMsg = anchor.recurrence === "daily" ? `\u2316 Completed for today: "${anchor.title}" (resets tomorrow)` : `\u2316 Settled #${anchor.id}: "${anchor.title}" (/anchor undo to revert)`;
+    ctx.ui.notify(successMsg, "info");
+    updateAnchorStatusBar(ctx, store);
+  } else if (action.startsWith("\u2139")) {
+    const details = [
+      `#${anchor.id} [${anchor.priority.toUpperCase()}] ${anchor.title}`,
+      anchor.description ? `Description: ${anchor.description}` : null,
+      anchor.targetDate ? `Target Date: ${anchor.targetDate} (${formatTargetDate(anchor)})` : null,
+      anchor.files && anchor.files.length > 0 ? `Files: ${anchor.files.join(", ")}` : null,
+      anchor.verifyCommand ? `Verify Command: ${anchor.verifyCommand}` : null,
+      `Created: ${formatCreationTime(anchor.createdAt)} (in ${anchor.project || "global"})`
+    ].filter(Boolean).join("\n");
+    ctx.ui.notify(details, "info");
+  }
 }
 
 export {

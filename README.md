@@ -234,37 +234,55 @@ Engineered with strict TypeScript and 100% standard library test coverage using 
 ```bash
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 npm run typecheck  # Strict tsc --noEmit check (0 errors)
-npm test           # Native Node test runner (24/24 passing)
+npm test           # Native Node test runner (26/26 passing)
 ```
 
 ```text
-✔ Lock - acquireSyncLock acquires, holds, and releases exclusive lockfile (32ms)
-✔ Lock - acquireSyncLock safely reclaims stale lock from dead PID (18ms)
-✔ Context - makeSafeTaskAnnotation produces language-accurate comments and skips JSON (3.1ms)
-✔ Protocol - AnchorProtocol lifecycle handles cold-start and safe JIT (21ms)
-✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens (59ms)
-✔ ContextInjector - renders targetDate and task aging in prompt (10ms)
-✔ AnchorDecay - status evaluation transitions (1.2ms)
-✔ AnchorDecay - sweepStore transitions and graveyard eviction (102ms)
-✔ AnchorMatcher - exact, prefix, and tag matching (2.5ms)
-✔ AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts) (0.7ms)
-✔ AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority (0.4ms)
-✔ SessionTouchObserver - records read, edit, write and commits (25ms)
-✔ SessionTouchObserver - matches CJK commit messages with segmentation (2.0ms)
-✔ SessionTouchObserver - separates read inspection from edit mutation (12ms)
-✔ AnchorStore - basic CRUD & atomic writes (77ms)
-✔ AnchorStore - corrupt state recovery (9.1ms)
-✔ AnchorStore - daily recurring task completes for today and wakes tomorrow (19ms)
-✔ AnchorStore - temporal durability keywords and project detection (10ms)
-✔ AnchorStore - atomicRenameWithRetry successfully replaces files atomically (22ms)
-✔ AnchorTUI - status bar reflects active state cleanly with ⌖ N (23ms)
-✔ AnchorTUI - formatTargetDate and formatCreationTime render clear dual-timeline (38ms)
-✔ AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with folder metadata (26ms)
-✔ AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width columns (0.3ms)
-✔ AnchorTUI - updateStartupBanner renders clean widget above editor (8.7ms)
+✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens
+✔ ContextInjector - renders targetDate and task aging in prompt
+✔ ContextInjector - renders preflight failure hints into cold-start context
+✔ AnchorDecay - status evaluation transitions
+✔ AnchorDecay - sweepStore transitions and graveyard eviction
+✔ AnchorMatcher - exact, prefix, and tag matching
+✔ AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts)
+✔ AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority
+✔ SessionTouchObserver - records read, edit, write and commits
+✔ SessionTouchObserver - matches CJK commit messages with segmentation
+✔ SessionTouchObserver - separates read inspection from edit mutation
+✔ Lock - acquireSyncLock acquires, holds, and releases exclusive lockfile
+✔ Lock - acquireSyncLock safely reclaims stale lock from dead PID
+✔ Context - makeSafeTaskAnnotation produces language-accurate comments and skips JSON
+✔ Protocol - AnchorProtocol lifecycle handles cold-start and safe JIT
+✔ AnchorStore - basic CRUD & atomic writes
+✔ AnchorStore - corrupt state recovery
+✔ AnchorStore - daily recurring task completes for today and wakes tomorrow
+✔ AnchorStore - temporal durability keywords and project detection
+✔ AnchorStore - atomicRenameWithRetry successfully replaces files atomically
+✔ AnchorTUI - status bar reflects active state cleanly with ⌖ N
+✔ AnchorTUI - formatTargetDate and formatCreationTime render clear dual-timeline
+✔ AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with folder metadata
+✔ AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width columns
+✔ AnchorTUI - updateStartupBanner renders clean widget above editor
+✔ AnchorTUI - truncateToWidth properly handles ANSI escape sequences and bounds width
 
-ℹ pass 24, fail 0 (416ms total runtime)
+ℹ pass 26, fail 0
 ```
+
+---
+
+## Author's Note
+
+The motivation behind Anchor came from a recurring headache during pair-programming with AI coding agents: watching `TODO.md` and `AGENTS.md` rot inside my git trees.
+
+Every time a task remained unfinished across sessions, writing it to a project markdown file felt harmless at first. But over weeks of work, two frictions became unbearable:
+1. In multi-turn sessions, the AI dragged dozens of stagnant task lines into the prompt on every single turn, burning hundreds of tokens while diluting the model's focus on the actual code being edited.
+2. Merge conflicts on task checklists in Git commits polluted the repository's history with irrelevant bookkeeping noise.
+
+When I looked at existing solutions, the trade-offs felt disproportionate. Stuffing a 200MB Dolt SQL relational database into the repository root (`beads`), or running a background Go daemon with SQLite and continuous vector retrieval (`engram`), inverted the relationship between tool and developer. A developer task tracker should not demand more system resources than the application being built.
+
+Anchor takes the opposite approach: store state outside the project tree in a lean global ledger (`~/.anchor/state.json`), inject tasks only on Turn 1 of a cold start, keep Turn 2+ at exactly 0 tokens, and auto-settle upon git commits or session exit.
+
+I hope Anchor helps keep your project trees clean and your focus where it belongs: on the code.
 
 ---
 

@@ -233,37 +233,59 @@ pi install npm:pi-anchor
 ```bash
 npm run build      # tsup 双格式打包 (ESM/CJS) 与 .d.ts 类型生成
 npm run typecheck  # TypeScript 严格类型检查 (0 错误)
-npm test           # 全套自动化单元测试 (24/24 全绿通过)
+npm test           # 全套自动化单元测试 (26/26 全绿通过)
 ```
 
 ```text
-✔ Lock - acquireSyncLock acquires, holds, and releases exclusive lockfile (32ms)
-✔ Lock - acquireSyncLock safely reclaims stale lock from dead PID (18ms)
-✔ Context - makeSafeTaskAnnotation produces language-accurate comments and skips JSON (3.1ms)
-✔ Protocol - AnchorProtocol lifecycle handles cold-start and safe JIT (21ms)
-✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens (59ms)
-✔ ContextInjector - renders targetDate and task aging in prompt (10ms)
-✔ AnchorDecay - status evaluation transitions (1.2ms)
-✔ AnchorDecay - sweepStore transitions and graveyard eviction (102ms)
-✔ AnchorMatcher - exact, prefix, and tag matching (2.5ms)
-✔ AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts) (0.7ms)
-✔ AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority (0.4ms)
-✔ SessionTouchObserver - records read, edit, write and commits (25ms)
-✔ SessionTouchObserver - matches CJK commit messages with segmentation (2.0ms)
-✔ SessionTouchObserver - separates read inspection from edit mutation (12ms)
-✔ AnchorStore - basic CRUD & atomic writes (77ms)
-✔ AnchorStore - corrupt state recovery (9.1ms)
-✔ AnchorStore - daily recurring task completes for today and wakes tomorrow (19ms)
-✔ AnchorStore - temporal durability keywords and project detection (10ms)
-✔ AnchorStore - atomicRenameWithRetry successfully replaces files atomically (22ms)
-✔ AnchorTUI - status bar reflects active state cleanly with ⌖ N (23ms)
-✔ AnchorTUI - formatTargetDate and formatCreationTime render clear dual-timeline (38ms)
-✔ AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with folder metadata (26ms)
-✔ AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width columns (0.3ms)
-✔ AnchorTUI - updateStartupBanner renders clean widget above editor (8.7ms)
+✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens
+✔ ContextInjector - renders targetDate and task aging in prompt
+✔ ContextInjector - renders preflight failure hints into cold-start context
+✔ AnchorDecay - status evaluation transitions
+✔ AnchorDecay - sweepStore transitions and graveyard eviction
+✔ AnchorMatcher - exact, prefix, and tag matching
+✔ AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts)
+✔ AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority
+✔ SessionTouchObserver - records read, edit, write and commits
+✔ SessionTouchObserver - matches CJK commit messages with segmentation
+✔ SessionTouchObserver - separates read inspection from edit mutation
+✔ Lock - acquireSyncLock acquires, holds, and releases exclusive lockfile
+✔ Lock - acquireSyncLock safely reclaims stale lock from dead PID
+✔ Context - makeSafeTaskAnnotation produces language-accurate comments and skips JSON
+✔ Protocol - AnchorProtocol lifecycle handles cold-start and safe JIT
+✔ AnchorStore - basic CRUD & atomic writes
+✔ AnchorStore - corrupt state recovery
+✔ AnchorStore - daily recurring task completes for today and wakes tomorrow
+✔ AnchorStore - temporal durability keywords and project detection
+✔ AnchorStore - atomicRenameWithRetry successfully replaces files atomically
+✔ AnchorTUI - status bar reflects active state cleanly with ⌖ N
+✔ AnchorTUI - formatTargetDate and formatCreationTime render clear dual-timeline
+✔ AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with folder metadata
+✔ AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width columns
+✔ AnchorTUI - updateStartupBanner renders clean widget above editor
+✔ AnchorTUI - truncateToWidth properly handles ANSI escape sequences and bounds width
 
-ℹ pass 24, fail 0 (416ms total runtime)
+ℹ pass 26, fail 0
 ```
+
+---
+
+## 作者手记 (Author's Note)
+
+写 Anchor 的最初冲动，来自于我用终端 AI 编程智能体结对开发时经历的一场持续阵痛：看着项目根目录下的 `TODO.md` 与 `AGENTS.md` 在 Git 历史里发霉。
+
+很多时候，写完一段代码已经是深夜，跨会话未完成的任务随手记在项目的 Markdown 里，看起来省事。然而几个月下来，两点物理摩擦让我极其痛苦：
+1. 每一轮对话交互，AI 都要把陈旧的任务清单整段塞进系统提示词，白白烧掉几十上百行 Token，还会分散模型对当前正在修改的代码的注意力；
+2. 团队多人协作或分支合并时，这类任务清单文件频发 Git 合并冲突，无端污染了核心代码的提交历史。
+
+调研现存工具时，我发现社区给出的方案走向了沉重的极端：为了管理几个简单的任务，有的方案直接在代码仓库根目录塞入一个超过 200MB 的 Dolt SQL 关系型数据库（`beads`），有的方案在后台常驻一个用 Go 编写的 SQLite 守护进程并做持续向量检索（`engram`）。一个任务追踪工具消耗的系统资源与认知负担，甚至超过了开发者正在编写的业务代码本身。
+
+这颠倒了工具与生产者的关系。
+
+Anchor 选择了一条极度克制的工程路径：把状态移出代码仓库，托管在用户主目录下的单文件轻量状态表（`~/.anchor/state.json`）；首轮对话注入冷启动上下文，第 2 轮起保持 0 Token 损耗；通过语言对应的语法安全注释在触碰代码时精准唤醒，并在代码提交或会话退出时自动核销。
+
+在这次更新中，我们还为 `/anchor` 增加了防误触详情面板，按回车可以从容查看关联文件与执行命令，彻底消灭误敲回车直接结算的焦虑。
+
+希望 Anchor 能让你的代码仓库保持干净，把专注力还给代码本身。
 
 ---
 
