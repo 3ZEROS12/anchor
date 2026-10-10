@@ -24,7 +24,7 @@
 
     <!-- Window Title -->
     <text x="420" y="38" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="500" fill="#859289" letter-spacing="0.3">
-      Jason@laptop ~ ⌖ anchor (v0.1.0)
+      Jason@laptop ~ ⌖ anchor (v0.2.1)
     </text>
   </g>
 
@@ -63,7 +63,7 @@
     <text x="45" y="244">
       <tspan fill="#859289">  02  </tspan>
       <tspan fill="#dbbc7f">[Upcoming]  </tspan>
-      <tspan fill="#d3c6aa">明天吃香蕉                  </tspan>
+      <tspan fill="#d3c6aa">明天优化并发文件锁单元测试    </tspan>
       <tspan fill="#859289">  Desktop     </tspan>
       <tspan fill="#dbbc7f">Tomorrow    </tspan>
       <tspan fill="#7a8478">Yesterday 21:34</tspan>
@@ -72,7 +72,7 @@
     <text x="45" y="270">
       <tspan fill="#859289">  03  </tspan>
       <tspan fill="#dbbc7f">[Upcoming]  </tspan>
-      <tspan fill="#d3c6aa">明天完成anchor项目前端优化  </tspan>
+      <tspan fill="#d3c6aa">重构鉴权模块为HttpOnly Cookie </tspan>
       <tspan fill="#859289">  Desktop     </tspan>
       <tspan fill="#dbbc7f">Tomorrow    </tspan>
       <tspan fill="#7a8478">Today 10:02</tspan>
@@ -81,7 +81,7 @@
     <text x="45" y="296">
       <tspan fill="#859289">  04  </tspan>
       <tspan fill="#dbbc7f">[Upcoming]  </tspan>
-      <tspan fill="#d3c6aa">后天完成anchor项目上传优化  </tspan>
+      <tspan fill="#d3c6aa">完善CLI交互式仪表盘与TUI组件  </tspan>
       <tspan fill="#859289">  Desktop     </tspan>
       <tspan fill="#dbbc7f">In 2d       </tspan>
       <tspan fill="#7a8478">Today 10:02</tspan>

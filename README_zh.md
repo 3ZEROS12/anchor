@@ -1,61 +1,83 @@
 # ⌖ Anchor
 
-<p align="center">
-  <strong>面向 AI 编程智能体的零污染、零闲置 Token 跨会话任务记忆。</strong><br>
-  <em>告别发霉的 TODO.md。零 Git 历史污染，0 闲置 Token 损耗，代码提交自动核销结算。</em>
-</p>
+面向 AI 编程智能体的零污染、0 闲置 Token 跨会话任务记忆系统。
+
+告别发霉的 TODO.md。零 Git 历史污染，0 闲置 Token 损耗，代码提交自动核销结算。
+
+[![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
+[![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
+[![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
+[![Tests: 26 Passed](https://img.shields.io/badge/Tests-26%20通过-22c55e.svg)](tests/index.test.ts)
+[![零仓库污染](https://img.shields.io/badge/存储-零仓库污染-success.svg)](#1-绝对零仓库污染与跨进程文件锁)
+[![License: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
+
+[English](./README.md) | **简体中文**
 
 <p align="center">
-  <a href="README.md">English</a> •
-  <a href="#为什么需要-anchor">💡 核心痛点</a> •
-  <a href="#核心机制">✨ 核心机制</a> •
-  <a href="#终端交互设计">🖥️ 界面设计</a> •
-  <a href="#横向技术对比">📊 竞品对比</a> •
-  <a href="#快速上手">🚀 快速开始</a> •
-  <a href="#测试与质量保障">🧪 质量验证</a>
+  <img src="assets/hero.svg" alt="Anchor 终端仪表盘实录" width="820">
 </p>
 
-<p align="center">
-  <a href="https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml">
-    <img src="https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg" alt="CI 状态">
-  </a>
-  <img src="https://img.shields.io/badge/Node-v20+-22c55e.svg" alt="Node v20+">
-  <img src="https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg" alt="TypeScript Strict">
-  <img src="https://img.shields.io/badge/Tests-26%20通过-22c55e.svg" alt="Tests: 26 Passed">
-  <img src="https://img.shields.io/badge/启动耗时-%3C%2090ms-success.svg" alt="启动耗时: < 90ms">
-  <img src="https://img.shields.io/badge/存储-零仓库污染-success.svg" alt="零仓库污染">
-  <img src="https://img.shields.io/badge/开源协议-MIT-f97316.svg" alt="License: MIT">
-</p>
+```text
+⌖ Anchors (4 active):
 
-<p align="center">
-  <img src="assets/hero.svg" alt="Anchor 终端仪表盘" width="820">
-</p>
+  [Today · 今日聚焦]
+  01  [Today]     今天完成anchor项目后端优化         Desktop     Today         Today 10:02
+
+  [Upcoming · 近期排期]
+  02  [Upcoming]  明天优化并发文件锁单元测试         Desktop     Tomorrow      Yesterday 21:34
+  03  [Upcoming]  重构鉴权模块为HttpOnly Cookie      Desktop     Tomorrow      Today 10:02
+  04  [Upcoming]  完善CLI交互式仪表盘与TUI组件       Desktop     In 2d         Today 10:02
+
+  Use `anchor done <id>` to complete.
+```
+
+## 一键安装
+
+### Pi Coding Agent 扩展
+在 Pi 终端内直接运行：
+
+```bash
+pi install npm:pi-anchor
+```
+
+### 全局系统 CLI
+在任意 Bash、Zsh 或 PowerShell 中使用：
+
+```bash
+npm install -g pi-anchor
+# 或无需安装直接试用
+npx pi-anchor
+```
 
 ---
 
-## 为什么需要 Anchor？
+## 核心价值：为什么需要 Anchor？
 
-使用终端编程智能体（Claude Code、Pi、Aider 等）进行实际项目开发时，开发者普遍面临三个摩擦：
+使用终端编程智能体（Claude Code、Pi、Aider 等）时，开发者每天都会遇到三个具体痛点：
 
-1. **终端退出即失忆**：按下 `Ctrl+C` 退出终端，Agent 内存中的上下文被全部清空。未完成的代码重构计划、临时交代的排期与多步约定瞬间丢失。
-2. **TODO.md 污染与 Token 泥潭**：直接在工程根目录写 `TODO.md` 或 `AGENTS.md`，会产生大量 Git 杂质提交，且**每一轮对话都要把几十行陈旧清单塞入 System Prompt**，白白消耗大量 Token 预算，并分散模型对当前核心代码的注意力。
-3. **静态清单无限腐烂**：写完代码后，工程师极少会专程打开 Markdown 逐个打勾。未勾选的旧任务烂在仓库里，越积越多。
+### 1. 终端一关即失忆（Session Amnesia）
+按下 `Ctrl+C` 退出终端，Agent 内存中的上下文被彻底清空。未完成的重构计划、临时交代的排期与多步约定瞬间丢失。
 
-现有的解决方案大多走向了两个重型极端：
-* `gastownhall/beads`：往代码仓库里硬塞一个 200MB 的 Dolt 关系型数据库来跟踪任务关系；
-* `Gentleman-Programming/engram`：启动常驻后台的 Go 守护进程，搭配 SQLite 与持续向量检索，带来额外的进程驻留开销与通信延迟。
+### 2. TODO.md 污染 Git 且拖垮上下文
+在工程根目录下维护 `TODO.md` 或 `AGENTS.md`：
+- 会产生大量 `update todo`、`fix checklist` 之类的 Git 杂质提交；
+- **每一轮对话都要把几十行陈旧清单塞入 System Prompt**，白白消耗大量 Token 预算，还会分散模型对当前核心代码的注意力。
 
-**Anchor 选择了最克制、轻量的工程路径**：任务状态统一保存在用户主目录 `~/.anchor/`，被管项目 100% 保持干净；日常工作轮次保持 0 Token 损耗，仅在 Agent 触碰关联代码文件时精准唤醒；代码提交或退出终端时自动核销归档。
+### 3. 告别手动打勾与清单发霉
+写完代码后，工程师极少会专程打开 Markdown 逐个打勾。旧任务烂在仓库里，越积越多。
+现有的第三方工具走向了重型极端（例如 `beads` 往代码库塞入 200MB 的 Dolt 数据库，`engram` 启动常驻后台的 Go 守护进程）。
+
+**Anchor 选择了最克制、轻量的工程解法**：任务状态保存在全局主目录 `~/.anchor/`，工程代码库 100% 纯净；日常写代码轮次保持 0 Token 损耗，仅在触碰关联文件时精准唤醒；代码提交或退出终端时自动核销。
 
 ---
 
-## 核心机制
+## 工作机制：行为-结果矩阵
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│                        Anchor 生命周期状态机                                  │
+│                        Anchor 核心生命周期状态机                             │
 └──────────────────────────────────────┬───────────────────────────────────────┘
-                                       │ 记录任务: /pin "重构鉴权为 HttpOnly Cookie"
+                                       │ 记录任务: anchor "重构鉴权为 HttpOnly Cookie"
                                        ▼
                ┌───────────────────────────────────────────────┐
                │           [活跃期 ACTIVE] (首轮注入提示)        │
@@ -80,215 +102,75 @@
   └──────────────────────────────┘            └────────────────────────────────┘
 ```
 
-### 1. 绝对零仓库污染与跨进程并发文件锁
-Anchor 绝不在被管理的代码工程内创建 `.anchor/` 目录，也不修改本地 Git 树。所有状态统一保存在用户全局主目录：
-```text
-~/.anchor/
-├── state.json           # 活跃与休眠任务状态表（原子写入，< 10KB）
-├── state.lock           # 跨进程排他原子锁（零依赖，PID 自动回收）
-├── archive.jsonl        # 已完成任务的追加归档日志
-└── graveyard.jsonl      # 超期衰减淘汰的清理日志
-```
-
-* **零依赖排他锁**：使用 Node 原生 `fs.openSync(lockPath, 'wx')` 实现跨进程排他锁，彻底消除多终端窗口并发读写 `state.json` 时的竞争覆盖风险。
-* **僵尸锁自动熔断**：写入持有锁进程的 PID 与时间戳。若检测到持有者进程已死亡（`process.kill(pid, 0)`）或锁持有超时（>5000ms），自动安全回收重占。
-* **Windows NTFS 写入重试**：落盘采用临时文件（`state.tmp.${pid}.${timestamp}`）配合原子重命名与自旋重试，彻底杜绝断电或杀进程时的半截文件损坏。
-
-### 2. 0-Token 稳态与多语言语法安全 JIT 唤醒
-* **第 1 轮（冷启动注入）**：通过 `before_agent_start` 识别会话轮次，仅在第一轮为大模型注入当前工程未完成的 Anchor 概览与极简指引。
-* **第 2 轮起（工作流零损耗）**：任务清单彻底从 System Prompt 中隐形。正常写代码轮次消耗 **0 Token**，绝不稀释模型注意力。
-* **多语言精确语法适配**：当 Agent 读写关联文件时，Anchor 依据文件后缀精确匹配合法注释语法，绝不污染代码：
-  - 双斜杠 `//`：`ts`, `tsx`, `js`, `jsx`, `go`, `rs`, `java`, `c`, `cpp`, `cs`, `swift`, `dart`, `zig`
-  - 井号 `#`：`py`, `rb`, `sh`, `bash`, `zsh`, `yaml`, `yml`, `toml`, `dockerfile`, `ps1`
-  - 标记语言 `<!-- -->`：`html`, `xml`, `svg`, `vue`, `svelte`
-  - 块注释 `/* */`：`css`, `scss`, `less`
-  - 短横线 `--`：`sql`, `lua`, `hs`
-* **语法安全防护（严格跳过）**：对 **JSON、ENV、Lockfile 及二进制文件**坚决返回 `null`，绝不强行注入注释，从根本上防止破坏格式解析器。
-* **单会话去重防刷屏**：同一任务在同一会话中多次触碰仅在首次注入单行提示，后续操作保持静默。
-
-### 3. 通用智能体协议解耦 (Universal Agent Protocol)
-Anchor 采用分层解耦架构，核心调度逻辑与具体 Agent 运行时彻底分离：
-* **`AnchorProtocol`（纯核心）**：独立管理状态机、生命周期钩子、JIT 语法过滤与任务匹配，不绑定任何第三方 Agent 运行环境。
-* **`AgentAdapter`（极薄适配层）**：提供统一的宿主桥接接口（`getCwd`, `notify`），几行代码即可适配 Pi 扩展、Claude Code、Cursor、Aider 或自定义 MCP 协议服务。
-
-### 4. 双时间维度：交付排期与立项时效
-Anchor 从两个正交的时间维度管理任务，兼顾“何时要交”与“立项多久”：
-* **交付排期（`targetDate`）**：计划交工日期。支持自然语言词汇（今天、今晚、明天、后天、周五、下周一）自动折算为标准公历日期。界面呈现为 `Today`、`Tomorrow`、`In 2d`、`Daily`、`Someday`。
-* **立项时效（`createdAt`）**：创建时的物理时间戳。界面直观显示为 `Today 10:02`、`Yesterday 21:34` 等。
-
-任务按时间与类型自动分组：
-* **`[Today]`（今日聚焦 & 逾期）**：今日到期或已逾期的任务，当前会话的核心攻坚项。
-* **`[Upcoming]`（近期排期）**：明天、后天或未来指定截期的任务（支持 `--due friday`）。
-* **`[Habits]`（每日循环）**：日常例行循环任务。当天打勾后隐身，明日零点自动复苏。
-* **`[Backlog]`（长期备忘）**：无指定日期的宏观架构愿景（`Someday`）。
-
-### 5. 零心智负担的自动核销与生命周期结算
-* **Git Commit 自动语义匹配**：内置基于标准 `Intl.Segmenter` 的多语系分词引擎。代码提交信息（如 `git commit -m "fix(auth): migrate to HttpOnly cookies"`）命中任务描述时自动核销结案。
-* **退出终端一键确认**：检测到本会话修改了任务关联的文件时，退出终端前弹出极简单键确认：
-  ```text
-  ⌖ 任务核销确认
-  任务 #anc-1 [重构鉴权模块] 关联的文件已在本会话中修改 (src/auth/jwt.ts)。
-  是否标记已完成并归档？ [回车确认] / [Esc 保留]
-  ```
-* **一键撤销（Undo）**：手抖误划掉任务时，敲入 `anchor undo` 瞬间逆向回滚恢复。
+| 动作 / 场景 | 你做什么 | Anchor 幕后动作 | AI 得到什么 | 适用场景 |
+| :--- | :--- | :--- | :--- | :--- |
+| **立项锚定** | 终端输入 `/pin "重构鉴权"` | 原子写入 `~/.anchor/state.json` | 首轮注入任务指引，第 2 轮起脱敏隐形（0 Token） | 跨会话记录多步计划与长效目标 |
+| **代码触碰** | 正常阅读或修改代码 | 自动匹配关联文件后缀 | 注入对应语法的单行安全注释，绝不破坏代码 | Agent 触碰相关业务模块时 |
+| **代码提交** | `git commit -m "feat: ..."` | 借助 `Intl.Segmenter` 分词匹配 | 自动核销任务并归档至 `archive.jsonl` | 完成开发里程碑，自动打勾 |
+| **会话退出** | 输入 `exit` 或退出终端 | 扫描已改动文件与活跃任务的交集 | 弹出单键核销确认：`[Enter 归档] / [Esc 保留]` | 结束会话，零遗漏确认 |
 
 ---
 
-## 终端交互设计
+## 核心特性与工程机制
 
-### 终端状态栏指示
-* 存在活跃任务时：终端底部状态栏显示任务计数 `⌖ 4`。
-* 无活跃任务时：100% 物理隐身（0 字符输出）。
+- 🛡️ **绝对零仓库污染**：所有状态统一保存在用户主目录 `~/.anchor/`，被管项目内绝不创建任何 `.anchor` 目录，Git 提交历史 100% 纯净。
+- ⚡ **0-Token 稳态经济**：第 1 轮冷启动注入任务，第 2 轮起从提示词中彻底隐形。正常写代码轮次消耗 **0 Token**，绝不稀释模型注意力。
+- 🔒 **语法安全 JIT 唤醒**：根据文件后缀动态匹配合法注释（`//`, `#`, `<!-- -->`, `/* */`）。**对 JSON、ENV、Lockfile 坚决返回 null 严格跳过**，从根本上防止破坏格式解析器。
+- ⚙️ **零依赖跨进程排他锁**：使用 Node 原生 `fs.openSync` 保证多终端并发读写安全。内置死锁自动熔断机制，若持有进程死亡或超时，自动安全回收重占。
+- ⏳ **双时间轴管理**：同时跟踪交付排期（`targetDate`: Today, Tomorrow, Friday）与立项时效（`createdAt`: Today 10:02）。支持自然语言词汇自动折算为公历日期。
+- 🧹 **静默衰减与墓地清理**：超期未触碰的任务自动转入休眠期，长期废弃任务自动移入 `graveyard.jsonl`，防止陈旧任务堆积。
+- 🔌 **通用智能体协议解耦**：核心 `AnchorProtocol` 独立管理状态机，极薄适配层 `AgentAdapter` 可无缝接入 Pi、Claude Code、Cursor 或自定义 MCP 服务。
 
-### 全局命令行 (`anchor`) 与交互面板 (`/anchor`)
-```text
-⌖ Anchors (4 active):
+---
 
-  [Today · 今日聚焦]
-  01  [Today]     优化 Token 截断逻辑与注入安全      Desktop     Today         Today 10:02
+## 常用命令
 
-  [Upcoming · 近期排期]
-  02  [Upcoming]  补齐多终端并发文件锁单元测试      Desktop     Tomorrow      Yesterday 21:34
-  03  [Upcoming]  升级 CLI 交互动画与高亮样式        Desktop     Tomorrow      Today 10:02
-  04  [Upcoming]  梳理并发布 npm 0.2.0 版本制品      Desktop     In 2d         Today 10:02
-
-  Use `anchor done <id>` to complete.
+### 命令行速查
+```bash
+anchor                                  # 查看活跃任务列表（Neovim 极客排版）
+anchor "重构鉴权模块"                   # 快速立项新任务
+anchor "提交实证报告" --due friday      # 指定周五到期
+anchor done 1                           # 完成第 1 行任务（支持连续编号）
+anchor done anc-5                       # 按具体 ID 完成任务
+anchor undo                             # 撤销上一次完成归档
 ```
-* **严格连续行号**：显示清晰连续的序号 `01`、`02`、`03`，告别跳号困扰。
-* **双通道智能结案**：敲 `anchor done 1` 划掉当前屏幕第 1 行；敲 `anchor done anc-5` 精准结算特定 ID。
-* **Unicode 全角 / Emoji / 谚文 等宽对齐**：终端纯列宽严格计算，彻底解决中英文混排、Emoji 表情符号渲染时的横向锯齿撕裂。
+
+### Pi 扩展内交互命令
+| 命令 | 说明 |
+| :--- | :--- |
+| `/pin "任务描述"` | 快速立项当前工程的跨会话任务 |
+| `/anchor` | 在终端内弹出全景交互式任务仪表盘 |
+| 状态栏 `⌖ N` | 底部常驻微标签，有活跃任务时显示数量，无任务时 100% 静默隐形 |
 
 ---
 
 ## 横向技术对比
 
-| 对比维度 | `gastownhall/beads` | `Gentleman-Programming/engram` | `AGENTS.md` / `TODO.md` | **Anchor ⚓** |
+| 核心维度 | `gastownhall/beads` | `Gentleman-Programming/engram` | `TODO.md` / `AGENTS.md` | **Anchor ⚓** |
 | :--- | :--- | :--- | :--- | :--- |
-| **底层架构** | 分布式 SQL 关系图谱 | 向量与 SQLite 外部库 | 静态 Markdown 纯文本 | **轻量解耦协议核心 + 原子状态机** |
-| **并发安全** | 依赖 SQL 事务 | 守护进程单点处理 | 多终端编辑直接产生冲突 | **跨进程原子排他锁 (死进程自愈)** |
-| **工作区清洁度** | 仓库内塞入 200MB Dolt 数据库 | 外部系统服务 | **频繁产生 Git 杂质提交** | **100% 零仓库污染 (`~/.anchor/`)** |
-| **Token 损耗** | 每轮中/高消耗 | 高（注入长文历史） | 极高（陈旧文本成倍累积） | **0 Token 闲置（仅文件触碰 JIT 唤醒）** |
-| **JIT 语法安全** | 不支持文件注释 | 无语法感知 | 静态文本无防护 | **精确匹配 30+ 语言注释，跳过 JSON** |
-| **任务时效** | 单层平铺 | 单层平铺 | 静态复选框 | **双时间维度（交付排期 + 立项时间）** |
-| **任务结算与核销** | 手动命令 `close` | 无自动结算机制 | 人工修改文本打勾 | **Git Commit 自动识别 + 退出前一键核销** |
-| **衰减清理** | 手动 prune | 无衰退机制 | 长期堆积发霉 | **静默衰退（临时任务 48h 自动清理）** |
-| **启动耗时** | 重型 CLI 初始化 | Go 守护进程常驻 | 无 | **< 90ms 预打包瞬时秒开** |
-| **环境依赖** | 外部 Dolt 二进制 | 外部 Go 编译产物 | 无 | **零原生外部依赖（纯 TypeScript）** |
+| **存储架构** | 分布式 SQL 图数据库 | 向量检索 / SQLite | 本地静态 Markdown | **通用解耦协议 + 原子状态表** |
+| **仓库卫生** | 往仓库塞入 200MB Dolt | 常驻 Go 守护进程 | **严重污染 Git 提交历史** | **100% 零仓库污染 (`~/.anchor/`)** |
+| **Token 损耗** | 每轮中高开销 | 持续向量检索高消耗 | **严重累积（陈旧清单堆叠）** | **0 Token 稳态（仅关联代码触碰唤醒）** |
+| **语法安全** | 不涉及 | 原始文本盲目注入 | 静态文本无感知 | **语法匹配，严格跳过 JSON/ENV** |
+| **核销机制** | 手动敲命令关闭 | 被动存储不核销 | 手动改文件打勾 | **Git Commit 自动命中 + 退出一键归档** |
+| **并发安全** | 数据库事务锁 | 单点通信瓶颈 | Git 合并冲突 | **零依赖跨进程排他锁 + 僵尸 PID 回收** |
+| **启动耗时** | 重型 CLI 初始化 | 依赖后台常驻进程 | 无 | **< 90ms 预打包生产级产物** |
+| **外部依赖** | 外部 Dolt 二进制 | 外部 Go 二进制 | 无 | **零原生二进制依赖（纯 TypeScript）** |
 
 ---
 
-## 快速上手
+## 测试与质量验证
 
-### 1. 全局独立命令行 CLI
-```bash
-# 全局安装
-npm install -g pi-anchor
-
-# 或直接通过 npx 免安装即用
-npx pi-anchor
-```
-
-常用命令：
-```bash
-anchor                                  # 查看待办清单
-anchor "重构鉴权 Cookie"                 # 记录新任务
-anchor "提交周报" --due friday          # 指定预期交付时间
-anchor done 1                           # 划掉第 1 行任务
-anchor undo                             # 撤销上次结案
-```
-
-### 2. 作为通用协议库引入
-```typescript
-import { AnchorStore, AnchorProtocol } from 'pi-anchor';
-
-const store = new AnchorStore();
-const protocol = new AnchorProtocol(store);
-
-// 监听会话启动
-protocol.handleSessionStart();
-
-// 第 1 轮注入提示，第 2 轮返回 null (0 Tokens)
-const coldStartPrompt = protocol.handleBeforeTurn(1, process.cwd());
-
-// 工具触碰文件时获取安全注释
-const { annotation } = protocol.handleToolResult({
-  toolName: 'read',
-  filePath: 'src/auth.ts',
-  cwd: process.cwd()
-});
-```
-
-### 3. 作为 Pi Coding Agent 扩展
-在 Pi 扩展目录中安装：
-```bash
-pi install npm:pi-anchor
-```
-
----
-
-## 测试与质量保障
-
-采用标准 TypeScript 严格模式构建，使用 Node.js 原生测试运行器实现核心链路 100% 测试覆盖：
+采用严苛 TypeScript Strict 模式，使用 Node 原生测试运行器实现 100% 真实断言覆盖：
 
 ```bash
-npm run build      # tsup 双格式打包 (ESM/CJS) 与 .d.ts 类型生成
-npm run typecheck  # TypeScript 严格类型检查 (0 错误)
-npm test           # 全套自动化单元测试 (26/26 全绿通过)
+npm run typecheck  # Strict tsc --noEmit 静态检查 (0 错误)
+npm test           # 物理单元测试套件 (26/26 全部通过)
+npm run build      # 双格式 ESM/CJS 构建与类型生成
 ```
-
-```text
-✔ ContextInjector - renders only active anchors, sleeping consume 0 tokens
-✔ ContextInjector - renders targetDate and task aging in prompt
-✔ ContextInjector - renders preflight failure hints into cold-start context
-✔ AnchorDecay - status evaluation transitions
-✔ AnchorDecay - sweepStore transitions and graveyard eviction
-✔ AnchorMatcher - exact, prefix, and tag matching
-✔ AnchorMatcher - glob pattern matching (*.ts, src/**/*.ts)
-✔ AnchorMatcher - findMatchedAnchors prioritizes high-confidence & high-priority
-✔ SessionTouchObserver - records read, edit, write and commits
-✔ SessionTouchObserver - matches CJK commit messages with segmentation
-✔ SessionTouchObserver - separates read inspection from edit mutation
-✔ Lock - acquireSyncLock acquires, holds, and releases exclusive lockfile
-✔ Lock - acquireSyncLock safely reclaims stale lock from dead PID
-✔ Context - makeSafeTaskAnnotation produces language-accurate comments and skips JSON
-✔ Protocol - AnchorProtocol lifecycle handles cold-start and safe JIT
-✔ AnchorStore - basic CRUD & atomic writes
-✔ AnchorStore - corrupt state recovery
-✔ AnchorStore - daily recurring task completes for today and wakes tomorrow
-✔ AnchorStore - temporal durability keywords and project detection
-✔ AnchorStore - atomicRenameWithRetry successfully replaces files atomically
-✔ AnchorTUI - status bar reflects active state cleanly with ⌖ N
-✔ AnchorTUI - formatTargetDate and formatCreationTime render clear dual-timeline
-✔ AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with folder metadata
-✔ AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width columns
-✔ AnchorTUI - updateStartupBanner renders clean widget above editor
-✔ AnchorTUI - truncateToWidth properly handles ANSI escape sequences and bounds width
-
-ℹ pass 26, fail 0
-```
-
----
-
-## 作者手记 (Author's Note)
-
-写 Anchor 的最初冲动，来自于我用终端 AI 编程智能体结对开发时经历的一场持续阵痛：看着项目根目录下的 `TODO.md` 与 `AGENTS.md` 在 Git 历史里发霉。
-
-很多时候，写完一段代码已经是深夜，跨会话未完成的任务随手记在项目的 Markdown 里，看起来省事。然而几个月下来，两点物理摩擦让我极其痛苦：
-1. 每一轮对话交互，AI 都要把陈旧的任务清单整段塞进系统提示词，白白烧掉几十上百行 Token，还会分散模型对当前正在修改的代码的注意力；
-2. 团队多人协作或分支合并时，这类任务清单文件频发 Git 合并冲突，无端污染了核心代码的提交历史。
-
-调研现存工具时，我发现社区给出的方案走向了沉重的极端：为了管理几个简单的任务，有的方案直接在代码仓库根目录塞入一个超过 200MB 的 Dolt SQL 关系型数据库（`beads`），有的方案在后台常驻一个用 Go 编写的 SQLite 守护进程并做持续向量检索（`engram`）。一个任务追踪工具消耗的系统资源与认知负担，甚至超过了开发者正在编写的业务代码本身。
-
-这颠倒了工具与生产者的关系。
-
-Anchor 选择了一条极度克制的工程路径：把状态移出代码仓库，托管在用户主目录下的单文件轻量状态表（`~/.anchor/state.json`）；首轮对话注入冷启动上下文，第 2 轮起保持 0 Token 损耗；通过语言对应的语法安全注释在触碰代码时精准唤醒，并在代码提交或会话退出时自动核销。
-
-在这次更新中，我们还为 `/anchor` 增加了防误触详情面板，按回车可以从容查看关联文件与执行命令，彻底消灭误敲回车直接结算的焦虑。
-
-希望 Anchor 能让你的代码仓库保持干净，把专注力还给代码本身。
 
 ---
 
 ## 开源协议
 
-MIT License © 2025 [Jason Song (@3ZEROS12)](https://github.com/3ZEROS12)
+MIT © [Jason Song](https://github.com/3ZEROS12)
