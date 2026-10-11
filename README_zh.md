@@ -14,7 +14,7 @@
 [English](./README.md) | **简体中文**
 
 <p align="center">
-  <img src="assets/hero.svg" alt="Anchor 终端仪表盘实录" width="820">
+  <img src="assets/hero-zh.svg" alt="Anchor 终端仪表盘实录" width="820">
 </p>
 
 ```text

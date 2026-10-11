@@ -14,7 +14,7 @@
 **English** | [简体中文](./README_zh.md)
 
 <p align="center">
-  <img src="assets/hero.svg" alt="Anchor Terminal Dashboard" width="820">
+  <img src="assets/hero-en.svg" alt="Anchor Terminal Dashboard" width="820">
 </p>
 
 ```text
