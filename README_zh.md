@@ -9,7 +9,7 @@
 [![Tests: 15 Passed](https://img.shields.io/badge/Tests-15%20通过-22c55e.svg)](tests/store.test.ts)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
 
-[English](./README.md) | **简体中文**
+[English](./README.md) | [日本語](./README_ja.md) | **简体中文**
 
 ```bash
 pi install npm:pi-anchor
@@ -132,7 +132,7 @@ npm run build      # tsup 双格式打包与类型声明生成
 | **[`pi-lingual`](https://github.com/3ZEROS12/pi-lingual)** | `二 ⇄ two` `aboveEditor` 双语伴学视窗（≤9 行 UAX #11 树状排版）与母语提示词转写（0 会话历史 Token 注入） | `pi install npm:pi-lingual` |
 | **[`toolflow`](https://github.com/3ZEROS12/toolflow)** | `⌬` 运行时工具钩子 —— 按阶段动态挂载重型 MCP，>40 行终端长日志自动落盘脱水（削减 95% 日志 Token） | `pi install npm:toolflow` |
 | **[`pi-tui-status-beautifier`](https://github.com/3ZEROS12/pi-tui-status-beautifier)** | `status-only` 底栏微钩子 —— 6 套徽章预设、`<80` 列窄屏折叠 `(+N idle)`、重绘循环 0 磁盘读取 | `pi install npm:pi-tui-status-beautifier` |
-| **[`pi-anchor`](https://github.com/3ZEROS12/anchor)** *(当前)* | `⌖` `belowEditor` 1 行常驻便签条、0ms `pin:` 输入拦截、迷你进度条 `[■■□□]` 与原会话跳转 `↪` | `pi install npm:pi-anchor` |
+| **[`pi-anchor`](https://github.com/3ZEROS12/anchor)** *(当前)* | `⌖` `belowEditor` 跨会话任务树与电子便签（`Alt+A` 折叠）、`todo` 自动断点续传、0ms `pin:` 瞬贴与 `/back` 会话穿越 | `pi install npm:pi-anchor` |
 
 ---
 
