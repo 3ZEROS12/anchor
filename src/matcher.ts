@@ -5,12 +5,16 @@ import type { Anchor, TouchMatchResult } from './types.ts';
  * Convert simple glob pattern (e.g. *.ts, src/**\/*.ts, src/auth/*.ts) to RegExp
  */
 export function globToRegExp(pattern: string): RegExp {
-  const escaped = pattern
+  const collapsed = pattern
+    .slice(0, 512)
+    .replace(/\/+(\*\*\/+)+/g, '/**/')
+    .replace(/\*{3,}/g, '**');
+  const escaped = collapsed
     .replace(/[.+^${}()|[\]\\]/g, '\\$&')
     .replace(/\/\*\*\//g, '___GLOB_DIR_SLASH___')
     .replace(/\*\*/g, '___GLOB_STAR_STAR___')
     .replace(/\*/g, '[^/]*')
-    .replace(/___GLOB_DIR_SLASH___/g, '(?:/|/.+/)')
+    .replace(/___GLOB_DIR_SLASH___/g, '(?:/|/(?:[^/]+/)+)')
     .replace(/___GLOB_STAR_STAR___/g, '.*');
   return new RegExp(`^${escaped}$`);
 }

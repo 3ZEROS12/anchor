@@ -105,7 +105,8 @@ var import_node_os = __toESM(require("os"), 1);
 // src/matcher.ts
 var import_node_path = __toESM(require("path"), 1);
 function globToRegExp(pattern) {
-  const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\/\*\*\//g, "___GLOB_DIR_SLASH___").replace(/\*\*/g, "___GLOB_STAR_STAR___").replace(/\*/g, "[^/]*").replace(/___GLOB_DIR_SLASH___/g, "(?:/|/.+/)").replace(/___GLOB_STAR_STAR___/g, ".*");
+  const collapsed = pattern.slice(0, 512).replace(/\/+(\*\*\/+)+/g, "/**/").replace(/\*{3,}/g, "**");
+  const escaped = collapsed.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\/\*\*\//g, "___GLOB_DIR_SLASH___").replace(/\*\*/g, "___GLOB_STAR_STAR___").replace(/\*/g, "[^/]*").replace(/___GLOB_DIR_SLASH___/g, "(?:/|/(?:[^/]+/)+)").replace(/___GLOB_STAR_STAR___/g, ".*");
   return new RegExp(`^${escaped}$`);
 }
 function normalizePath(filePath, baseCwd) {
@@ -492,9 +493,19 @@ var AnchorStore = class {
     }
     try {
       const data = JSON.parse(raw);
-      if (!Array.isArray(data.anchors)) {
+      if (!data || typeof data !== "object" || !Array.isArray(data.anchors)) {
         throw new Error("Invalid state: anchors must be array");
       }
+      data.anchors = data.anchors.filter((a) => a && typeof a === "object" && typeof a.id === "string" && typeof a.title === "string").map((a) => ({
+        ...a,
+        files: Array.isArray(a.files) ? a.files.filter((f) => typeof f === "string") : [],
+        tags: Array.isArray(a.tags) ? a.tags.filter((t) => typeof t === "string") : [],
+        decay: {
+          activeDays: Number.isFinite(a.decay?.activeDays) && a.decay.activeDays > 0 ? a.decay.activeDays : DURABLE_DECAY_POLICY.activeDays,
+          sleepDays: Number.isFinite(a.decay?.sleepDays) && a.decay.sleepDays > 0 ? a.decay.sleepDays : DURABLE_DECAY_POLICY.sleepDays,
+          graveyardDays: Number.isFinite(a.decay?.graveyardDays) && a.decay.graveyardDays > 0 ? a.decay.graveyardDays : DURABLE_DECAY_POLICY.graveyardDays
+        }
+      }));
       return data;
     } catch {
       const backupPath = import_node_path2.default.join(this.storageDir, `state.corrupt.${Date.now()}.json`);
@@ -697,12 +708,21 @@ var AnchorStore = class {
         throw new Error("No archived anchors to undo");
       }
       const raw = import_node_fs.default.readFileSync(this.archivePath, "utf-8");
-      const lines = raw.split("\n").filter(Boolean);
-      if (lines.length === 0) {
+      const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      let anchor = null;
+      while (lines.length > 0 && !anchor) {
+        const candidate = lines.pop();
+        try {
+          const parsed = JSON.parse(candidate);
+          if (parsed && typeof parsed === "object" && typeof parsed.id === "string" && typeof parsed.title === "string") {
+            anchor = parsed;
+          }
+        } catch {
+        }
+      }
+      if (!anchor) {
         throw new Error("Archive is empty, nothing to undo");
       }
-      const lastLine = lines.pop();
-      const anchor = JSON.parse(lastLine);
       import_node_fs.default.writeFileSync(this.archivePath, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
       anchor.status = "active";
       anchor.updatedAt = Date.now();
@@ -759,7 +779,16 @@ var AnchorStore = class {
     if (!import_node_fs.default.existsSync(this.archivePath)) return [];
     try {
       const raw = import_node_fs.default.readFileSync(this.archivePath, "utf-8");
-      const all = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      const all = [];
+      for (const l of raw.split(/\r?\n/)) {
+        const trimmed = l.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === "object" && typeof parsed.id === "string") all.push(parsed);
+        } catch {
+        }
+      }
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
       return all.filter((a) => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
@@ -771,7 +800,16 @@ var AnchorStore = class {
     if (!import_node_fs.default.existsSync(this.graveyardPath)) return [];
     try {
       const raw = import_node_fs.default.readFileSync(this.graveyardPath, "utf-8");
-      const all = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l));
+      const all = [];
+      for (const l of raw.split(/\r?\n/)) {
+        const trimmed = l.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === "object" && typeof parsed.id === "string") all.push(parsed);
+        } catch {
+        }
+      }
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
       return all.filter((a) => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
@@ -872,14 +910,16 @@ function sweepStore(store, now = Date.now()) {
 // src/settlement.ts
 var import_node_child_process = require("child_process");
 function runPhysicalVerification(anchor, cwd) {
-  if (!anchor.verifyCommand) {
+  if (!anchor.verifyCommand?.trim()) {
     return { success: false, output: "No verification command specified" };
   }
+  const targetCwd = anchor.cwd || cwd;
   try {
     const stdout = (0, import_node_child_process.execSync)(anchor.verifyCommand, {
-      cwd,
+      cwd: targetCwd,
       encoding: "utf-8",
-      timeout: 3e4,
+      timeout: 8e3,
+      maxBuffer: 4 * 1024 * 1024,
       stdio: ["ignore", "pipe", "pipe"]
     });
     return { success: true, output: stdout.trim() };

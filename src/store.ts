@@ -340,9 +340,21 @@ export class AnchorStore {
 
     try {
       const data = JSON.parse(raw);
-      if (!Array.isArray(data.anchors)) {
+      if (!data || typeof data !== 'object' || !Array.isArray(data.anchors)) {
         throw new Error('Invalid state: anchors must be array');
       }
+      data.anchors = data.anchors
+        .filter((a: any) => a && typeof a === 'object' && typeof a.id === 'string' && typeof a.title === 'string')
+        .map((a: any) => ({
+          ...a,
+          files: Array.isArray(a.files) ? a.files.filter((f: unknown) => typeof f === 'string') : [],
+          tags: Array.isArray(a.tags) ? a.tags.filter((t: unknown) => typeof t === 'string') : [],
+          decay: {
+            activeDays: Number.isFinite(a.decay?.activeDays) && a.decay.activeDays > 0 ? a.decay.activeDays : DURABLE_DECAY_POLICY.activeDays,
+            sleepDays: Number.isFinite(a.decay?.sleepDays) && a.decay.sleepDays > 0 ? a.decay.sleepDays : DURABLE_DECAY_POLICY.sleepDays,
+            graveyardDays: Number.isFinite(a.decay?.graveyardDays) && a.decay.graveyardDays > 0 ? a.decay.graveyardDays : DURABLE_DECAY_POLICY.graveyardDays,
+          },
+        }));
       return data as AnchorStoreState;
     } catch {
       const backupPath = path.join(this.storageDir, `state.corrupt.${Date.now()}.json`);
@@ -607,13 +619,20 @@ export class AnchorStore {
       }
 
       const raw = fs.readFileSync(this.archivePath, 'utf-8');
-      const lines = raw.split('\n').filter(Boolean);
-      if (lines.length === 0) {
+      const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+      let anchor: Anchor | null = null;
+      while (lines.length > 0 && !anchor) {
+        const candidate = lines.pop()!;
+        try {
+          const parsed = JSON.parse(candidate);
+          if (parsed && typeof parsed === 'object' && typeof parsed.id === 'string' && typeof parsed.title === 'string') {
+            anchor = parsed;
+          }
+        } catch {}
+      }
+      if (!anchor) {
         throw new Error('Archive is empty, nothing to undo');
       }
-
-      const lastLine = lines.pop()!;
-      const anchor: Anchor = JSON.parse(lastLine);
 
       // 1. Re-write archive without the last line
       fs.writeFileSync(this.archivePath, lines.length > 0 ? lines.join('\n') + '\n' : '', 'utf-8');
@@ -680,7 +699,15 @@ export class AnchorStore {
     if (!fs.existsSync(this.archivePath)) return [];
     try {
       const raw = fs.readFileSync(this.archivePath, 'utf-8');
-      const all: Anchor[] = raw.split('\n').filter(Boolean).map((l: string) => JSON.parse(l));
+      const all: Anchor[] = [];
+      for (const l of raw.split(/\r?\n/)) {
+        const trimmed = l.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === 'object' && typeof parsed.id === 'string') all.push(parsed);
+        } catch {}
+      }
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
       return all.filter(a => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
@@ -693,7 +720,15 @@ export class AnchorStore {
     if (!fs.existsSync(this.graveyardPath)) return [];
     try {
       const raw = fs.readFileSync(this.graveyardPath, 'utf-8');
-      const all: Anchor[] = raw.split('\n').filter(Boolean).map((l: string) => JSON.parse(l));
+      const all: Anchor[] = [];
+      for (const l of raw.split(/\r?\n/)) {
+        const trimmed = l.trim();
+        if (!trimmed) continue;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed && typeof parsed === 'object' && typeof parsed.id === 'string') all.push(parsed);
+        } catch {}
+      }
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
       return all.filter(a => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));

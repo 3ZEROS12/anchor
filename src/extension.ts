@@ -32,10 +32,10 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} 个非活跃任务已进入休眠`, 'info');
     }
 
-    // Physical Pre-flight Verification: auto-settle passing tasks or record failing output
+    // Physical Pre-flight Verification: auto-settle passing tasks or record failing output (scoped strictly to current cwd)
     const activeAnchors = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active');
     for (const a of activeAnchors) {
-      if (a.verifyCommand) {
+      if (a.verifyCommand && (!a.cwd || isSameOrSubPath(a.cwd, ctx.cwd))) {
         try {
           const res = runPhysicalVerification(a, ctx.cwd);
           if (res.success) {

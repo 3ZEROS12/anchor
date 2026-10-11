@@ -14,7 +14,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-D4O5HZWV.js";
+} from "./chunk-NVNWWM3J.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
@@ -37,7 +37,7 @@ function extension_default(pi) {
     }
     const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
     for (const a of activeAnchors) {
-      if (a.verifyCommand) {
+      if (a.verifyCommand && (!a.cwd || isSameOrSubPath(a.cwd, ctx.cwd))) {
         try {
           const res = runPhysicalVerification(a, ctx.cwd);
           if (res.success) {

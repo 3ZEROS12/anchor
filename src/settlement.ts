@@ -7,15 +7,17 @@ import { execSync } from 'node:child_process';
  * Execute physical verification test command for an anchor
  */
 export function runPhysicalVerification(anchor: Anchor, cwd: string): { success: boolean; output: string } {
-  if (!anchor.verifyCommand) {
+  if (!anchor.verifyCommand?.trim()) {
     return { success: false, output: 'No verification command specified' };
   }
 
+  const targetCwd = anchor.cwd || cwd;
   try {
     const stdout = execSync(anchor.verifyCommand, {
-      cwd,
+      cwd: targetCwd,
       encoding: 'utf-8',
-      timeout: 30000,
+      timeout: 8000,
+      maxBuffer: 4 * 1024 * 1024,
       stdio: ['ignore', 'pipe', 'pipe']
     });
     return { success: true, output: stdout.trim() };
