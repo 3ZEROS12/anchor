@@ -58,6 +58,7 @@ __export(index_exports, {
   getTodayDateString: () => getTodayDateString,
   globToRegExp: () => globToRegExp,
   groupAnchorsByQuadrant: () => groupAnchorsByQuadrant,
+  hasActiveUI: () => hasActiveUI,
   makeSafeTaskAnnotation: () => makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles: () => matchAnchorAgainstTouchedFiles,
   normalizePath: () => normalizePath,
@@ -930,27 +931,36 @@ function getDisplayWidth(str) {
   }
   return width;
 }
+function hasActiveUI(ctx) {
+  if (!ctx) return false;
+  try {
+    return Boolean(ctx.hasUI && ctx.ui);
+  } catch {
+    return false;
+  }
+}
 function truncateToWidth(str, maxWidth, ellipsis = "\u2026") {
   if (maxWidth <= 0) return "";
-  const totalWidth = getDisplayWidth(str);
-  if (totalWidth <= maxWidth) return str;
+  const singleLine = str.replace(/[\r\n\t]+/g, " ");
+  const totalWidth = getDisplayWidth(singleLine);
+  if (totalWidth <= maxWidth) return singleLine;
   const ellipsisWidth = getDisplayWidth(ellipsis);
   const target = Math.max(0, maxWidth - ellipsisWidth);
   if (target === 0) return ellipsis.slice(0, maxWidth);
   let accumulated = "";
   let accumWidth = 0;
   let i = 0;
-  while (i < str.length) {
+  while (i < singleLine.length) {
     ANSI_REGEX.lastIndex = i;
-    const match = ANSI_REGEX.exec(str);
+    const match = ANSI_REGEX.exec(singleLine);
     if (match && match.index === i) {
       accumulated += match[0];
       i += match[0].length;
       continue;
     }
-    const codePoint = str.codePointAt(i) || 0;
+    const codePoint = singleLine.codePointAt(i) || 0;
     const charLen = codePoint > 65535 ? 2 : 1;
-    const fullChar = str.slice(i, i + charLen);
+    const fullChar = singleLine.slice(i, i + charLen);
     const charWidth = getDisplayWidth(fullChar);
     if (accumWidth + charWidth > target) {
       break;
@@ -960,7 +970,7 @@ function truncateToWidth(str, maxWidth, ellipsis = "\u2026") {
     i += charLen;
   }
   accumulated = accumulated.replace(/\s*[\(\[\{（【]$/, "");
-  return accumulated + ellipsis + (str.includes("\x1B") ? "\x1B[0m" : "");
+  return accumulated + ellipsis + (singleLine.includes("\x1B") ? "\x1B[0m" : "");
 }
 function padToWidth(str, targetWidth) {
   const truncated = truncateToWidth(str, targetWidth);
@@ -1036,52 +1046,58 @@ function formatOrigin(anchor) {
   return import_node_path3.default.basename(anchor) || "global";
 }
 function updateAnchorStatusBar(ctx, store) {
-  if (!ctx.hasUI || !ctx.ui) return;
-  const active = store.list({ status: "active", cwd: ctx.cwd });
-  if (active.length === 0) {
-    ctx.ui.setStatus("anchor", void 0);
-    return;
+  if (!hasActiveUI(ctx)) return;
+  try {
+    const active = store.list({ status: "active", cwd: ctx.cwd });
+    if (active.length === 0) {
+      ctx.ui.setStatus("anchor", void 0);
+      return;
+    }
+    ctx.ui.setStatus("anchor", `\u2316 ${active.length}`);
+  } catch {
   }
-  ctx.ui.setStatus("anchor", `\u2316 ${active.length}`);
 }
 function updateStartupBanner(ctx, store) {
-  if (!ctx.hasUI || !ctx.ui) return;
-  const active = store.list({ status: "active", cwd: ctx.cwd });
-  if (active.length === 0) {
-    ctx.ui.setWidget("anchor-startup", void 0);
-    return;
-  }
-  const groups = groupAnchorsByQuadrant(active);
-  const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
-  const topItems = sorted.slice(0, 3);
-  const factory = (_tui, theme) => ({
-    render: (width) => {
-      const maxTitleWidth = Math.max(16, width - 36);
-      const fg = theme?.fg ? theme.fg.bind(theme) : (_c, text) => text;
-      const lines = [
-        fg("accent", `\u2316 Anchor \xB7 ${active.length} active commitments:`)
-      ];
-      for (let i = 0; i < topItems.length; i++) {
-        const a = topItems[i];
-        const num = (i + 1).toString().padStart(2, "0");
-        const q = classifyAnchor(a);
-        const tgt = formatTargetDate(a);
-        const titlePadded = truncateToWidth(a.title, maxTitleWidth);
-        lines.push(`  \u2022 ${fg("muted", `[${q}]`)}  ${fg("dim", num)} ${titlePadded} ${fg("dim", `(${tgt})`)}`);
-      }
-      if (sorted.length > 3) {
-        lines.push(fg("dim", `  (+${sorted.length - 3} more \xB7 run /anchor to inspect)`));
-      }
-      return lines;
-    },
-    invalidate: () => {
+  if (!hasActiveUI(ctx)) return;
+  try {
+    const active = store.list({ status: "active", cwd: ctx.cwd });
+    if (active.length === 0) {
+      ctx.ui.setWidget("anchor-startup", void 0);
+      return;
     }
-  });
-  const content = ctx.ui?.theme ? factory : factory().render(80);
-  ctx.ui.setWidget("anchor-startup", content, { placement: "aboveEditor" });
+    const groups = groupAnchorsByQuadrant(active);
+    const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
+    const topItems = sorted.slice(0, 3);
+    const factory = (_tui, theme) => ({
+      render: (width) => {
+        const maxTitleWidth = Math.max(12, width - 36);
+        const fg = theme?.fg ? theme.fg.bind(theme) : (_c, text) => text;
+        const lines = [
+          truncateToWidth(fg("accent", `\u2316 Anchor \xB7 ${active.length} active commitments:`), width)
+        ];
+        for (let i = 0; i < topItems.length; i++) {
+          const a = topItems[i];
+          const num = (i + 1).toString().padStart(2, "0");
+          const q = classifyAnchor(a);
+          const tgt = formatTargetDate(a);
+          const titlePadded = truncateToWidth(a.title, maxTitleWidth);
+          lines.push(truncateToWidth(`  \u2022 ${fg("muted", `[${q}]`)}  ${fg("dim", num)} ${titlePadded} ${fg("dim", `(${tgt})`)}`, width));
+        }
+        if (sorted.length > 3) {
+          lines.push(truncateToWidth(fg("dim", `  (+${sorted.length - 3} more \xB7 run /anchor to inspect)`), width));
+        }
+        return lines;
+      },
+      invalidate: () => {
+      }
+    });
+    const content = ctx.ui?.theme ? factory : factory().render(80);
+    ctx.ui.setWidget("anchor-startup", content, { placement: "aboveEditor" });
+  } catch {
+  }
 }
 async function openAnchorDashboard(ctx, store) {
-  if (!ctx.hasUI || !ctx.ui) return;
+  if (!hasActiveUI(ctx)) return;
   const list = store.list({ status: "active", cwd: ctx.cwd });
   if (list.length === 0) {
     ctx.ui.notify("\u2316 No active anchors. Use /pin <task> to record.", "info");
@@ -1466,6 +1482,7 @@ var AnchorProtocol = class {
   getTodayDateString,
   globToRegExp,
   groupAnchorsByQuadrant,
+  hasActiveUI,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
   normalizePath,

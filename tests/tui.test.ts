@@ -189,5 +189,40 @@ test('AnchorTUI - truncateToWidth properly handles ANSI escape sequences and bou
 
   const shortStr = 'hello world';
   assert.strictEqual(truncateToWidth(shortStr, 50), 'hello world');
+
+  // Multi-line JSON output (e.g. from anchor list) must be flattened to single line without raw newlines
+  const multiLineJson = '✔ {\n  "active": [\n    { "id": "anc-1", "title": "Test" }\n  ]\n}';
+  const singleLineTrunc = truncateToWidth(multiLineJson, 40);
+  assert.ok(!singleLineTrunc.includes('\n'), 'truncateToWidth must strip newlines to prevent pi-tui single-line overflow');
+  assert.ok(getDisplayWidth(singleLineTrunc) <= 40);
 });
+
+test('AnchorTUI - survives stale ExtensionContext without throwing', async () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    store.create({ title: 'Task 1', cwd: '/workspace' });
+
+    const staleCtx = {
+      cwd: '/workspace',
+      get hasUI(): boolean {
+        throw new Error('This extension ctx is stale after session replacement or reload.');
+      },
+      get ui(): any {
+        throw new Error('This extension ctx is stale after session replacement or reload.');
+      }
+    } as unknown as ExtensionContext;
+
+    assert.doesNotThrow(() => {
+      updateAnchorStatusBar(staleCtx, store);
+      updateStartupBanner(staleCtx, store);
+    });
+    await assert.doesNotReject(async () => {
+      await openAnchorDashboard(staleCtx, store);
+    });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 

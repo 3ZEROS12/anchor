@@ -3,6 +3,7 @@ import {
   SessionTouchObserver,
   findMatchedAnchors,
   generateSettlementProposals,
+  hasActiveUI,
   makeSafeTaskAnnotation,
   normalizePath,
   openAnchorDashboard,
@@ -12,7 +13,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-B652T7QR.js";
+} from "./chunk-GPJPN27S.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
@@ -69,8 +70,11 @@ function extension_default(pi) {
     }
   });
   pi.on("agent_start", async (_event, ctx) => {
-    if (ctx.hasUI && ctx.ui) {
-      ctx.ui.setWidget("anchor-startup", void 0);
+    if (hasActiveUI(ctx)) {
+      try {
+        ctx.ui.setWidget("anchor-startup", void 0);
+      } catch {
+      }
     }
   });
   pi.on("before_agent_start", async (event, ctx) => {
@@ -122,19 +126,36 @@ ${contextSnippet}`
       }
     }
   });
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", async (event, ctx) => {
+    let gitStatus = "";
     try {
-      const gitStatus = execSync("git status --porcelain", {
+      gitStatus = execSync("git status --porcelain", {
         cwd: ctx.cwd,
         encoding: "utf-8",
-        timeout: 3e3,
+        timeout: 2e3,
         stdio: ["ignore", "pipe", "ignore"]
-      });
+      }).trim();
       const changed = gitStatus.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
       for (const f of changed) {
         observer.addTouchedFile(f);
       }
     } catch {
+    }
+    if (event?.reason === "quit" && gitStatus) {
+      try {
+        const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
+        if (activeAnchors.length === 0) {
+          const home = process.env.HOME || process.env.USERPROFILE || "";
+          const pendingPath = path.join(home, ".anchor", "pending_exit.json");
+          const data = {
+            cwd: ctx.cwd,
+            timestamp: Date.now(),
+            modifiedCount: gitStatus.split("\n").filter(Boolean).length
+          };
+          fs.writeFileSync(pendingPath, JSON.stringify(data, null, 2), "utf-8");
+        }
+      } catch {
+      }
     }
     const modified = observer.getModifiedFiles();
     if (modified.length === 0) return;
@@ -149,7 +170,12 @@ ${contextSnippet}`
           summary: `Auto-settled via Git commit: ${commitMatch.message}`,
           touchedFiles: prop.matchedFiles
         });
-        ctx.ui.notify(`\u2316 Auto-settled #${a.id} via Git commit (run /anchor undo to revert)`, "info");
+        if (hasActiveUI(ctx)) {
+          try {
+            ctx.ui.notify(`\u2316 Auto-settled #${a.id} via Git commit (run /anchor undo to revert)`, "info");
+          } catch {
+          }
+        }
         continue;
       }
       if (a.verifyCommand) {
@@ -160,22 +186,30 @@ ${contextSnippet}`
             summary: `Automated test passed: ${a.verifyCommand}`,
             touchedFiles: prop.matchedFiles
           });
-          ctx.ui.notify(`\u2316 Test passed (${a.verifyCommand}), auto-settled #${a.id}`, "info");
+          if (hasActiveUI(ctx)) {
+            try {
+              ctx.ui.notify(`\u2316 Test passed (${a.verifyCommand}), auto-settled #${a.id}`, "info");
+            } catch {
+            }
+          }
           continue;
         }
       }
-      if (!ctx.hasUI || !ctx.ui) continue;
-      const ok = await ctx.ui.confirm(
-        "\u2316 Settle Anchor Task",
-        `Task #${a.id} [${a.title}] touched files (${prop.matchedFiles.slice(0, 2).join(", ")}).
+      if (!hasActiveUI(ctx)) continue;
+      try {
+        const ok = await ctx.ui.confirm(
+          "\u2316 Settle Anchor Task",
+          `Task #${a.id} [${a.title}] touched files (${prop.matchedFiles.slice(0, 2).join(", ")}).
 Mark as completed and archive?`
-      );
-      if (ok) {
-        store.settle(a.id, {
-          settledBy: "one-tap-settlement",
-          touchedFiles: prop.matchedFiles
-        });
-        ctx.ui.notify(`\u2316 Settled #${a.id}: "${a.title}"`, "info");
+        );
+        if (ok) {
+          store.settle(a.id, {
+            settledBy: "one-tap-settlement",
+            touchedFiles: prop.matchedFiles
+          });
+          ctx.ui.notify(`\u2316 Settled #${a.id}: "${a.title}"`, "info");
+        }
+      } catch {
       }
     }
   });
@@ -375,30 +409,6 @@ Mark as completed and archive?`
       const anc = store.create({ title, cwd: ctx.cwd });
       ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"`, "info");
       updateAnchorStatusBar(ctx, store);
-    }
-  });
-  pi.on("session_shutdown", async (event, ctx) => {
-    if (event.reason === "quit") {
-      try {
-        const gitStatus = execSync("git status --porcelain", {
-          cwd: ctx.cwd,
-          encoding: "utf-8",
-          timeout: 2e3,
-          stdio: ["ignore", "pipe", "ignore"]
-        }).trim();
-        const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
-        if (gitStatus && activeAnchors.length === 0) {
-          const home = process.env.HOME || process.env.USERPROFILE || "";
-          const pendingPath = path.join(home, ".anchor", "pending_exit.json");
-          const data = {
-            cwd: ctx.cwd,
-            timestamp: Date.now(),
-            modifiedCount: gitStatus.split("\n").filter(Boolean).length
-          };
-          fs.writeFileSync(pendingPath, JSON.stringify(data, null, 2), "utf-8");
-        }
-      } catch (_) {
-      }
     }
   });
 }

@@ -6,7 +6,7 @@ import { renderColdStartAnchorsContext, renderActiveAnchorsContext, makeSafeTask
 import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
 import { normalizePath, findMatchedAnchors } from './matcher.ts';
 import { sweepStore } from './decay.ts';
-import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner, truncateToWidth } from './tui.ts';
+import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner, truncateToWidth, hasActiveUI } from './tui.ts';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -74,8 +74,10 @@ export default function (pi: ExtensionAPI) {
 
   // 2. Auto-clear startup banner when agent starts first turn to keep screen clean
   pi.on('agent_start', async (_event: any, ctx: ExtensionContext) => {
-    if (ctx.hasUI && ctx.ui) {
-      ctx.ui.setWidget('anchor-startup', undefined);
+    if (hasActiveUI(ctx)) {
+      try {
+        ctx.ui.setWidget('anchor-startup', undefined);
+      } catch {}
     }
   });
 
@@ -142,16 +144,16 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 4. Session shutdown: One-tap settlement check scoped to current workspace
-  pi.on('session_shutdown', async (_event: any, ctx: ExtensionContext) => {
-    // Opportunistically scan git modified files
+  // 4. Session shutdown: Single-pass git inspection, one-tap settlement check & Exit Guard
+  pi.on('session_shutdown', async (event: any, ctx: ExtensionContext) => {
+    let gitStatus = '';
     try {
-      const gitStatus = execSync('git status --porcelain', {
+      gitStatus = execSync('git status --porcelain', {
         cwd: ctx.cwd,
         encoding: 'utf-8',
-        timeout: 3000,
+        timeout: 2000,
         stdio: ['ignore', 'pipe', 'ignore']
-      });
+      }).trim();
       const changed = gitStatus
         .split('\n')
         .map((l: string) => l.slice(3).trim())
@@ -160,6 +162,23 @@ export default function (pi: ExtensionAPI) {
         observer.addTouchedFile(f);
       }
     } catch {}
+
+    // Exit Guard: detect uncommitted changes on abrupt session shutdown
+    if (event?.reason === 'quit' && gitStatus) {
+      try {
+        const activeAnchors = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active');
+        if (activeAnchors.length === 0) {
+          const home = process.env.HOME || process.env.USERPROFILE || '';
+          const pendingPath = path.join(home, '.anchor', 'pending_exit.json');
+          const data = {
+            cwd: ctx.cwd,
+            timestamp: Date.now(),
+            modifiedCount: gitStatus.split('\n').filter(Boolean).length
+          };
+          fs.writeFileSync(pendingPath, JSON.stringify(data, null, 2), 'utf-8');
+        }
+      } catch {}
+    }
 
     const modified = observer.getModifiedFiles();
     if (modified.length === 0) return;
@@ -179,7 +198,11 @@ export default function (pi: ExtensionAPI) {
           summary: `Auto-settled via Git commit: ${commitMatch.message}`,
           touchedFiles: prop.matchedFiles
         });
-        ctx.ui.notify(`⌖ Auto-settled #${a.id} via Git commit (run /anchor undo to revert)`, 'info');
+        if (hasActiveUI(ctx)) {
+          try {
+            ctx.ui.notify(`⌖ Auto-settled #${a.id} via Git commit (run /anchor undo to revert)`, 'info');
+          } catch {}
+        }
         continue;
       }
 
@@ -192,26 +215,32 @@ export default function (pi: ExtensionAPI) {
             summary: `Automated test passed: ${a.verifyCommand}`,
             touchedFiles: prop.matchedFiles
           });
-          ctx.ui.notify(`⌖ Test passed (${a.verifyCommand}), auto-settled #${a.id}`, 'info');
+          if (hasActiveUI(ctx)) {
+            try {
+              ctx.ui.notify(`⌖ Test passed (${a.verifyCommand}), auto-settled #${a.id}`, 'info');
+            } catch {}
+          }
           continue;
         }
       }
 
       // 3. Fallback: Prompt user for one-tap settlement on exit
-      if (!ctx.hasUI || !ctx.ui) continue;
+      if (!hasActiveUI(ctx)) continue;
 
-      const ok = await ctx.ui.confirm(
-        '⌖ Settle Anchor Task',
-        `Task #${a.id} [${a.title}] touched files (${prop.matchedFiles.slice(0, 2).join(', ')}).\nMark as completed and archive?`
-      );
+      try {
+        const ok = await ctx.ui.confirm(
+          '⌖ Settle Anchor Task',
+          `Task #${a.id} [${a.title}] touched files (${prop.matchedFiles.slice(0, 2).join(', ')}).\nMark as completed and archive?`
+        );
 
-      if (ok) {
-        store.settle(a.id, {
-          settledBy: 'one-tap-settlement',
-          touchedFiles: prop.matchedFiles
-        });
-        ctx.ui.notify(`⌖ Settled #${a.id}: "${a.title}"`, 'info');
-      }
+        if (ok) {
+          store.settle(a.id, {
+            settledBy: 'one-tap-settlement',
+            touchedFiles: prop.matchedFiles
+          });
+          ctx.ui.notify(`⌖ Settled #${a.id}: "${a.title}"`, 'info');
+        }
+      } catch {}
     }
   });
 
@@ -432,32 +461,6 @@ export default function (pi: ExtensionAPI) {
       const anc = store.create({ title, cwd: ctx.cwd });
       ctx.ui.notify(`⌖ Pinned #${anc.id}: "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, store);
-    }
-  });
-
-  // 7. Exit Guard: detect uncommitted changes on abrupt session shutdown
-  pi.on('session_shutdown', async (event: any, ctx: ExtensionContext) => {
-    if (event.reason === 'quit') {
-      try {
-        const gitStatus = execSync('git status --porcelain', {
-          cwd: ctx.cwd,
-          encoding: 'utf-8',
-          timeout: 2000,
-          stdio: ['ignore', 'pipe', 'ignore']
-        }).trim();
-
-        const activeAnchors = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active');
-        if (gitStatus && activeAnchors.length === 0) {
-          const home = process.env.HOME || process.env.USERPROFILE || '';
-          const pendingPath = path.join(home, '.anchor', 'pending_exit.json');
-          const data = {
-            cwd: ctx.cwd,
-            timestamp: Date.now(),
-            modifiedCount: gitStatus.split('\n').filter(Boolean).length
-          };
-          fs.writeFileSync(pendingPath, JSON.stringify(data, null, 2), 'utf-8');
-        }
-      } catch (_) {}
     }
   });
 }

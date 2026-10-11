@@ -26,6 +26,7 @@ import {
   getTodayDateString,
   globToRegExp,
   groupAnchorsByQuadrant,
+  hasActiveUI,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
   normalizePath,
@@ -39,7 +40,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-B652T7QR.js";
+} from "./chunk-GPJPN27S.js";
 
 // src/protocol.ts
 var AnchorProtocol = class {
@@ -128,6 +129,7 @@ export {
   getTodayDateString,
   globToRegExp,
   groupAnchorsByQuadrant,
+  hasActiveUI,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
   normalizePath,

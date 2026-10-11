@@ -298,6 +298,7 @@ declare function stripAnsi(str: string): string;
  * - Standard ASCII (width 1)
  */
 declare function getDisplayWidth(str: string): number;
+declare function hasActiveUI(ctx: ExtensionContext | null | undefined): ctx is ExtensionContext;
 /**
  * Truncate string to target terminal visual width with ellipsis
  */
@@ -445,4 +446,4 @@ declare class AnchorProtocol {
     };
 }
 
-export { type AgentAdapter, type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, AnchorProtocol, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, COMMENT_FORMATS, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, acquireSyncLock, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, makeSafeTaskAnnotation, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, stripAnsi, sweepStore, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };
+export { type AgentAdapter, type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, AnchorProtocol, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, COMMENT_FORMATS, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, acquireSyncLock, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, hasActiveUI, makeSafeTaskAnnotation, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, stripAnsi, sweepStore, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };

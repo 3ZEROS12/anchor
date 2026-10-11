@@ -122,13 +122,23 @@ export function getDisplayWidth(str: string): number {
   return width;
 }
 
+export function hasActiveUI(ctx: ExtensionContext | null | undefined): ctx is ExtensionContext {
+  if (!ctx) return false;
+  try {
+    return Boolean(ctx.hasUI && ctx.ui);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Truncate string to target terminal visual width with ellipsis
  */
 export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…'): string {
   if (maxWidth <= 0) return '';
-  const totalWidth = getDisplayWidth(str);
-  if (totalWidth <= maxWidth) return str;
+  const singleLine = str.replace(/[\r\n\t]+/g, ' ');
+  const totalWidth = getDisplayWidth(singleLine);
+  if (totalWidth <= maxWidth) return singleLine;
 
   const ellipsisWidth = getDisplayWidth(ellipsis);
   const target = Math.max(0, maxWidth - ellipsisWidth);
@@ -138,18 +148,18 @@ export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…')
   let accumWidth = 0;
   let i = 0;
 
-  while (i < str.length) {
+  while (i < singleLine.length) {
     ANSI_REGEX.lastIndex = i;
-    const match = ANSI_REGEX.exec(str);
+    const match = ANSI_REGEX.exec(singleLine);
     if (match && match.index === i) {
       accumulated += match[0];
       i += match[0].length;
       continue;
     }
 
-    const codePoint = str.codePointAt(i) || 0;
+    const codePoint = singleLine.codePointAt(i) || 0;
     const charLen = codePoint > 0xffff ? 2 : 1;
-    const fullChar = str.slice(i, i + charLen);
+    const fullChar = singleLine.slice(i, i + charLen);
     const charWidth = getDisplayWidth(fullChar);
 
     if (accumWidth + charWidth > target) {
@@ -163,7 +173,7 @@ export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…')
   // Invariant 11: Guard against trailing open brackets right before ellipsis (e.g. "Fix auth (…" -> "Fix auth…")
   accumulated = accumulated.replace(/\s*[\(\[\{（【]$/, '');
 
-  return accumulated + ellipsis + (str.includes('\x1b') ? '\x1b[0m' : '');
+  return accumulated + ellipsis + (singleLine.includes('\x1b') ? '\x1b[0m' : '');
 }
 
 /**
@@ -291,15 +301,19 @@ export function formatOrigin(anchor: Anchor | string): string {
  * Update footer status bar capsule: `⌖ 1`
  */
 export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore): void {
-  if (!ctx.hasUI || !ctx.ui) return;
+  if (!hasActiveUI(ctx)) return;
 
-  const active = store.list({ status: 'active', cwd: ctx.cwd });
-  if (active.length === 0) {
-    ctx.ui.setStatus('anchor', undefined);
-    return;
+  try {
+    const active = store.list({ status: 'active', cwd: ctx.cwd });
+    if (active.length === 0) {
+      ctx.ui.setStatus('anchor', undefined);
+      return;
+    }
+
+    ctx.ui.setStatus('anchor', `⌖ ${active.length}`);
+  } catch {
+    // Ignore stale context errors during session replacement
   }
-
-  ctx.ui.setStatus('anchor', `⌖ ${active.length}`);
 }
 
 /**
@@ -308,49 +322,53 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
  * Automatically cleared on agent_start (when user sends first message).
  */
 export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): void {
-  if (!ctx.hasUI || !ctx.ui) return;
+  if (!hasActiveUI(ctx)) return;
 
-  const active = store.list({ status: 'active', cwd: ctx.cwd });
-  if (active.length === 0) {
-    ctx.ui.setWidget('anchor-startup', undefined);
-    return;
+  try {
+    const active = store.list({ status: 'active', cwd: ctx.cwd });
+    if (active.length === 0) {
+      ctx.ui.setWidget('anchor-startup', undefined);
+      return;
+    }
+
+    const groups = groupAnchorsByQuadrant(active);
+    const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
+    const topItems = sorted.slice(0, 3);
+
+    const factory = (_tui?: any, theme?: any) => ({
+      render: (width: number) => {
+        const maxTitleWidth = Math.max(12, width - 36);
+        const fg = theme?.fg ? theme.fg.bind(theme) : (_c: string, text: string) => text;
+
+        const lines: string[] = [
+          truncateToWidth(fg('accent', `⌖ Anchor · ${active.length} active commitments:`), width)
+        ];
+
+        for (let i = 0; i < topItems.length; i++) {
+          const a = topItems[i];
+          const num = (i + 1).toString().padStart(2, '0');
+          const q = classifyAnchor(a);
+          const tgt = formatTargetDate(a);
+          const titlePadded = truncateToWidth(a.title, maxTitleWidth);
+          lines.push(truncateToWidth(`  • ${fg('muted', `[${q}]`)}  ${fg('dim', num)} ${titlePadded} ${fg('dim', `(${tgt})`)}`, width));
+        }
+
+        if (sorted.length > 3) {
+          lines.push(truncateToWidth(fg('dim', `  (+${sorted.length - 3} more · run /anchor to inspect)`), width));
+        }
+
+        return lines;
+      },
+      invalidate: () => {}
+    });
+
+    // Reactive component factory in real TUI mode, static string[] in mock tests
+    const content = (ctx as any).ui?.theme ? factory : factory().render(80);
+
+    ctx.ui.setWidget('anchor-startup', content as any, { placement: 'aboveEditor' });
+  } catch {
+    // Ignore stale context errors during session replacement
   }
-
-  const groups = groupAnchorsByQuadrant(active);
-  const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
-  const topItems = sorted.slice(0, 3);
-
-  const factory = (_tui?: any, theme?: any) => ({
-    render: (width: number) => {
-      const maxTitleWidth = Math.max(16, width - 36);
-      const fg = theme?.fg ? theme.fg.bind(theme) : (_c: string, text: string) => text;
-
-      const lines: string[] = [
-        fg('accent', `⌖ Anchor · ${active.length} active commitments:`)
-      ];
-
-      for (let i = 0; i < topItems.length; i++) {
-        const a = topItems[i];
-        const num = (i + 1).toString().padStart(2, '0');
-        const q = classifyAnchor(a);
-        const tgt = formatTargetDate(a);
-        const titlePadded = truncateToWidth(a.title, maxTitleWidth);
-        lines.push(`  • ${fg('muted', `[${q}]`)}  ${fg('dim', num)} ${titlePadded} ${fg('dim', `(${tgt})`)}`);
-      }
-
-      if (sorted.length > 3) {
-        lines.push(fg('dim', `  (+${sorted.length - 3} more · run /anchor to inspect)`));
-      }
-
-      return lines;
-    },
-    invalidate: () => {}
-  });
-
-  // Reactive component factory in real TUI mode, static string[] in mock tests
-  const content = (ctx as any).ui?.theme ? factory : factory().render(80);
-
-  ctx.ui.setWidget('anchor-startup', content as any, { placement: 'aboveEditor' });
 }
 
 /**
@@ -360,7 +378,7 @@ export async function openAnchorDashboard(
   ctx: ExtensionContext,
   store: AnchorStore
 ): Promise<void> {
-  if (!ctx.hasUI || !ctx.ui) return;
+  if (!hasActiveUI(ctx)) return;
 
   const list = store.list({ status: 'active', cwd: ctx.cwd });
   if (list.length === 0) {
