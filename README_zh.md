@@ -1,15 +1,15 @@
 # ⌖ Anchor
 
-> **贴在 Pi 输入框正下方的电子便签 —— `便签: ...` 0ms 瞬贴上屏、长线任务迷你进度条 `[■■□□ 2/4]`、一键切回原对话上下文 (`↪`)，`git commit` 提交代码自动撕便签。**
+> **贴在 Pi 输入框正下方的跨会话电子便签与 `todo` 自动存档点 —— 关终端自动接管未完 `todo` 进度 `[■■□□ 2/5]`，敲 `便签: ...` 0ms 瞬贴支线灵感，敲 `/back` 一键穿越回原对话，`git commit` 自动撕便签。**
 
 [![npm version](https://img.shields.io/npm/v/pi-anchor?color=blue)](https://www.npmjs.com/package/pi-anchor)
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 10 Passed](https://img.shields.io/badge/Tests-10%20通过-22c55e.svg)](tests/store.test.ts)
+[![Tests: 11 Passed](https://img.shields.io/badge/Tests-11%20通过-22c55e.svg)](tests/store.test.ts)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
 
-[English](./README.md) | [日本語](./README_ja.md) | **简体中文**
+[English](./README.md) | **简体中文**
 
 ```bash
 pi install npm:pi-anchor
@@ -37,11 +37,11 @@ pi install npm:pi-anchor
 2. **`TODO.md` 弄脏 Git 且每轮白烧 Token**：在项目根目录维护待办文件，既制造杂乱的 Git 修改记录，又在每一轮对话里反复把旧清单塞进系统提示词。
 3. **开局闪现横幅一打字就消失**：普通插件只在打开终端时闪一下提示，你发完第一句话它就自我隐藏。接下来两个小时写代码，除非专门敲命令查询，否则根本看不见自己记了什么。
 
-**Anchor 的定位很单纯：贴在 Pi 输入框下边框的一张电子便签**：
-- **输入框正下方常驻 1 行 (`belowEditor`)**：便签条固定在输入框下沿，写代码时抬眼可见；输入框上方空间完全留给 `pi-lingual` 等插件；没有便签时自动收起为 0 行。
-- **自己随手敲，0ms 瞬贴 (`便签: ...`)**：直接在输入框敲 `便签: 检查网关超时重试`（或 `pin: ...`、`/pin ...`），输入钩子在 `0.00ms` 内直接拦截上屏，不调用大模型、不耗费 1 个 Token，并自动关联当前刚修改过的代码文件。
-- **长线任务迷你进度条 (`[■■□□ 2/4]`)**：在便签里写 `[2/4]` 或分步序号 `1. 抽出接口 2. 替换Cookie 3. 补单测`，便签条自动显示 4 格进度条与下一步提示。
-- **原对话一键穿越 (`↪ Jump to session`)**：每张便签自动记录创建或施工时的会话文件路径（`sessionFile`）。在 `/anchor` 面板中点击 `↪ Jump to session`，直接切回当时那场对话。
+**Anchor 与单次对话内的 `todo` 形成了天然互补：它是贴在输入框下沿的「跨会话自动存档点 + 随手便签」**：
+- **自动接管未完 `todo`（Auto-Todo Bridge）**：现有的 `todo` 工具（如 `@juicesharp/rpiv-todo` 与内置 `todo`）只存在于单次对话分支中、不写磁盘，一旦关掉终端或敲 `/new` 开启新会话，没跑完的 `todo` 清单就会全部清空。Anchor 会自动监听 `todo` 进度，把未走完的步骤（如 `[■■□□ 2/5]`）与当前修改的文件自动存为跨会话断点；当同一会话内 `todo` 全部完成（`5/5`）时又会自动清理，全程零手动操作。
+- **输入框正下方常驻 1 行 (`belowEditor`)**：便签条固定在输入框下沿，写代码时抬眼可见；输入框上方空间完全留给 `pi-lingual` 与 `rpiv-todo`；没有便签时自动收起为 0 行。
+- **自己随手敲，0ms 瞬贴 (`便签: ...`)**：直接在输入框敲 `便签: 检查网关超时重试`（或 `pin: ...`、`/pin ...`），输入钩子在 `0.00ms` 内直接拦截上屏，不调用大模型、不耗费 1 个 Token。
+- **原对话一键穿越 (`/back` & `↪ Jump to session`)**：每张便签与自动断点都会记录当时的会话文件路径（`sessionFile`）。敲一句 `/back`（或在 `/anchor` 面板中点击 `↪ Jump to session`），直接切回当时那场对话。
 
 ---
 
@@ -49,9 +49,10 @@ pi install npm:pi-anchor
 
 | 操作场景 | 你的输入 | 后台执行逻辑 | 界面即时反馈 | 适用时刻 |
 | :--- | :--- | :--- | :--- | :--- |
+| **未完 `todo` 自动存档** | AI 调用 `todo` 做到 `2/5` 时你关掉终端或敲 `/new` | 自动同步未完 `todo` 步骤、已改文件与 `sessionFile`；若做到 `5/5` 则自动销毁 | 下次打开终端直接显示：`⌖ #1 [■■□□ 2/5] 替换Cookie ▸ 补单测 (↪)` | 弥补单会话 `todo` 关窗即失忆的短板，实现零操作跨会话续传 |
 | **0ms 随手贴便签** | 输入框敲 `便签: 把 src/auth.ts 改用 Cookie` | `input` 钩子 0ms 拦截，提取文件路径并记录当前 `sessionFile` | 输入框下方立即浮现：`⌖ #1 把 src/auth.ts 改用 Cookie (app · auth.ts ↪)` | 改代码中途冒出支线念头，不想打断当前对话 |
 | **分步推进长任务** | 敲 `/pin 重构: 1. 接口 2. Cookie 3. 单测` 后敲 `/step 1` | 解析分步列表并在 `~/.anchor/state.json` 推进完成步数 | 下方便签条实时变为：`⌖ #1 [■■□□ 2/3] 重构 ▸ 单测` | 跨天重构、分步排障或刷课程章节 |
-| **切回原对话 (`↪`)** | 敲 `/anchor` 选中便签点 `↪ Jump to session`（或 `/anchor jump 1`） | 调用 Pi 原生 `ctx.switchSession(note.sessionFile)` | 终端直接切回贴这张便签时的完整历史对话上下文 | 隔了几天回来继续施工，需要找回当时的讨论细节 |
+| **切回原对话 (`/back`)** | 敲 `/back`（或 `/anchor` 选中便签点 `↪ Jump to session`） | 调用 Pi 原生 `ctx.switchSession(note.sessionFile)` | 终端直接切回贴这张便签时的完整历史对话上下文 | 隔了几天回来继续施工，需要找回当时的讨论细节 |
 | **提交代码自动撕** | 执行 `git commit -m "feat: 登录改用 Cookie"` 或敲 `/done 1` | 过滤通用停用词后比对提交信息与便签关键词 | 便签自动归档至 `archive.jsonl`，下方便签条同步消失 | 写完代码顺手提交，免去手动打勾销账 |
 
 ---
@@ -90,7 +91,7 @@ Anchor 显式指定 `{ placement: "belowEditor" }` 挂载在输入框下方，�
 | **Pi 斜杠命令** | `/pin <内容>` | 贴一张新便签（支持写 `[1/4]` 或 `1. A 2. B 3. C` 自动生成进度条） |
 | **Pi 斜杠命令** | `/anchor` | 打开交互面板（回车可撕便签、推进度 `+1`、`↪` 切回原对话 Session、看详情） |
 | **Pi 斜杠命令** | `/step 1` | 将 `#1` 便签的进度条往前推进 `+1` 步 |
-| **Pi 斜杠命令** | `/anchor jump 1` | 直接切换回 `#1` 便签绑定的那场历史对话 (`switchSession`) |
+| **Pi 斜杠命令** | `/back`（或 `/anchor jump 1`） | 一键切换回最近一条未完成便签/`todo` 断点对应的历史对话 (`switchSession`) |
 | **Pi 斜杠命令** | `/done 1` / `/anchor 1` | 按编号 `#1` 直接撕下便签并归档 |
 | **Pi 斜杠命令** | `/anchor undo` | 把刚刚撕下的便签重新贴回原位 |
 | **系统命令行** | `anchor` / `anchor "<内容>"` | 不进 Pi 也能在外部终端查看或贴便签 |
@@ -111,7 +112,7 @@ Anchor 显式指定 `{ placement: "belowEditor" }` 挂载在输入框下方，�
 
 ```bash
 npm run typecheck  # TypeScript 严格类型检查 (0 错误)
-npm test           # 原生 Node 测试运行器 (10/10 全绿通过)
+npm test           # 原生 Node 测试运行器 (11/11 全绿通过)
 npm run build      # tsup 双格式打包与类型声明生成
 ```
 

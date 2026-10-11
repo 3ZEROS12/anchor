@@ -1,6 +1,6 @@
 {
   "name": "pi-anchor",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Cross-session sticky note & auto-todo checkpoint for Pi — automatically saves unfinished todos across terminal restarts, docks a 1-line progress bar [■■□□] below your editor, jumps back to the original session (/back), and auto-clears on git commit.",
   "type": "module",
   "main": "dist/index.js",

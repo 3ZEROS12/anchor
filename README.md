@@ -1,15 +1,15 @@
 # ⌖ Anchor
 
-> **A digital sticky note docked below your Pi editor — 0ms instant stick, micro progress bars `[■■□□ 2/4]`, 1-click session teleport (`↪`), and automatic teardown on `git commit`.**
+> **A digital sticky note & cross-session `todo` checkpoint docked below your Pi editor — automatically catches unfinished `todo` lists when you close the terminal, sticks quick notes in 0ms (`pin: ...`), and teleports back to the original session (`/back`).**
 
 [![npm version](https://img.shields.io/npm/v/pi-anchor?color=blue)](https://www.npmjs.com/package/pi-anchor)
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 10 Passed](https://img.shields.io/badge/Tests-10%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 11 Passed](https://img.shields.io/badge/Tests-11%20Passed-22c55e.svg)](tests/store.test.ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
-**English** | [日本語](./README_ja.md) | [简体中文](./README_zh.md)
+**English** | [简体中文](./README_zh.md)
 
 ```bash
 pi install npm:pi-anchor
@@ -37,11 +37,11 @@ Late at night, mid-way through fixing a bug, you spot a second issue in `src/aut
 2. **`TODO.md` Pollutes Git & Burns Context Tokens**: Tracking personal reminders inside repository markdown files dirties `git status` and re-injects stale checklists into the system prompt on every turn.
 3. **Splash Banners Vanish When You Start Typing**: Traditional startup widgets disappear on the first message. For the rest of a two-hour session, your notes are hidden unless you manually run a slash command.
 
-**Anchor acts like a physical sticky note stuck to the bottom bezel of your Pi editor**:
-- **Persistent Below-Editor Strip (`belowEditor`)**: Docks a single-line note strip directly beneath your input box. It stays in view while you code, leaves `aboveEditor` untouched for extensions like `pi-lingual`, and collapses to 0 lines when empty.
+**Anchor acts like a physical sticky note and auto-save checkpoint stuck to the bottom bezel of your Pi editor**:
+- **Auto-Todo Bridge (`todo` ➔ Cross-Session Checkpoint)**: Standard `todo` tools (`@juicesharp/rpiv-todo` and built-in `todo`) live only inside a single conversation with zero disk writes — closing the terminal or running `/new` wipes unfinished tasks. Anchor automatically mirrors unfinished `todo` snapshots to disk (`[■■□□ 2/5]`) and auto-clears them the moment all steps reach `completed`.
+- **Persistent Below-Editor Strip (`belowEditor`)**: Docks a single-line note strip directly beneath your input box. It stays in view while you code, leaves `aboveEditor` untouched for extensions like `pi-lingual` and `rpiv-todo`, and collapses to 0 lines when empty.
 - **0ms Human-First Capture (`pin: ...`)**: Type `pin: Check token expiry` (or `/pin ...`) straight into the editor. An input hook intercepts the text in `0.00ms` without calling the language model or spending tokens.
-- **Micro Progress Bar (`[■■□□ 2/4]`)**: Write `[2/4]` or numbered steps (`1. Extract interface 2. HttpOnly cookie 3. Unit tests`) in your note to get an inline 4-cell progress bar with next-step hints.
-- **Session Teleport (`↪ Jump to session`)**: Every note bookmarks the exact `.jsonl` session file where it was created or last touched. Select `↪ Jump to session` in `/anchor` to switch Pi straight back to that conversation.
+- **Session Teleport (`/back` & `↪ Jump to session`)**: Every note and auto-checkpoint bookmarks the exact `.jsonl` session file where work happened. Run `/back` (or select `↪ Jump to session` in `/anchor`) to switch Pi straight back to that conversation.
 
 ---
 
@@ -49,9 +49,10 @@ Late at night, mid-way through fixing a bug, you spot a second issue in `src/aut
 
 | Mode / Action | What You Input | What the Engine Does | What You See | Best For |
 | :--- | :--- | :--- | :--- | :--- |
+| **Auto-Todo Checkpoint** | Agent calls `todo` (`2/5` done, then you quit or `/new`) | Mirrors unfinished `todo` snapshot + modified files + `sessionFile`; auto-clears at `5/5` | Next session shows: `⌖ #1 [■■□□ 2/5] Switch token ▸ Add tests (↪)` | Never losing unfinished `todo` lists across terminal restarts |
 | **Stick a Note (0ms)** | Type `pin: Fix auth in src/auth.ts` or `/pin ...` | Intercepts via input hook in `0ms`, extracts file paths, and links current `sessionFile` | 1-line strip appears below editor: `⌖ #1 Fix auth (app · auth.ts ↪)` | Capturing a tangent without derailing the current prompt |
 | **Track Multi-Step Work** | Type `/pin Refactor: 1. API 2. Cookie 3. Tests` then `/step 1` | Parses step list and increments `done / total` counter in `~/.anchor/state.json` | Strip updates in place: `⌖ #1 [■■□□ 2/3] Refactor ▸ Tests` | Multi-session features and long-running study goals |
-| **Resume Context (`↪`)** | Run `/anchor` ➔ select `↪ Jump to session` (or `/anchor jump 1`) | Invokes Pi's native `ctx.switchSession(note.sessionFile)` | Terminal switches directly back to the original conversation transcript | Picking up a complex task days later with full history |
+| **Resume Context (`/back`)** | Run `/back` (or `/anchor` ➔ `↪ Jump to session`) | Invokes Pi's native `ctx.switchSession(note.sessionFile)` | Terminal switches directly back to the original conversation transcript | Picking up a complex task days later with full history |
 | **Auto-Tear on Commit** | Commit code (`git commit -m "feat: fix auth"`) or run `/done 1` | Matches commit message against active notes (filtering generic stop-words) | Note archives to `archive.jsonl`; strip clears (`⌖ Auto-torn off #1`) | Keeping the sticky strip clean without manual bookkeeping |
 
 ---
@@ -90,7 +91,7 @@ All state lives in `~/.anchor/` outside your git repository:
 | **Pi Slash** | `/pin <note>` | Stick a note (supports `[1/4]` or `1. A 2. B 3. C` steps) |
 | **Pi Slash** | `/anchor` | Open interactive sticky note board (tear off, `+1` step, `↪` jump to session, or read details) |
 | **Pi Slash** | `/step 1` | Advance progress bar on note `#1` by `+1` |
-| **Pi Slash** | `/anchor jump 1` | Switch Pi back to the conversation session linked to note `#1` |
+| **Pi Slash** | `/back` (or `/anchor jump 1`) | Teleport Pi back to the conversation session of the latest unfinished note/todo checkpoint |
 | **Pi Slash** | `/done 1` / `/anchor 1` | Tear off note `#1` and archive it |
 | **Pi Slash** | `/anchor undo` | Put back the most recently torn-off note |
 | **Terminal CLI** | `anchor` / `anchor "<note>"` | View or stick notes from any shell outside Pi |
@@ -111,7 +112,7 @@ In `v0.4` and `v0.5`, I threw away 60% of the codebase and rebuilt Anchor around
 
 ```bash
 npm run typecheck  # Strict tsc --noEmit check (0 errors)
-npm test           # Native Node test runner (10/10 passing)
+npm test           # Native Node test runner (11/11 passing)
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 ```
 
