@@ -7,12 +7,21 @@ import {
   type AnchorPriority,
   type AnchorProgress,
   type AnchorStatus,
+  type AnchorStep,
   type AnchorStoreState,
+  type StepStatus,
   type TodoTaskItem,
   type TouchMatchResult,
   QUIET_AFTER_DAYS,
   MS_PER_DAY
 } from './types.ts';
+import {
+  materializeSteps,
+  syncProgressFromItems,
+  validateAnchorDependencies,
+  validateStepDependencies
+} from './graph.ts';
+import { convertTodoTasksToSteps } from './bridge.ts';
 
 /**
  * Normalize path separators to forward slashes and strip baseCwd prefix when inside baseCwd
@@ -94,11 +103,16 @@ export function extractProgressFromText(rawTitle: string): { cleanTitle: string;
   const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*([^\d]+?)(?=\s+\d+\.\s|$)/g));
   if (stepParts.length >= 2) {
     const steps = stepParts.map(m => m[2].trim().replace(/[;；,，]+$/, '')).filter(Boolean);
+    const items: AnchorStep[] = steps.map((subject, idx) => ({
+      id: idx + 1,
+      subject,
+      status: idx === 0 ? 'in_progress' : 'pending'
+    }));
     const firstMatchIdx = rawTitle.indexOf(stepParts[0][0]);
     const prefix = rawTitle.slice(0, firstMatchIdx).replace(/[:：\-—\s]+$/, '').trim();
     return {
       cleanTitle: prefix || steps.join(' → '),
-      progress: { done: 0, total: steps.length, steps }
+      progress: { done: 0, total: steps.length, steps, items }
     };
   }
 
@@ -494,6 +508,8 @@ export class AnchorStore {
     project?: string;
     files?: string[];
     tags?: string[];
+    blockedBy?: string[];
+    activeForm?: string;
     sessionFile?: string;
     progress?: AnchorProgress;
   }): Anchor {
@@ -501,6 +517,11 @@ export class AnchorStore {
       const state = this.loadState();
       const now = Date.now();
       const id = this.generateId(state);
+
+      if (input.blockedBy && input.blockedBy.length > 0) {
+        const check = validateAnchorDependencies(state.anchors, id, input.blockedBy);
+        if (!check.valid) throw new Error(check.error);
+      }
 
       const { cleanTitle, progress: parsedProgress } = extractProgressFromText(input.title);
       const explicitFiles = (input.files || []).map(f => normalizePath(f)).filter(Boolean);
@@ -520,6 +541,13 @@ export class AnchorStore {
         ? input.project.trim()
         : (cwd ? path.basename(cwd) : 'global');
 
+      const normBlockedBy = input.blockedBy
+        ? input.blockedBy.map(b => {
+            const c = b.trim().replace(/^#/, '');
+            return /^\d+$/.test(c) ? `anc-${parseInt(c, 10)}` : c;
+          })
+        : undefined;
+
       const anchor: Anchor = {
         id,
         title: cleanTitle,
@@ -534,6 +562,8 @@ export class AnchorStore {
         lastTouchedAt: now,
         files: inferredFiles,
         tags: (input.tags || []).map(t => t.trim()).filter(Boolean),
+        ...(input.activeForm ? { activeForm: input.activeForm.trim() } : {}),
+        ...(normBlockedBy && normBlockedBy.length > 0 ? { blockedBy: normBlockedBy } : {}),
         ...(input.sessionFile ? { sessionFile: normalizePath(input.sessionFile) } : {}),
         ...(input.progress || parsedProgress ? { progress: input.progress || parsedProgress } : {})
       };
@@ -639,10 +669,22 @@ export class AnchorStore {
       const prevDone = current.progress?.done || 0;
       const nextDone = Math.max(0, Math.min(total, prevDone + safeDelta));
 
+      const existingItems = materializeSteps(current.progress);
+      let updatedItems: AnchorStep[] | undefined;
+      if (existingItems.length > 0) {
+        updatedItems = existingItems.map((item, idx) => {
+          let status: StepStatus = 'pending';
+          if (idx < nextDone) status = 'completed';
+          else if (idx === nextDone) status = 'in_progress';
+          return { ...item, status };
+        });
+      }
+
       current.progress = {
         ...(current.progress || {}),
         done: nextDone,
-        total
+        total,
+        ...(updatedItems ? { items: updatedItems, steps: updatedItems.map(i => i.subject) } : {})
       };
       current.lastTouchedAt = now;
       current.updatedAt = now;
@@ -654,6 +696,123 @@ export class AnchorStore {
       this.saveState(state);
       return { anchor: current, completed: nextDone >= total };
     });
+  }
+
+  /**
+   * Add a structured sub-step to an anchor (with DAG dependency validation)
+   */
+  public addStep(
+    id: string,
+    subject: string,
+    options: { blockedBy?: number[]; activeForm?: string; status?: StepStatus } = {}
+  ): Anchor {
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
+
+      const current = state.anchors[idx];
+      const items = materializeSteps(current.progress);
+      const nextStepId = items.length > 0 ? Math.max(...items.map(s => s.id)) + 1 : 1;
+
+      if (options.blockedBy && options.blockedBy.length > 0) {
+        const check = validateStepDependencies(items, nextStepId, options.blockedBy);
+        if (!check.valid) throw new Error(check.error);
+      }
+
+      const newStep: AnchorStep = {
+        id: nextStepId,
+        subject: subject.trim(),
+        status: options.status || (items.some(s => s.status === 'in_progress') ? 'pending' : 'in_progress'),
+        ...(options.activeForm ? { activeForm: options.activeForm.trim() } : {}),
+        ...(options.blockedBy && options.blockedBy.length > 0 ? { blockedBy: [...options.blockedBy] } : {})
+      };
+
+      const nextItems = [...items, newStep];
+      current.progress = syncProgressFromItems(nextItems, current.progress);
+      current.updatedAt = Date.now();
+      current.lastTouchedAt = Date.now();
+      state.anchors[idx] = current;
+      this.saveState(state);
+      return current;
+    });
+  }
+
+  /**
+   * Update a specific sub-step within an anchor (status, subject, activeForm, or blockedBy DAG edges)
+   */
+  public updateStep(
+    id: string,
+    stepId: number,
+    patch: {
+      status?: StepStatus;
+      subject?: string;
+      activeForm?: string;
+      addBlockedBy?: number[];
+      removeBlockedBy?: number[];
+    }
+  ): Anchor {
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
+
+      const current = state.anchors[idx];
+      const items = materializeSteps(current.progress);
+      const stepIdx = items.findIndex(s => s.id === stepId);
+      if (stepIdx === -1) throw new Error(`Step #${stepId} not found in #${current.id}`);
+
+      if (patch.addBlockedBy && patch.addBlockedBy.length > 0) {
+        const check = validateStepDependencies(items, stepId, patch.addBlockedBy);
+        if (!check.valid) throw new Error(check.error);
+      }
+
+      const target = { ...items[stepIdx] };
+      if (patch.status) target.status = patch.status;
+      if (patch.subject) target.subject = patch.subject.trim();
+      if (patch.activeForm !== undefined) {
+        if (patch.activeForm) target.activeForm = patch.activeForm.trim();
+        else delete target.activeForm;
+      }
+
+      if (patch.addBlockedBy || patch.removeBlockedBy) {
+        const set = new Set<number>(target.blockedBy ?? []);
+        for (const addId of patch.addBlockedBy ?? []) set.add(addId);
+        for (const rmId of patch.removeBlockedBy ?? []) set.delete(rmId);
+        if (set.size > 0) target.blockedBy = [...set];
+        else delete target.blockedBy;
+      }
+
+      items[stepIdx] = target;
+      current.progress = syncProgressFromItems(items, current.progress);
+      current.updatedAt = Date.now();
+      current.lastTouchedAt = Date.now();
+      state.anchors[idx] = current;
+      this.saveState(state);
+      return current;
+    });
+  }
+
+  /**
+   * Read recent settled/archived notes from `archive.jsonl` (newest first)
+   */
+  public listArchive(limit = 20): Anchor[] {
+    if (!fs.existsSync(this.archivePath)) return [];
+    try {
+      const lines = fs.readFileSync(this.archivePath, 'utf-8').split(/\r?\n/).filter(Boolean);
+      const parsed: Anchor[] = [];
+      for (let i = lines.length - 1; i >= 0 && parsed.length < limit; i--) {
+        try {
+          const item = JSON.parse(lines[i]);
+          if (item && typeof item.id === 'string' && typeof item.title === 'string') {
+            parsed.push(item);
+          }
+        } catch {}
+      }
+      return parsed;
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -701,8 +860,9 @@ export class AnchorStore {
         return { status: 'noop' };
       }
 
-      // 2. Active unfinished todos exist: build live progress & next-step snapshot
+      // 2. Active unfinished todos exist: build live progress & structured step tree
       const inProgress = unfinishedTasks.find(t => t.status === 'in_progress') || unfinishedTasks[0];
+      const structuredItems = convertTodoTasksToSteps(visible);
       const orderedSteps = [
         ...completedTasks.map(t => t.subject.trim()),
         ...unfinishedTasks.filter(t => t.status === 'in_progress').map(t => t.subject.trim()),
@@ -711,7 +871,8 @@ export class AnchorStore {
       const progress: AnchorProgress = {
         done: completedTasks.length,
         total: visible.length,
-        steps: orderedSteps
+        steps: orderedSteps,
+        items: structuredItems
       };
 
       const remainingSummary = unfinishedTasks

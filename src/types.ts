@@ -1,18 +1,34 @@
 /**
- * Anchor Data Contracts
- * Minimalist cross-session sticky notes stored in ~/.anchor/state.json
+ * Anchor v1.0 Domain Contracts
+ * Cross-Session Task & Todo Dock + Instant Sticky Notes (`~/.anchor/state.json`)
  */
 
 export type AnchorStatus = 'active' | 'sleeping' | 'settled';
 export type AnchorPriority = 'p0' | 'p1' | 'p2';
+export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'deleted';
+
+export interface AnchorStep {
+  /** 1-based step id within the anchor */
+  id: number;
+  /** Imperative step title */
+  subject: string;
+  /** 4-state lifecycle matching `todo` tool */
+  status: StepStatus;
+  /** Live present-continuous activity label (e.g. 'editing src/auth.ts') */
+  activeForm?: string;
+  /** Prerequisite step IDs within the same anchor (`⛓ #1`) */
+  blockedBy?: number[];
+}
 
 export interface AnchorProgress {
   /** Completed steps or units */
   done: number;
   /** Total steps or units */
   total: number;
-  /** Optional parsed step labels (e.g. ['抽出接口', '替换Cookie', '补单测']) */
+  /** Flat step titles for backward compatibility */
   steps?: string[];
+  /** Rich structured step items with status, activeForm, and blockedBy DAG */
+  items?: AnchorStep[];
 }
 
 export interface AnchorEvidence {
@@ -26,21 +42,23 @@ export interface AnchorEvidence {
 export interface TodoTaskItem {
   id: number;
   subject: string;
-  status: 'pending' | 'in_progress' | 'completed' | 'deleted';
+  status: StepStatus;
   activeForm?: string;
   description?: string;
+  blockedBy?: number[];
+  owner?: string;
 }
 
 export interface Anchor {
   /** Sequential identifier, e.g. 'anc-1' */
   id: string;
-  /** Sticky note text */
+  /** Primary title or sticky note text */
   title: string;
-  /** Optional extra context */
+  /** Optional detailed context */
   description?: string;
   /** Lifecycle status: 'active' (recent) or 'sleeping' (>7d untouched, 0 prompt tokens) */
   status: AnchorStatus;
-  /** Origin source: 'manual' (user/tool pinned) or 'todo-sync' (auto-bridged from unfinished session todos) */
+  /** Origin source: 'manual' (user/tool pinned) or 'todo-sync' (auto-bridged from session todos) */
   source?: 'manual' | 'todo-sync';
   /** Short workspace label (e.g. 'anchor', 'College/优化', or 'global') */
   project: string;
@@ -52,17 +70,21 @@ export interface Anchor {
   updatedAt: number;
   /** Last activity timestamp (ms) */
   lastTouchedAt: number;
-  /** Associated file paths or globs (explicit, auto-extracted from note text, or inherited from active session) */
+  /** Associated file paths or globs */
   files: string[];
-  /** Optional tags */
+  /** Optional domain tags */
   tags: string[];
-  /** Associated Pi conversation session file (.jsonl) for 1-click session jump/resume */
+  /** Live present-continuous activity indicator (e.g. 'editing src/auth.ts') */
+  activeForm?: string;
+  /** Prerequisite anchor IDs (e.g. ['anc-1']) for cross-task sequencing */
+  blockedBy?: string[];
+  /** Associated Pi conversation session file (.jsonl) for 1-click session teleport (`/back`) */
   sessionFile?: string;
-  /** Optional lightweight progress tracker for long-term or multi-step notes */
+  /** Progress tracker & structured step tree */
   progress?: AnchorProgress;
   /** Optional due date ('YYYY-MM-DD') */
   targetDate?: string;
-  /** Optional priority kept for backward compatibility */
+  /** Priority tier */
   priority?: AnchorPriority;
   /** Settlement metadata when archived */
   evidence?: AnchorEvidence;
@@ -82,6 +104,20 @@ export interface TouchMatchResult {
   reason: 'exact-file' | 'dir-prefix';
 }
 
+export interface StepCounts {
+  total: number;
+  pending: number;
+  inProgress: number;
+  completed: number;
+}
+
+export interface DockStepLayout {
+  visible: AnchorStep[];
+  hiddenCompleted: number;
+  truncatedTail: number;
+}
+
 /** 7 days without activity moves a note to quiet mode (still visible in UI, 0 prompt tokens in unrelated workspaces) */
 export const QUIET_AFTER_DAYS = 7;
 export const MS_PER_DAY = 86_400_000;
+export const DEFAULT_MAX_DOCK_LINES = 8;

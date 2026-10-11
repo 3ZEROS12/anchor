@@ -1,2 +1,2 @@
 import '@earendil-works/pi-coding-agent';
-export { B as default, u as parseAnchorCommandInput, v as parseQuickNoteInput, y as resolveAnchorTarget } from './extension-09AVvgl-.cjs';
+export { G as default, x as parseAnchorCommandInput, y as parseQuickNoteInput, E as resolveAnchorTarget } from './extension-B4JOU06c.cjs';

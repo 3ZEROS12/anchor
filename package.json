@@ -1,7 +1,7 @@
 {
   "name": "pi-anchor",
-  "version": "0.6.1",
-  "description": "Cross-session sticky note & auto-todo checkpoint for Pi — automatically saves unfinished todos across terminal restarts, docks a 1-line progress bar [■■□□] below your editor, jumps back to the original session (/back), and auto-clears on git commit.",
+  "version": "1.0.0",
+  "description": "Cross-session Task & Todo Dock for Pi — persistent belowEditor tree overlay (✓ strikethrough, ◐ live file activity, ⛓ DAG dependencies, Alt+A fold), auto-saves unfinished todos across restarts, 0ms pin: notes, and /back session teleport.",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",

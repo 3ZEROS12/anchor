@@ -21,11 +21,13 @@ import {
   updateAnchorStatusBar,
   updateStartupBanner
 } from './tui.ts';
+import { defaultDockController } from './dock.ts';
+import { inferLiveActivityLabel, replayTodoSnapshotFromBranch } from './bridge.ts';
 
 const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
 
 export function parseAnchorCommandInput(raw: string): {
-  mode: 'dashboard' | 'undo' | 'settle' | 'step' | 'jump' | 'pin';
+  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin';
   targetId?: string;
   delta?: number;
   title?: string;
@@ -36,6 +38,9 @@ export function parseAnchorCommandInput(raw: string): {
   }
   if (trimmed === 'undo') {
     return { mode: 'undo' };
+  }
+  if (trimmed === 'fold' || trimmed === 'compact' || trimmed === 'toggle' || trimmed === 'expand') {
+    return { mode: 'fold' };
   }
 
   const settleMatch = trimmed.match(/^(?:done|rm|close|settle)\s+(.+)$/i);
@@ -142,10 +147,11 @@ export default function (pi: ExtensionAPI) {
     return store.get(anc.id) || anc;
   }
 
-  // 1. Session start: quiet old notes (>7d), wake notes belonging to this workspace, render belowEditor sticky strip
+  // 1. Session start: quiet old notes (>7d), wake notes belonging to this workspace, replay branch todos, render belowEditor Dock
   pi.on('session_start', async (_event: any, ctx: ExtensionContext) => {
     annotatedThisSession.clear();
     recentSessionFiles.length = 0;
+    defaultDockController.resetGraceState();
     sweepQuietNotes(store);
 
     const quietForHere = store
@@ -155,9 +161,40 @@ export default function (pi: ExtensionAPI) {
       store.touch(q.id);
     }
 
+    // Replay current session branch for any existing `todo` tool snapshot
+    try {
+      const branch = (ctx as any).sessionManager?.getBranch?.();
+      const tasks = replayTodoSnapshotFromBranch(branch);
+      if (tasks) {
+        store.syncFromTodoTool(tasks, {
+          cwd: ctx.cwd,
+          sessionFile: getSessionFileSafe(ctx)
+        });
+      }
+    } catch {}
+
     updateAnchorStatusBar(ctx, store);
-    updateStartupBanner(ctx, store);
   });
+
+  // 1b. Fold completed steps from previous turn on `agent_start` (1-turn strikethrough grace period)
+  pi.on('agent_start', async (_event: any, ctx: ExtensionContext) => {
+    if (defaultDockController.foldCompletedStepsFromPreviousTurn()) {
+      updateStartupBanner(ctx, store);
+    }
+  });
+
+  // 1c. Keyboard shortcut `alt+a`: toggle belowEditor Dock between Expanded Tree and 1-Line Compact Strip
+  if (typeof (pi as any).registerShortcut === 'function') {
+    try {
+      (pi as any).registerShortcut('alt+a', {
+        description: 'Collapse or expand the Anchor belowEditor task dock',
+        handler: (ctx: ExtensionContext) => {
+          defaultDockController.toggleCollapsed();
+          updateStartupBanner(ctx, store);
+        }
+      });
+    } catch {}
+  }
 
   // 2. Human-First 0ms Input Hook: type `pin: <note>` or `便签: <note>` directly in the editor!
   //    Intercepted in 0ms without triggering an LLM turn or burning a single token.
@@ -243,9 +280,19 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // (b) 1-line syntax-safe file whisper & session bookmark update
+    // (c) 1-line syntax-safe file whisper, live activity indicator (`activeForm`), & session bookmark update
+    const liveActivity = inferLiveActivityLabel(lowerTool, event.input as any, ctx.cwd);
     const pathInput = (event.input as any)?.path;
-    if (typeof pathInput !== 'string') return;
+    if (typeof pathInput !== 'string') {
+      if (liveActivity) {
+        const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+        if (activeHere.length > 0) {
+          store.update(activeHere[0].id, { activeForm: liveActivity });
+          updateStartupBanner(ctx, store);
+        }
+      }
+      return;
+    }
 
     const isMutation = MUTATION_TOOLS.has(lowerTool);
     if (isMutation) {
@@ -257,9 +304,14 @@ export default function (pi: ExtensionAPI) {
     const matches = findMatchedAnchors(notes, [touchedPath]);
     if (matches.length === 0) return;
 
-    if (isMutation) {
+    if (isMutation || liveActivity) {
       for (const m of matches) {
-        store.touch(m.anchor.id, Date.now(), currentSessionFile);
+        if (isMutation) {
+          store.touch(m.anchor.id, Date.now(), currentSessionFile);
+        }
+        if (liveActivity) {
+          store.update(m.anchor.id, { activeForm: liveActivity });
+        }
       }
       updateAnchorStatusBar(ctx, store);
     }
@@ -431,6 +483,13 @@ export default function (pi: ExtensionAPI) {
         } catch (err: any) {
           ctx.ui.notify(`Undo failed: ${err.message}`, 'error');
         }
+        return;
+      }
+
+      if (parsed.mode === 'fold') {
+        const collapsed = defaultDockController.toggleCollapsed();
+        updateStartupBanner(ctx, store);
+        ctx.ui.notify(`⌖ Anchor Dock ${collapsed ? 'folded to 1-line strip' : 'expanded to tree view'} (Alt+A)`, 'info');
         return;
       }
 

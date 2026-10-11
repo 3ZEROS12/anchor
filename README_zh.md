@@ -6,7 +6,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 11 Passed](https://img.shields.io/badge/Tests-11%20通过-22c55e.svg)](tests/store.test.ts)
+[![Tests: 15 Passed](https://img.shields.io/badge/Tests-15%20通过-22c55e.svg)](tests/store.test.ts)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
 
 [English](./README.md) | **简体中文**
@@ -22,9 +22,14 @@ pi install npm:pi-anchor
 ```text
   ┌─ [输入框上方 aboveEditor 完全留给 pi-lingual 等插件，上下零冲突] ─────────────┐
 ╭─┴─ Pi 输入框 ────────────────────────────────────────────────────────────────────╮
-│ ❯ 便签: 重构登录鉴权流: 1. 抽出接口 2. 替换Cookie 3. 补单测 4. 压测              │
+│ ❯ 便签: 重构鉴权流: 1. 抽出接口 2. 替换HttpOnly Cookie 3. 补齐集成单测          │
 ╰─┬────────────────────────────────────────────────────────────────────────────────╯
-  └─► ⌖ #1 [■■□□ 2/4] 重构登录鉴权流 ▸ 补单测 (app · auth.ts ↪)
+  ├─► ⌖ #1 [■□□□ 1/3] 重构鉴权流 (app · auth.ts ↪)                    [Alt+A 折叠]
+  │   ├─ ✓ 1. 抽出接口 (删除线，下一轮自动收起)
+  │   ├─ ◐ 2. 替换HttpOnly Cookie (editing auth.ts)
+  │   ├─ ○ 3. 补齐集成单测 ⛓ #2
+  │   └─ 📌 #2 检查网关超时降级重试 (3h ago)
+  └─► (按 Alt+A 一键折叠为 1 行): ⌖ #1 [■□□□ 1/3] 重构鉴权流 ▸ 替换Cookie (auth.ts ↪)
 ```
 
 ---
@@ -112,7 +117,7 @@ Anchor 显式指定 `{ placement: "belowEditor" }` 挂载在输入框下方，�
 
 ```bash
 npm run typecheck  # TypeScript 严格类型检查 (0 错误)
-npm test           # 原生 Node 测试运行器 (11/11 全绿通过)
+npm test           # 原生 Node 测试运行器 (15/15 全绿通过)
 npm run build      # tsup 双格式打包与类型声明生成
 ```
 

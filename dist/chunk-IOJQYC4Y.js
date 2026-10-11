@@ -4,18 +4,277 @@ import fs3 from "fs";
 
 // src/store.ts
 import fs from "fs";
-import path from "path";
+import path2 from "path";
 import os from "os";
 
 // src/types.ts
 var QUIET_AFTER_DAYS = 7;
 var MS_PER_DAY = 864e5;
+var DEFAULT_MAX_DOCK_LINES = 8;
+
+// src/graph.ts
+function validateStepDependencies(steps, stepId, newBlockedBy) {
+  const visibleMap = /* @__PURE__ */ new Map();
+  for (const s of steps) {
+    if (s.status !== "deleted") {
+      visibleMap.set(s.id, s);
+    }
+  }
+  for (const depId of newBlockedBy) {
+    if (depId === stepId) {
+      return { valid: false, error: `Step #${stepId} cannot be blocked by itself` };
+    }
+    if (!visibleMap.has(depId)) {
+      return { valid: false, error: `Prerequisite step #${depId} does not exist or is deleted` };
+    }
+  }
+  const edges = /* @__PURE__ */ new Map();
+  for (const s of visibleMap.values()) {
+    if (s.id === stepId) {
+      const merged = /* @__PURE__ */ new Set([...s.blockedBy ?? [], ...newBlockedBy]);
+      edges.set(s.id, [...merged]);
+    } else {
+      edges.set(s.id, s.blockedBy ? [...s.blockedBy] : []);
+    }
+  }
+  const visiting = /* @__PURE__ */ new Set();
+  const visited = /* @__PURE__ */ new Set();
+  const hasCycle = (node) => {
+    if (visiting.has(node)) return true;
+    if (visited.has(node)) return false;
+    visiting.add(node);
+    for (const nb of edges.get(node) ?? []) {
+      if (hasCycle(nb)) return true;
+    }
+    visiting.delete(node);
+    visited.add(node);
+    return false;
+  };
+  for (const node of edges.keys()) {
+    if (hasCycle(node)) {
+      return { valid: false, error: `Dependency cycle detected involving step #${stepId}` };
+    }
+  }
+  return { valid: true };
+}
+function validateAnchorDependencies(anchors, anchorId, newBlockedBy) {
+  const normId = (raw) => {
+    const clean = raw.trim().replace(/^#/, "");
+    return /^\d+$/.test(clean) ? `anc-${parseInt(clean, 10)}` : clean;
+  };
+  const targetId = normId(anchorId);
+  const activeMap = /* @__PURE__ */ new Map();
+  for (const a of anchors) {
+    activeMap.set(a.id, a);
+  }
+  const normalizedDeps = newBlockedBy.map(normId);
+  for (const depId of normalizedDeps) {
+    if (depId === targetId) {
+      return { valid: false, error: `Note #${targetId} cannot depend on itself` };
+    }
+    if (!activeMap.has(depId)) {
+      return { valid: false, error: `Prerequisite note #${depId} does not exist` };
+    }
+  }
+  const edges = /* @__PURE__ */ new Map();
+  for (const a of activeMap.values()) {
+    if (a.id === targetId) {
+      edges.set(a.id, Array.from(/* @__PURE__ */ new Set([...a.blockedBy ?? [], ...normalizedDeps])));
+    } else {
+      edges.set(a.id, a.blockedBy ? [...a.blockedBy] : []);
+    }
+  }
+  const visiting = /* @__PURE__ */ new Set();
+  const visited = /* @__PURE__ */ new Set();
+  const hasCycle = (node) => {
+    if (visiting.has(node)) return true;
+    if (visited.has(node)) return false;
+    visiting.add(node);
+    for (const nb of edges.get(node) ?? []) {
+      if (hasCycle(nb)) return true;
+    }
+    visiting.delete(node);
+    visited.add(node);
+    return false;
+  };
+  for (const node of edges.keys()) {
+    if (hasCycle(node)) {
+      return { valid: false, error: `Dependency cycle detected involving #${targetId}` };
+    }
+  }
+  return { valid: true };
+}
+function deriveStepBlocks(steps) {
+  const blocks = /* @__PURE__ */ new Map();
+  for (const s of steps) {
+    if (s.status === "deleted") continue;
+    for (const dep of s.blockedBy ?? []) {
+      const arr = blocks.get(dep) ?? [];
+      arr.push(s.id);
+      blocks.set(dep, arr);
+    }
+  }
+  return blocks;
+}
+function materializeSteps(progress) {
+  if (!progress) return [];
+  if (Array.isArray(progress.items) && progress.items.length > 0) {
+    return progress.items.filter((s) => s.status !== "deleted").map((s) => ({ ...s }));
+  }
+  if (Array.isArray(progress.steps) && progress.steps.length > 0) {
+    const done = Math.max(0, progress.done || 0);
+    return progress.steps.map((subject, idx) => {
+      let status = "pending";
+      if (idx < done) status = "completed";
+      else if (idx === done) status = "in_progress";
+      return {
+        id: idx + 1,
+        subject,
+        status
+      };
+    });
+  }
+  return [];
+}
+function syncProgressFromItems(items, existing) {
+  const visible = items.filter((i) => i.status !== "deleted");
+  const completed = visible.filter((i) => i.status === "completed").length;
+  return {
+    ...existing || {},
+    done: completed,
+    total: visible.length,
+    steps: visible.map((i) => i.subject),
+    items: items.map((i) => ({ ...i }))
+  };
+}
+function selectStepCounts(steps) {
+  const visible = steps.filter((s) => s.status !== "deleted");
+  let pending = 0;
+  let inProgress = 0;
+  let completed = 0;
+  for (const s of visible) {
+    if (s.status === "completed") completed++;
+    else if (s.status === "in_progress") inProgress++;
+    else pending++;
+  }
+  return {
+    total: visible.length,
+    pending,
+    inProgress,
+    completed
+  };
+}
+function selectDockStepLayout(steps, budget, hiddenCompletedIds = /* @__PURE__ */ new Set()) {
+  const allVisible = steps.filter(
+    (s) => s.status !== "deleted" && !(s.status === "completed" && hiddenCompletedIds.has(s.id))
+  );
+  const preHiddenCompleted = steps.filter(
+    (s) => s.status === "completed" && hiddenCompletedIds.has(s.id)
+  ).length;
+  if (budget <= 0) {
+    return { visible: [], hiddenCompleted: preHiddenCompleted, truncatedTail: allVisible.length };
+  }
+  if (allVisible.length <= budget && preHiddenCompleted === 0) {
+    return { visible: allVisible, hiddenCompleted: 0, truncatedTail: 0 };
+  }
+  const innerBudget = preHiddenCompleted > 0 ? Math.max(1, budget - 1) : allVisible.length <= budget ? budget : Math.max(1, budget - 1);
+  if (allVisible.length <= innerBudget && preHiddenCompleted === 0) {
+    return { visible: allVisible, hiddenCompleted: 0, truncatedTail: 0 };
+  }
+  const nonCompleted = allVisible.filter((s) => s.status !== "completed");
+  const newlyCompletedCount = allVisible.length - nonCompleted.length;
+  if (nonCompleted.length <= innerBudget) {
+    const kept = new Set(nonCompleted);
+    for (const s of allVisible) {
+      if (kept.size >= innerBudget) break;
+      if (s.status === "completed") kept.add(s);
+    }
+    const visible2 = allVisible.filter((s) => kept.has(s));
+    const shownCompleted = visible2.filter((s) => s.status === "completed").length;
+    return {
+      visible: visible2,
+      hiddenCompleted: preHiddenCompleted + (newlyCompletedCount - shownCompleted),
+      truncatedTail: 0
+    };
+  }
+  const visible = nonCompleted.slice(0, innerBudget);
+  return {
+    visible,
+    hiddenCompleted: preHiddenCompleted + newlyCompletedCount,
+    truncatedTail: nonCompleted.length - innerBudget
+  };
+}
+
+// src/bridge.ts
+import path from "path";
+function replayTodoSnapshotFromBranch(branch) {
+  if (!branch || typeof branch[Symbol.iterator] !== "function") return null;
+  let latestTasks = null;
+  for (const entry of branch) {
+    const e = entry;
+    if (e?.type !== "message") continue;
+    const msg = e.message;
+    if (msg?.role !== "toolResult" || String(msg.toolName || "").toLowerCase() !== "todo") continue;
+    const rawTasks = msg.details?.tasks;
+    if (Array.isArray(rawTasks)) {
+      latestTasks = rawTasks.filter((t) => t && typeof t === "object" && typeof t.subject === "string").map((t, idx) => ({
+        id: typeof t.id === "number" ? t.id : idx + 1,
+        subject: String(t.subject),
+        status: t.status === "in_progress" || t.status === "completed" || t.status === "deleted" ? t.status : "pending",
+        ...typeof t.activeForm === "string" && t.activeForm.trim() ? { activeForm: t.activeForm.trim() } : {},
+        ...Array.isArray(t.blockedBy) ? { blockedBy: t.blockedBy.filter((n) => typeof n === "number") } : {}
+      }));
+    }
+  }
+  return latestTasks;
+}
+function convertTodoTasksToSteps(tasks) {
+  return tasks.filter((t) => t && typeof t.subject === "string" && t.status !== "deleted").map((t, idx) => ({
+    id: typeof t.id === "number" ? t.id : idx + 1,
+    subject: t.subject.trim(),
+    status: t.status,
+    ...t.activeForm ? { activeForm: t.activeForm.trim() } : {},
+    ...t.blockedBy && t.blockedBy.length > 0 ? { blockedBy: [...t.blockedBy] } : {}
+  }));
+}
+function inferLiveActivityLabel(toolName, input, _cwd) {
+  if (!input || typeof input !== "object") return void 0;
+  const lower = (toolName || "").toLowerCase();
+  const rawPath = input.path || input.filePath || input.file;
+  if (typeof rawPath === "string" && rawPath.trim()) {
+    const base = path.basename(rawPath.trim().replace(/\\/g, "/"));
+    if (!base) return void 0;
+    if (lower === "edit" || lower === "patch" || lower === "apply_diff" || lower === "modify") {
+      return `editing ${base}`;
+    }
+    if (lower === "write" || lower === "create_file") {
+      return `writing ${base}`;
+    }
+    if (lower === "read") {
+      return `reading ${base}`;
+    }
+  }
+  if (lower === "bash" || lower === "powershell") {
+    const cmd = String(input.command || "").trim();
+    if (!cmd) return void 0;
+    if (/\b(?:npm\s+test|vitest|pytest|cargo\s+test|go\s+test|tsx\s+--test)\b/i.test(cmd)) {
+      return "running tests";
+    }
+    if (/\b(?:npm\s+run\s+build|tsc|tsup|cargo\s+build)\b/i.test(cmd)) {
+      return "building project";
+    }
+    if (/\bgit\s+commit\b/i.test(cmd)) {
+      return "committing changes";
+    }
+  }
+  return void 0;
+}
 
 // src/store.ts
 function normalizePath(filePath, baseCwd) {
   if (typeof filePath !== "string") return "";
   let norm = filePath.trim().replace(/\\/g, "/").replace(/^\.\//, "");
-  if (baseCwd && (path.isAbsolute(filePath) || norm.startsWith("/") || /^[a-zA-Z]:\//.test(norm))) {
+  if (baseCwd && (path2.isAbsolute(filePath) || norm.startsWith("/") || /^[a-zA-Z]:\//.test(norm))) {
     const normBase = baseCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
     const lowerNorm = norm.toLowerCase();
     const lowerBase = normBase.toLowerCase();
@@ -59,11 +318,16 @@ function extractProgressFromText(rawTitle) {
   const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*([^\d]+?)(?=\s+\d+\.\s|$)/g));
   if (stepParts.length >= 2) {
     const steps = stepParts.map((m) => m[2].trim().replace(/[;；,，]+$/, "")).filter(Boolean);
+    const items = steps.map((subject, idx) => ({
+      id: idx + 1,
+      subject,
+      status: idx === 0 ? "in_progress" : "pending"
+    }));
     const firstMatchIdx = rawTitle.indexOf(stepParts[0][0]);
     const prefix = rawTitle.slice(0, firstMatchIdx).replace(/[:：\-—\s]+$/, "").trim();
     return {
       cleanTitle: prefix || steps.join(" \u2192 "),
-      progress: { done: 0, total: steps.length, steps }
+      progress: { done: 0, total: steps.length, steps, items }
     };
   }
   const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\))/);
@@ -83,15 +347,15 @@ function extractProgressFromText(rawTitle) {
 function isAnchorTargetingWorkspace(anchor, targetCwd) {
   if (!targetCwd) return true;
   const normTarget = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  const targetBase = path.basename(normTarget).toLowerCase();
+  const targetBase = path2.basename(normTarget).toLowerCase();
   if (anchor.project && anchor.project !== "global") {
     const normProj = anchor.project.trim().replace(/\\/g, "/").replace(/\/+$/, "");
     if (isSameOrSubPath(normProj, normTarget)) return true;
-    if (path.basename(normProj).toLowerCase() === targetBase) return true;
+    if (path2.basename(normProj).toLowerCase() === targetBase) return true;
   }
   if (anchor.files && anchor.files.length > 0) {
     for (const f of anchor.files) {
-      const resolvedFile = !path.isAbsolute(f) && !/^[a-zA-Z]:\//.test(f) && anchor.cwd ? `${anchor.cwd.replace(/\\/g, "/").replace(/\/+$/, "")}/${f.replace(/^\/+/, "")}` : f;
+      const resolvedFile = !path2.isAbsolute(f) && !/^[a-zA-Z]:\//.test(f) && anchor.cwd ? `${anchor.cwd.replace(/\\/g, "/").replace(/\/+$/, "")}/${f.replace(/^\/+/, "")}` : f;
       if (isSameOrSubPath(resolvedFile, normTarget)) return true;
     }
   }
@@ -176,7 +440,7 @@ var COMMENT_FORMATS = {
   ".lua": (m) => `-- ${m}`
 };
 function makeSafeTaskAnnotation(filePath, anchor) {
-  const ext = path.extname(filePath).toLowerCase();
+  const ext = path2.extname(filePath).toLowerCase();
   const fmt = COMMENT_FORMATS[ext];
   if (!fmt) return null;
   const num = anchor.id.replace(/^anc-/, "");
@@ -293,8 +557,8 @@ function sweepQuietNotes(store, now = Date.now()) {
   });
 }
 function getDefaultStorageDir() {
-  if (process.env.ANCHOR_DIR) return path.resolve(process.env.ANCHOR_DIR);
-  return path.join(os.homedir(), ".anchor");
+  if (process.env.ANCHOR_DIR) return path2.resolve(process.env.ANCHOR_DIR);
+  return path2.join(os.homedir(), ".anchor");
 }
 function sleepSync(ms) {
   const end = Date.now() + ms;
@@ -376,10 +640,10 @@ var AnchorStore = class {
   lockPath;
   archivePath;
   constructor(storageDir) {
-    this.storageDir = storageDir ? path.resolve(storageDir) : getDefaultStorageDir();
-    this.statePath = path.join(this.storageDir, "state.json");
-    this.lockPath = path.join(this.storageDir, "state.lock");
-    this.archivePath = path.join(this.storageDir, "archive.jsonl");
+    this.storageDir = storageDir ? path2.resolve(storageDir) : getDefaultStorageDir();
+    this.statePath = path2.join(this.storageDir, "state.json");
+    this.lockPath = path2.join(this.storageDir, "state.lock");
+    this.archivePath = path2.join(this.storageDir, "archive.jsonl");
   }
   ensureDirs() {
     if (!fs.existsSync(this.storageDir)) {
@@ -408,7 +672,7 @@ var AnchorStore = class {
       return parsed;
     } catch {
       try {
-        fs.copyFileSync(this.statePath, path.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
+        fs.copyFileSync(this.statePath, path2.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
       } catch {
       }
       return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
@@ -438,6 +702,10 @@ var AnchorStore = class {
       const state = this.loadState();
       const now = Date.now();
       const id = this.generateId(state);
+      if (input.blockedBy && input.blockedBy.length > 0) {
+        const check = validateAnchorDependencies(state.anchors, id, input.blockedBy);
+        if (!check.valid) throw new Error(check.error);
+      }
       const { cleanTitle, progress: parsedProgress } = extractProgressFromText(input.title);
       const explicitFiles = (input.files || []).map((f) => normalizePath(f)).filter(Boolean);
       const inferredFiles = explicitFiles.length > 0 ? explicitFiles : extractPathsFromText(`${cleanTitle} ${input.description || ""}`);
@@ -445,10 +713,14 @@ var AnchorStore = class {
       if (input.project && (/^[a-zA-Z]:[\\/]/.test(input.project.trim()) || input.project.trim().startsWith("/"))) {
         cwd = normalizePath(input.project.trim());
       } else if (inferredFiles.length > 0 && (/^[a-zA-Z]:\//.test(inferredFiles[0]) || inferredFiles[0].startsWith("/"))) {
-        const firstDir = path.dirname(inferredFiles[0]);
+        const firstDir = path2.dirname(inferredFiles[0]);
         if (firstDir && firstDir !== ".") cwd = normalizePath(firstDir);
       }
-      const projectName = input.project ? input.project.trim() : cwd ? path.basename(cwd) : "global";
+      const projectName = input.project ? input.project.trim() : cwd ? path2.basename(cwd) : "global";
+      const normBlockedBy = input.blockedBy ? input.blockedBy.map((b) => {
+        const c = b.trim().replace(/^#/, "");
+        return /^\d+$/.test(c) ? `anc-${parseInt(c, 10)}` : c;
+      }) : void 0;
       const anchor = {
         id,
         title: cleanTitle,
@@ -463,6 +735,8 @@ var AnchorStore = class {
         lastTouchedAt: now,
         files: inferredFiles,
         tags: (input.tags || []).map((t) => t.trim()).filter(Boolean),
+        ...input.activeForm ? { activeForm: input.activeForm.trim() } : {},
+        ...normBlockedBy && normBlockedBy.length > 0 ? { blockedBy: normBlockedBy } : {},
         ...input.sessionFile ? { sessionFile: normalizePath(input.sessionFile) } : {},
         ...input.progress || parsedProgress ? { progress: input.progress || parsedProgress } : {}
       };
@@ -548,10 +822,21 @@ var AnchorStore = class {
       const total = explicitTotal && Number.isFinite(explicitTotal) && explicitTotal >= 1 ? explicitTotal : current.progress?.total || 4;
       const prevDone = current.progress?.done || 0;
       const nextDone = Math.max(0, Math.min(total, prevDone + safeDelta));
+      const existingItems = materializeSteps(current.progress);
+      let updatedItems;
+      if (existingItems.length > 0) {
+        updatedItems = existingItems.map((item, idx2) => {
+          let status = "pending";
+          if (idx2 < nextDone) status = "completed";
+          else if (idx2 === nextDone) status = "in_progress";
+          return { ...item, status };
+        });
+      }
       current.progress = {
         ...current.progress || {},
         done: nextDone,
-        total
+        total,
+        ...updatedItems ? { items: updatedItems, steps: updatedItems.map((i) => i.subject) } : {}
       };
       current.lastTouchedAt = now;
       current.updatedAt = now;
@@ -562,6 +847,98 @@ var AnchorStore = class {
       this.saveState(state);
       return { anchor: current, completed: nextDone >= total };
     });
+  }
+  /**
+   * Add a structured sub-step to an anchor (with DAG dependency validation)
+   */
+  addStep(id, subject, options = {}) {
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
+      const current = state.anchors[idx];
+      const items = materializeSteps(current.progress);
+      const nextStepId = items.length > 0 ? Math.max(...items.map((s) => s.id)) + 1 : 1;
+      if (options.blockedBy && options.blockedBy.length > 0) {
+        const check = validateStepDependencies(items, nextStepId, options.blockedBy);
+        if (!check.valid) throw new Error(check.error);
+      }
+      const newStep = {
+        id: nextStepId,
+        subject: subject.trim(),
+        status: options.status || (items.some((s) => s.status === "in_progress") ? "pending" : "in_progress"),
+        ...options.activeForm ? { activeForm: options.activeForm.trim() } : {},
+        ...options.blockedBy && options.blockedBy.length > 0 ? { blockedBy: [...options.blockedBy] } : {}
+      };
+      const nextItems = [...items, newStep];
+      current.progress = syncProgressFromItems(nextItems, current.progress);
+      current.updatedAt = Date.now();
+      current.lastTouchedAt = Date.now();
+      state.anchors[idx] = current;
+      this.saveState(state);
+      return current;
+    });
+  }
+  /**
+   * Update a specific sub-step within an anchor (status, subject, activeForm, or blockedBy DAG edges)
+   */
+  updateStep(id, stepId, patch) {
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
+      const current = state.anchors[idx];
+      const items = materializeSteps(current.progress);
+      const stepIdx = items.findIndex((s) => s.id === stepId);
+      if (stepIdx === -1) throw new Error(`Step #${stepId} not found in #${current.id}`);
+      if (patch.addBlockedBy && patch.addBlockedBy.length > 0) {
+        const check = validateStepDependencies(items, stepId, patch.addBlockedBy);
+        if (!check.valid) throw new Error(check.error);
+      }
+      const target = { ...items[stepIdx] };
+      if (patch.status) target.status = patch.status;
+      if (patch.subject) target.subject = patch.subject.trim();
+      if (patch.activeForm !== void 0) {
+        if (patch.activeForm) target.activeForm = patch.activeForm.trim();
+        else delete target.activeForm;
+      }
+      if (patch.addBlockedBy || patch.removeBlockedBy) {
+        const set = new Set(target.blockedBy ?? []);
+        for (const addId of patch.addBlockedBy ?? []) set.add(addId);
+        for (const rmId of patch.removeBlockedBy ?? []) set.delete(rmId);
+        if (set.size > 0) target.blockedBy = [...set];
+        else delete target.blockedBy;
+      }
+      items[stepIdx] = target;
+      current.progress = syncProgressFromItems(items, current.progress);
+      current.updatedAt = Date.now();
+      current.lastTouchedAt = Date.now();
+      state.anchors[idx] = current;
+      this.saveState(state);
+      return current;
+    });
+  }
+  /**
+   * Read recent settled/archived notes from `archive.jsonl` (newest first)
+   */
+  listArchive(limit = 20) {
+    if (!fs.existsSync(this.archivePath)) return [];
+    try {
+      const lines = fs.readFileSync(this.archivePath, "utf-8").split(/\r?\n/).filter(Boolean);
+      const parsed = [];
+      for (let i = lines.length - 1; i >= 0 && parsed.length < limit; i--) {
+        try {
+          const item = JSON.parse(lines[i]);
+          if (item && typeof item.id === "string" && typeof item.title === "string") {
+            parsed.push(item);
+          }
+        } catch {
+        }
+      }
+      return parsed;
+    } catch {
+      return [];
+    }
   }
   /**
    * Clever Touch 4 (Todo-Bridge): Automatically mirror intra-session `todo` tool lists
@@ -599,6 +976,7 @@ var AnchorStore = class {
         return { status: "noop" };
       }
       const inProgress = unfinishedTasks.find((t) => t.status === "in_progress") || unfinishedTasks[0];
+      const structuredItems = convertTodoTasksToSteps(visible);
       const orderedSteps = [
         ...completedTasks.map((t) => t.subject.trim()),
         ...unfinishedTasks.filter((t) => t.status === "in_progress").map((t) => t.subject.trim()),
@@ -607,7 +985,8 @@ var AnchorStore = class {
       const progress = {
         done: completedTasks.length,
         total: visible.length,
-        steps: orderedSteps
+        steps: orderedSteps,
+        items: structuredItems
       };
       const remainingSummary = unfinishedTasks.slice(0, 3).map((t) => t.subject.trim()).join(" \u2192 ");
       const headline = inProgress.subject.trim();
@@ -631,7 +1010,7 @@ var AnchorStore = class {
       }
       const id = this.generateId(state);
       const inferredFiles = options.recentFiles && options.recentFiles.length > 0 ? options.recentFiles.map((f) => normalizePath(f)).filter(Boolean) : extractPathsFromText(orderedSteps.join(" "));
-      const projectName = normCwd ? path.basename(normCwd) : "global";
+      const projectName = normCwd ? path2.basename(normCwd) : "global";
       const created = {
         id,
         title: headline,
@@ -723,9 +1102,222 @@ var AnchorStore = class {
   }
 };
 
+// src/dock.ts
+var STATUS_GLYPH = {
+  pending: "\u25CB",
+  in_progress: "\u25D0",
+  completed: "\u2713",
+  deleted: "\u2717"
+};
+function formatStepGlyph(status, fg) {
+  switch (status) {
+    case "pending":
+      return fg("dim", "\u25CB");
+    case "in_progress":
+      return fg("warning", "\u25D0");
+    case "completed":
+      return fg("success", "\u2713");
+    case "deleted":
+      return fg("error", "\u2717");
+  }
+}
+function applyStrikethrough(text, theme) {
+  if (theme && typeof theme.strikethrough === "function") {
+    return theme.strikethrough(text);
+  }
+  return `\x1B[9m${text}\x1B[29m`;
+}
+function formatDockStepRow(step, options) {
+  const { fg, theme, showId = true, fallbackActiveForm } = options;
+  const glyph = formatStepGlyph(step.status, fg);
+  const subjectColor = step.status === "in_progress" ? "accent" : step.status === "completed" || step.status === "deleted" ? "muted" : "text";
+  let subject = fg(subjectColor, step.subject);
+  if (step.status === "completed" || step.status === "deleted") {
+    subject = applyStrikethrough(subject, theme);
+  }
+  let row = glyph;
+  if (showId) {
+    row += ` ${fg("dim", `${step.id}.`)}`;
+  }
+  row += ` ${subject}`;
+  const activeForm = step.status === "in_progress" ? step.activeForm || fallbackActiveForm : void 0;
+  if (activeForm) {
+    row += ` ${fg("muted", `(${activeForm})`)}`;
+  }
+  if (step.blockedBy && step.blockedBy.length > 0) {
+    row += ` ${fg("muted", `\u26D3 #${step.blockedBy.join(",#")}`)}`;
+  }
+  return row;
+}
+var AnchorDockController = class {
+  collapsed = false;
+  pendingHideByAnchor = /* @__PURE__ */ new Map();
+  hiddenByAnchor = /* @__PURE__ */ new Map();
+  isCollapsed() {
+    return this.collapsed;
+  }
+  setCollapsed(val) {
+    this.collapsed = val;
+  }
+  toggleCollapsed() {
+    this.collapsed = !this.collapsed;
+    return this.collapsed;
+  }
+  resetGraceState(anchorId) {
+    if (anchorId) {
+      this.pendingHideByAnchor.delete(anchorId);
+      this.hiddenByAnchor.delete(anchorId);
+    } else {
+      this.pendingHideByAnchor.clear();
+      this.hiddenByAnchor.clear();
+    }
+  }
+  /**
+   * Called on `agent_start`: folds away completed steps that were shown with `✓` strikethrough
+   * during the previous turn so the dock stays compact while coding.
+   */
+  foldCompletedStepsFromPreviousTurn() {
+    let changed = false;
+    for (const [anchorId, pendingSet] of this.pendingHideByAnchor.entries()) {
+      if (pendingSet.size === 0) continue;
+      let hiddenSet = this.hiddenByAnchor.get(anchorId);
+      if (!hiddenSet) {
+        hiddenSet = /* @__PURE__ */ new Set();
+        this.hiddenByAnchor.set(anchorId, hiddenSet);
+      }
+      for (const id of pendingSet) {
+        hiddenSet.add(id);
+        changed = true;
+      }
+      pendingSet.clear();
+    }
+    return changed;
+  }
+  /**
+   * Render the `belowEditor` widget lines for active anchors.
+   * - If `collapsed === true` OR no anchor has multi-step items, renders the 1-line Sticky Strip.
+   * - If `collapsed === false` AND the primary anchor has structured steps (`total >= 2`),
+   *   renders the multi-row Tree Dock (up to `maxStepRows = 4` step rows + optional side note summary).
+   */
+  renderDockLines(activeAnchors, options) {
+    const { width, cwd, theme, maxStepRows = 4 } = options;
+    if (activeAnchors.length === 0) return [];
+    const sorted = sortAnchorsForDisplay([...activeAnchors], cwd);
+    const fg = theme?.fg ? theme.fg.bind(theme) : (_c, text) => text;
+    const primary = sorted[0];
+    const steps = materializeSteps(primary.progress);
+    if (this.collapsed || width < 60 || steps.length < 2) {
+      return this.renderSingleLineStrip(sorted, width, fg);
+    }
+    const completedIds = new Set(steps.filter((s) => s.status === "completed").map((s) => s.id));
+    const pendingSet = this.pendingHideByAnchor.get(primary.id) ?? /* @__PURE__ */ new Set();
+    const hiddenSet = this.hiddenByAnchor.get(primary.id) ?? /* @__PURE__ */ new Set();
+    for (const id of [...pendingSet]) {
+      if (!completedIds.has(id)) pendingSet.delete(id);
+    }
+    for (const id of [...hiddenSet]) {
+      if (!completedIds.has(id)) hiddenSet.delete(id);
+    }
+    this.pendingHideByAnchor.set(primary.id, pendingSet);
+    this.hiddenByAnchor.set(primary.id, hiddenSet);
+    const layout = selectDockStepLayout(steps, maxStepRows, hiddenSet);
+    for (const s of layout.visible) {
+      if (s.status === "completed" && !pendingSet.has(s.id) && !hiddenSet.has(s.id)) {
+        pendingSet.add(s.id);
+      }
+    }
+    if (layout.visible.length === 0) {
+      return this.renderSingleLineStrip(sorted, width, fg);
+    }
+    const num = primary.id.replace(/^anc-/, "");
+    const bar = primary.progress ? `${fg("accent", formatProgressBar(primary.progress))} ` : "";
+    const origin = formatOrigin(primary);
+    const sessionIcon = primary.sessionFile ? " \u21AA" : "";
+    const blockedTag = primary.blockedBy && primary.blockedBy.length > 0 ? ` ${fg("muted", `\u26D3 #${primary.blockedBy.map((b) => b.replace(/^anc-/, "")).join(",#")}`)}` : "";
+    const foldHint = width >= 76 ? fg("dim", "  [Alt+A fold]") : "";
+    const headerPrefix = `${fg("accent", "\u2316")} ${fg("dim", `#${num}`)} ${bar}`;
+    const headerSuffix = `${blockedTag} ${fg("muted", `(${origin}${sessionIcon})`)}${foldHint}`;
+    const titleBudget = Math.max(12, width - getDisplayWidth(headerPrefix) - getDisplayWidth(headerSuffix) - 2);
+    const headerLine = truncateToWidth(
+      `${headerPrefix}${truncateToWidth(primary.title, titleBudget)}${headerSuffix}`,
+      width
+    );
+    const lines = [headerLine];
+    const otherNotes = sorted.slice(1);
+    const hasFooterRow = layout.hiddenCompleted > 0 || layout.truncatedTail > 0 || otherNotes.length > 0;
+    for (let i = 0; i < layout.visible.length; i++) {
+      const step = layout.visible[i];
+      const isLastRow = i === layout.visible.length - 1 && !hasFooterRow;
+      const branch = fg("dim", isLastRow ? "\u2514\u2500 " : "\u251C\u2500 ");
+      const stepText = formatDockStepRow(step, {
+        fg,
+        theme,
+        showId: true,
+        fallbackActiveForm: primary.activeForm
+      });
+      lines.push(truncateToWidth(`${branch}${stepText}`, width));
+    }
+    if (hasFooterRow) {
+      const parts = [];
+      if (layout.hiddenCompleted > 0 || layout.truncatedTail > 0) {
+        const overflowDetails = [];
+        if (layout.hiddenCompleted > 0) overflowDetails.push(`${layout.hiddenCompleted} done`);
+        if (layout.truncatedTail > 0) overflowDetails.push(`${layout.truncatedTail} pending`);
+        parts.push(fg("dim", `+${layout.hiddenCompleted + layout.truncatedTail} steps (${overflowDetails.join(", ")})`));
+      }
+      if (otherNotes.length > 0) {
+        const preview = otherNotes.slice(0, 2).map((a) => `#${a.id.replace(/^anc-/, "")} ${truncateToWidth(a.title, 20)}`).join(" \xB7 ");
+        const extra = otherNotes.length > 2 ? ` +${otherNotes.length - 2}` : "";
+        parts.push(fg("muted", `\u{1F4CC} ${preview}${extra}`));
+      }
+      lines.push(truncateToWidth(`${fg("dim", "\u2514\u2500 ")}${parts.join(fg("dim", "  \u2502  "))}`, width));
+    }
+    return lines;
+  }
+  renderSingleLineStrip(sorted, width, fg) {
+    if (sorted.length === 1) {
+      const a = sorted[0];
+      const num = a.id.replace(/^anc-/, "");
+      const bar = a.progress ? `${fg("accent", formatProgressBar(a.progress))} ` : "";
+      const candidateStep = a.progress?.steps ? a.progress.steps[a.progress.done] !== a.title ? a.progress.steps[a.progress.done] : a.progress.steps[a.progress.done + 1] : void 0;
+      const nextStep = candidateStep ? fg("muted", ` \u25B8 ${candidateStep}`) : "";
+      const activeHint = a.activeForm ? fg("muted", ` (${a.activeForm})`) : "";
+      const origin = formatOrigin(a);
+      const sessionIcon = a.sessionFile ? " \u21AA" : "";
+      const prefix = `${fg("accent", "\u2316")} ${fg("dim", `#${num}`)} ${bar}`;
+      const suffix = `${activeHint} ${fg("muted", `(${origin}${sessionIcon})`)}`;
+      const availTitle = Math.max(
+        12,
+        width - getDisplayWidth(prefix) - getDisplayWidth(nextStep) - getDisplayWidth(suffix) - 2
+      );
+      const titleClipped = truncateToWidth(a.title, availTitle);
+      return [truncateToWidth(`${prefix}${titleClipped}${nextStep}${suffix}`, width)];
+    }
+    const maxItems = width < 68 ? 1 : width < 100 ? 2 : 3;
+    const visibleSlice = sorted.slice(0, maxItems);
+    const countTag = fg("accent", `\u2316 ${sorted.length}: `);
+    const moreCount = sorted.length - visibleSlice.length;
+    const moreSuffix = moreCount > 0 ? fg("dim", ` +${moreCount}`) : "";
+    const perSlotWidth = Math.max(
+      10,
+      Math.floor((width - getDisplayWidth(countTag) - getDisplayWidth(moreSuffix) - (visibleSlice.length - 1) * 5) / visibleSlice.length)
+    );
+    const segments = visibleSlice.map((a) => {
+      const num = a.id.replace(/^anc-/, "");
+      const bar = a.progress ? `${formatProgressBar(a.progress)} ` : "";
+      const prefix = `#${num} ${bar}`;
+      const titleBudget = Math.max(6, perSlotWidth - getDisplayWidth(prefix));
+      const shortTitle = truncateToWidth(a.title, titleBudget);
+      return `${fg("dim", `#${num}`)} ${bar}${shortTitle}`;
+    });
+    return [truncateToWidth(`${countTag}${segments.join(fg("dim", " \xB7 "))}${moreSuffix}`, width)];
+  }
+};
+var defaultDockController = new AnchorDockController();
+
 // src/tui.ts
 import fs2 from "fs";
-import path2 from "path";
+import path3 from "path";
 var ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 function stripAnsi(str) {
   return str.replace(ANSI_REGEX, "");
@@ -812,7 +1404,7 @@ function formatRelativeAge(timestamp, now = Date.now()) {
 function formatOrigin(anchor) {
   if (typeof anchor === "string") {
     if (!anchor) return "global";
-    return path2.basename(anchor.replace(/\\/g, "/")) || "global";
+    return path3.basename(anchor.replace(/\\/g, "/")) || "global";
   }
   let proj = "global";
   if (anchor.project && anchor.project !== "global") {
@@ -824,10 +1416,10 @@ function formatOrigin(anchor) {
       proj = normProj;
     }
   } else if (anchor.cwd) {
-    proj = path2.basename(anchor.cwd.replace(/\\/g, "/")) || "global";
+    proj = path3.basename(anchor.cwd.replace(/\\/g, "/")) || "global";
   }
   if (anchor.files && anchor.files.length > 0) {
-    const shortFile = path2.basename(anchor.files[0].replace(/\\/g, "/"));
+    const shortFile = path3.basename(anchor.files[0].replace(/\\/g, "/"));
     if (shortFile && !proj.endsWith(shortFile)) {
       return `${proj} \xB7 ${shortFile}`;
     }
@@ -864,43 +1456,12 @@ function updateStartupBanner(ctx, store) {
       ctx.ui.setWidget("anchor-startup", void 0, { placement: "belowEditor" });
       return;
     }
-    const sorted = sortAnchorsForDisplay(active, ctx.cwd);
     const factory = (_tui, theme) => ({
-      render: (width) => {
-        const fg = theme?.fg ? theme.fg.bind(theme) : (_c, text) => text;
-        if (sorted.length === 1) {
-          const a = sorted[0];
-          const num = a.id.replace(/^anc-/, "");
-          const bar = a.progress ? `${fg("accent", formatProgressBar(a.progress))} ` : "";
-          const candidateStep = a.progress?.steps ? a.progress.steps[a.progress.done] !== a.title ? a.progress.steps[a.progress.done] : a.progress.steps[a.progress.done + 1] : void 0;
-          const nextStep = candidateStep ? fg("muted", ` \u25B8 ${candidateStep}`) : "";
-          const origin = formatOrigin(a);
-          const sessionIcon = a.sessionFile ? " \u21AA" : "";
-          const prefix = `${fg("accent", "\u2316")} ${fg("dim", `#${num}`)} ${bar}`;
-          const suffix = ` ${fg("muted", `(${origin}${sessionIcon})`)}`;
-          const availTitle = Math.max(12, width - getDisplayWidth(prefix) - getDisplayWidth(nextStep) - getDisplayWidth(suffix) - 2);
-          const titleClipped = truncateToWidth(a.title, availTitle);
-          return [truncateToWidth(`${prefix}${titleClipped}${nextStep}${suffix}`, width)];
-        }
-        const maxItems = width < 68 ? 1 : width < 100 ? 2 : 3;
-        const visibleSlice = sorted.slice(0, maxItems);
-        const countTag = fg("accent", `\u2316 ${sorted.length}: `);
-        const moreCount = sorted.length - visibleSlice.length;
-        const moreSuffix = moreCount > 0 ? fg("dim", ` +${moreCount}`) : "";
-        const perSlotWidth = Math.max(
-          10,
-          Math.floor((width - getDisplayWidth(countTag) - getDisplayWidth(moreSuffix) - (visibleSlice.length - 1) * 5) / visibleSlice.length)
-        );
-        const segments = visibleSlice.map((a) => {
-          const num = a.id.replace(/^anc-/, "");
-          const bar = a.progress ? `${formatProgressBar(a.progress)} ` : "";
-          const prefix = `#${num} ${bar}`;
-          const titleBudget = Math.max(6, perSlotWidth - getDisplayWidth(prefix));
-          const shortTitle = truncateToWidth(a.title, titleBudget);
-          return `${fg("dim", `#${num}`)} ${bar}${shortTitle}`;
-        });
-        return [truncateToWidth(`${countTag}${segments.join(fg("dim", " \xB7 "))}${moreSuffix}`, width)];
-      },
+      render: (width) => defaultDockController.renderDockLines(active, {
+        width,
+        cwd: ctx.cwd,
+        theme: ctx.ui?.theme ?? theme
+      }),
       invalidate: () => {
       }
     });
@@ -943,9 +1504,16 @@ async function openAnchorDashboard(ctx, store) {
     anchor.sessionFile && fs2.existsSync(anchor.sessionFile) && typeof ctx.switchSession === "function" && (!currentSessionFile || !isSameOrSubPath(anchor.sessionFile, currentSessionFile))
   );
   const stepLabel = anchor.progress ? `\u25B6 Advance step (${anchor.progress.done}/${anchor.progress.total} \u2794 ${Math.min(anchor.progress.total, anchor.progress.done + 1)}/${anchor.progress.total})` : "\u25B6 Start progress bar (1/4)";
+  const structuredSteps = materializeSteps(anchor.progress);
+  const stepOptions = structuredSteps.map((s) => {
+    const g = STATUS_GLYPH[s.status] || "\u25CB";
+    const nextAction = s.status === "completed" ? "reopen" : "complete";
+    return `${g} Step ${s.id}: ${s.subject} (${nextAction})`;
+  });
   const actions = [
     "\u2713 Done (tear off note)",
     stepLabel,
+    ...stepOptions,
     ...canJumpSession ? ["\u21AA Jump to session (resume linked conversation)"] : [],
     ...anchor.status === "sleeping" ? ["\u26A1 Wake up (mark active)"] : [],
     "\u2139 Read full note",
@@ -953,7 +1521,7 @@ async function openAnchorDashboard(ctx, store) {
   ];
   const action = await ctx.ui.select(`\u2316 #${anchor.id.replace(/^anc-/, "")}: "${anchor.title}"`, actions);
   if (!action || action.startsWith("\u21A9")) return;
-  if (action.startsWith("\u2713")) {
+  if (action.startsWith("\u2713 Done")) {
     store.settle(anchor.id, { settledBy: "manual" });
     ctx.ui.notify(`\u2316 Torn off #${anchor.id.replace(/^anc-/, "")}: "${anchor.title}" (/anchor undo to put back)`, "info");
     updateAnchorStatusBar(ctx, store);
@@ -967,6 +1535,21 @@ async function openAnchorDashboard(ctx, store) {
       );
     } else {
       ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
+    }
+  } else if (/^[○◐✓✗]\s+Step\s+(\d+):/.test(action)) {
+    const m = action.match(/Step\s+(\d+):/);
+    if (m) {
+      const stepId = parseInt(m[1], 10);
+      const targetStep = structuredSteps.find((s) => s.id === stepId);
+      if (targetStep) {
+        const nextStatus = targetStep.status === "completed" ? "pending" : "completed";
+        const updated = store.updateStep(anchor.id, stepId, { status: nextStatus });
+        ctx.ui.notify(
+          `\u2316 Step ${stepId} ${nextStatus === "completed" ? "completed \u2713" : "reopened \u25CB"} (${formatProgressBar(updated.progress)})`,
+          "info"
+        );
+        updateAnchorStatusBar(ctx, store);
+      }
     }
   } else if (action.startsWith("\u21AA") && anchor.sessionFile) {
     try {
@@ -984,7 +1567,7 @@ async function openAnchorDashboard(ctx, store) {
       anchor.progress ? `Progress: ${formatProgressBar(anchor.progress)}${anchor.progress.steps ? ` (${anchor.progress.steps.join(" \u2192 ")})` : ""}` : null,
       anchor.description ? `Details: ${anchor.description}` : null,
       anchor.files.length > 0 ? `Files: ${anchor.files.join(", ")}` : null,
-      anchor.sessionFile ? `Session: ${path2.basename(anchor.sessionFile)}` : null,
+      anchor.sessionFile ? `Session: ${path3.basename(anchor.sessionFile)}` : null,
       `Workspace: ${anchor.project || "global"} \xB7 Pinned ${formatRelativeAge(anchor.createdAt)}`
     ].filter(Boolean).join("\n");
     ctx.ui.notify(details, "info");
@@ -1000,6 +1583,9 @@ function parseAnchorCommandInput(raw) {
   }
   if (trimmed === "undo") {
     return { mode: "undo" };
+  }
+  if (trimmed === "fold" || trimmed === "compact" || trimmed === "toggle" || trimmed === "expand") {
+    return { mode: "fold" };
   }
   const settleMatch = trimmed.match(/^(?:done|rm|close|settle)\s+(.+)$/i);
   if (settleMatch) {
@@ -1083,14 +1669,42 @@ function extension_default(pi) {
   pi.on("session_start", async (_event, ctx) => {
     annotatedThisSession.clear();
     recentSessionFiles.length = 0;
+    defaultDockController.resetGraceState();
     sweepQuietNotes(store);
     const quietForHere = store.list({ status: "sleeping", all: true }).filter((a) => (a.files.length > 0 || a.project && a.project !== "global" || a.cwd) && isAnchorTargetingWorkspace(a, ctx.cwd));
     for (const q of quietForHere) {
       store.touch(q.id);
     }
+    try {
+      const branch = ctx.sessionManager?.getBranch?.();
+      const tasks = replayTodoSnapshotFromBranch(branch);
+      if (tasks) {
+        store.syncFromTodoTool(tasks, {
+          cwd: ctx.cwd,
+          sessionFile: getSessionFileSafe(ctx)
+        });
+      }
+    } catch {
+    }
     updateAnchorStatusBar(ctx, store);
-    updateStartupBanner(ctx, store);
   });
+  pi.on("agent_start", async (_event, ctx) => {
+    if (defaultDockController.foldCompletedStepsFromPreviousTurn()) {
+      updateStartupBanner(ctx, store);
+    }
+  });
+  if (typeof pi.registerShortcut === "function") {
+    try {
+      pi.registerShortcut("alt+a", {
+        description: "Collapse or expand the Anchor belowEditor task dock",
+        handler: (ctx) => {
+          defaultDockController.toggleCollapsed();
+          updateStartupBanner(ctx, store);
+        }
+      });
+    } catch {
+    }
+  }
   pi.on("input", async (event, ctx) => {
     if (event?.source === "extension") return { action: "continue" };
     const quickNote = parseQuickNoteInput(String(event?.text || ""));
@@ -1160,8 +1774,18 @@ ${snippet}` };
         }
       }
     }
+    const liveActivity = inferLiveActivityLabel(lowerTool, event.input, ctx.cwd);
     const pathInput = event.input?.path;
-    if (typeof pathInput !== "string") return;
+    if (typeof pathInput !== "string") {
+      if (liveActivity) {
+        const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+        if (activeHere.length > 0) {
+          store.update(activeHere[0].id, { activeForm: liveActivity });
+          updateStartupBanner(ctx, store);
+        }
+      }
+      return;
+    }
     const isMutation = MUTATION_TOOLS.has(lowerTool);
     if (isMutation) {
       rememberTouchedFile(pathInput, ctx.cwd);
@@ -1170,9 +1794,14 @@ ${snippet}` };
     const notes = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
     const matches = findMatchedAnchors(notes, [touchedPath]);
     if (matches.length === 0) return;
-    if (isMutation) {
+    if (isMutation || liveActivity) {
       for (const m of matches) {
-        store.touch(m.anchor.id, Date.now(), currentSessionFile);
+        if (isMutation) {
+          store.touch(m.anchor.id, Date.now(), currentSessionFile);
+        }
+        if (liveActivity) {
+          store.update(m.anchor.id, { activeForm: liveActivity });
+        }
       }
       updateAnchorStatusBar(ctx, store);
     }
@@ -1333,6 +1962,12 @@ ${snippet}` };
         }
         return;
       }
+      if (parsed.mode === "fold") {
+        const collapsed = defaultDockController.toggleCollapsed();
+        updateStartupBanner(ctx, store);
+        ctx.ui.notify(`\u2316 Anchor Dock ${collapsed ? "folded to 1-line strip" : "expanded to tree view"} (Alt+A)`, "info");
+        return;
+      }
       if (parsed.mode === "step" && parsed.targetId) {
         const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
         if (!resolvedId) {
@@ -1467,6 +2102,17 @@ ${snippet}` };
 export {
   QUIET_AFTER_DAYS,
   MS_PER_DAY,
+  DEFAULT_MAX_DOCK_LINES,
+  validateStepDependencies,
+  validateAnchorDependencies,
+  deriveStepBlocks,
+  materializeSteps,
+  syncProgressFromItems,
+  selectStepCounts,
+  selectDockStepLayout,
+  replayTodoSnapshotFromBranch,
+  convertTodoTasksToSteps,
+  inferLiveActivityLabel,
   normalizePath,
   isSameOrSubPath,
   globToRegExp,
@@ -1485,6 +2131,12 @@ export {
   acquireSyncLock,
   atomicRenameWithRetry,
   AnchorStore,
+  STATUS_GLYPH,
+  formatStepGlyph,
+  applyStrikethrough,
+  formatDockStepRow,
+  AnchorDockController,
+  defaultDockController,
   stripAnsi,
   getDisplayWidth,
   hasActiveUI,

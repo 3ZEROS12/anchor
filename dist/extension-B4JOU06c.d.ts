@@ -1,18 +1,33 @@
 import { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 /**
- * Anchor Data Contracts
- * Minimalist cross-session sticky notes stored in ~/.anchor/state.json
+ * Anchor v1.0 Domain Contracts
+ * Cross-Session Task & Todo Dock + Instant Sticky Notes (`~/.anchor/state.json`)
  */
 type AnchorStatus = 'active' | 'sleeping' | 'settled';
 type AnchorPriority = 'p0' | 'p1' | 'p2';
+type StepStatus = 'pending' | 'in_progress' | 'completed' | 'deleted';
+interface AnchorStep {
+    /** 1-based step id within the anchor */
+    id: number;
+    /** Imperative step title */
+    subject: string;
+    /** 4-state lifecycle matching `todo` tool */
+    status: StepStatus;
+    /** Live present-continuous activity label (e.g. 'editing src/auth.ts') */
+    activeForm?: string;
+    /** Prerequisite step IDs within the same anchor (`⛓ #1`) */
+    blockedBy?: number[];
+}
 interface AnchorProgress {
     /** Completed steps or units */
     done: number;
     /** Total steps or units */
     total: number;
-    /** Optional parsed step labels (e.g. ['抽出接口', '替换Cookie', '补单测']) */
+    /** Flat step titles for backward compatibility */
     steps?: string[];
+    /** Rich structured step items with status, activeForm, and blockedBy DAG */
+    items?: AnchorStep[];
 }
 interface AnchorEvidence {
     settledAt?: number;
@@ -24,20 +39,22 @@ interface AnchorEvidence {
 interface TodoTaskItem {
     id: number;
     subject: string;
-    status: 'pending' | 'in_progress' | 'completed' | 'deleted';
+    status: StepStatus;
     activeForm?: string;
     description?: string;
+    blockedBy?: number[];
+    owner?: string;
 }
 interface Anchor {
     /** Sequential identifier, e.g. 'anc-1' */
     id: string;
-    /** Sticky note text */
+    /** Primary title or sticky note text */
     title: string;
-    /** Optional extra context */
+    /** Optional detailed context */
     description?: string;
     /** Lifecycle status: 'active' (recent) or 'sleeping' (>7d untouched, 0 prompt tokens) */
     status: AnchorStatus;
-    /** Origin source: 'manual' (user/tool pinned) or 'todo-sync' (auto-bridged from unfinished session todos) */
+    /** Origin source: 'manual' (user/tool pinned) or 'todo-sync' (auto-bridged from session todos) */
     source?: 'manual' | 'todo-sync';
     /** Short workspace label (e.g. 'anchor', 'College/优化', or 'global') */
     project: string;
@@ -49,17 +66,21 @@ interface Anchor {
     updatedAt: number;
     /** Last activity timestamp (ms) */
     lastTouchedAt: number;
-    /** Associated file paths or globs (explicit, auto-extracted from note text, or inherited from active session) */
+    /** Associated file paths or globs */
     files: string[];
-    /** Optional tags */
+    /** Optional domain tags */
     tags: string[];
-    /** Associated Pi conversation session file (.jsonl) for 1-click session jump/resume */
+    /** Live present-continuous activity indicator (e.g. 'editing src/auth.ts') */
+    activeForm?: string;
+    /** Prerequisite anchor IDs (e.g. ['anc-1']) for cross-task sequencing */
+    blockedBy?: string[];
+    /** Associated Pi conversation session file (.jsonl) for 1-click session teleport (`/back`) */
     sessionFile?: string;
-    /** Optional lightweight progress tracker for long-term or multi-step notes */
+    /** Progress tracker & structured step tree */
     progress?: AnchorProgress;
     /** Optional due date ('YYYY-MM-DD') */
     targetDate?: string;
-    /** Optional priority kept for backward compatibility */
+    /** Priority tier */
     priority?: AnchorPriority;
     /** Settlement metadata when archived */
     evidence?: AnchorEvidence;
@@ -76,9 +97,21 @@ interface TouchMatchResult {
     matchedFiles: string[];
     reason: 'exact-file' | 'dir-prefix';
 }
+interface StepCounts {
+    total: number;
+    pending: number;
+    inProgress: number;
+    completed: number;
+}
+interface DockStepLayout {
+    visible: AnchorStep[];
+    hiddenCompleted: number;
+    truncatedTail: number;
+}
 /** 7 days without activity moves a note to quiet mode (still visible in UI, 0 prompt tokens in unrelated workspaces) */
 declare const QUIET_AFTER_DAYS = 7;
 declare const MS_PER_DAY = 86400000;
+declare const DEFAULT_MAX_DOCK_LINES = 8;
 
 /**
  * Normalize path separators to forward slashes and strip baseCwd prefix when inside baseCwd
@@ -167,6 +200,8 @@ declare class AnchorStore {
         project?: string;
         files?: string[];
         tags?: string[];
+        blockedBy?: string[];
+        activeForm?: string;
         sessionFile?: string;
         progress?: AnchorProgress;
     }): Anchor;
@@ -188,6 +223,28 @@ declare class AnchorStore {
         anchor: Anchor;
         completed: boolean;
     };
+    /**
+     * Add a structured sub-step to an anchor (with DAG dependency validation)
+     */
+    addStep(id: string, subject: string, options?: {
+        blockedBy?: number[];
+        activeForm?: string;
+        status?: StepStatus;
+    }): Anchor;
+    /**
+     * Update a specific sub-step within an anchor (status, subject, activeForm, or blockedBy DAG edges)
+     */
+    updateStep(id: string, stepId: number, patch: {
+        status?: StepStatus;
+        subject?: string;
+        activeForm?: string;
+        addBlockedBy?: number[];
+        removeBlockedBy?: number[];
+    }): Anchor;
+    /**
+     * Read recent settled/archived notes from `archive.jsonl` (newest first)
+     */
+    listArchive(limit?: number): Anchor[];
     /**
      * Clever Touch 4 (Todo-Bridge): Automatically mirror intra-session `todo` tool lists
      * into a cross-session checkpoint!
@@ -213,7 +270,7 @@ declare class AnchorStore {
 }
 
 declare function parseAnchorCommandInput(raw: string): {
-    mode: 'dashboard' | 'undo' | 'settle' | 'step' | 'jump' | 'pin';
+    mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin';
     targetId?: string;
     delta?: number;
     title?: string;
@@ -231,4 +288,4 @@ declare function parseQuickNoteInput(text: string): string | null;
 declare function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?: string): string | undefined;
 declare function export_default(pi: ExtensionAPI): void;
 
-export { type Anchor as A, export_default as B, COMMENT_FORMATS as C, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type TodoTaskItem as T, type AnchorProgress as a, AnchorStore as b, type AnchorEvidence as c, type AnchorPriority as d, type AnchorStatus as e, type AnchorStoreState as f, type TouchMatchResult as g, acquireSyncLock as h, atomicRenameWithRetry as i, extractPathsFromText as j, extractProgressFromText as k, findMatchedAnchors as l, getDefaultStorageDir as m, globToRegExp as n, isAnchorTargetingWorkspace as o, isSameOrSubPath as p, makeSafeTaskAnnotation as q, matchAnchorAgainstTouchedFiles as r, matchesCommitMessage as s, normalizePath as t, parseAnchorCommandInput as u, parseQuickNoteInput as v, renderActiveAnchorsContext as w, renderColdStartAnchorsContext as x, resolveAnchorTarget as y, sweepQuietNotes as z };
+export { type AnchorStep as A, renderColdStartAnchorsContext as B, COMMENT_FORMATS as C, type DockStepLayout as D, resolveAnchorTarget as E, sweepQuietNotes as F, export_default as G, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type StepCounts as S, type TodoTaskItem as T, type AnchorProgress as a, type Anchor as b, type StepStatus as c, AnchorStore as d, type AnchorEvidence as e, type AnchorPriority as f, type AnchorStatus as g, type AnchorStoreState as h, DEFAULT_MAX_DOCK_LINES as i, type TouchMatchResult as j, acquireSyncLock as k, atomicRenameWithRetry as l, extractPathsFromText as m, extractProgressFromText as n, findMatchedAnchors as o, getDefaultStorageDir as p, globToRegExp as q, isAnchorTargetingWorkspace as r, isSameOrSubPath as s, makeSafeTaskAnnotation as t, matchAnchorAgainstTouchedFiles as u, matchesCommitMessage as v, normalizePath as w, parseAnchorCommandInput as x, parseQuickNoteInput as y, renderActiveAnchorsContext as z };

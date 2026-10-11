@@ -1,5 +1,7 @@
 import type { ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AnchorStore, isAnchorTargetingWorkspace, isSameOrSubPath } from './store.ts';
+import { materializeSteps } from './graph.ts';
+import { defaultDockController, STATUS_GLYPH } from './dock.ts';
 import type { Anchor, AnchorProgress } from './types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -201,7 +203,7 @@ export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore)
 }
 
 /**
- * Render persistent 1-line sticky-note strip BELOW the editor (`placement: 'belowEditor'`).
+ * Render persistent `belowEditor` Anchor Dock (Tree Dock when expanded, 1-line strip when folded).
  * Never collides with `pi-lingual` (`aboveEditor`), stays visible while you work,
  * and takes 0 lines when there are no active notes.
  */
@@ -215,53 +217,13 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
       return;
     }
 
-    const sorted = sortAnchorsForDisplay(active, ctx.cwd);
-
     const factory = (_tui?: any, theme?: any) => ({
-      render: (width: number) => {
-        const fg = theme?.fg ? theme.fg.bind(theme) : (_c: string, text: string) => text;
-
-        // Single note: render rich 1-line sticky strip with optional progress bar & next step
-        if (sorted.length === 1) {
-          const a = sorted[0];
-          const num = a.id.replace(/^anc-/, '');
-          const bar = a.progress ? `${fg('accent', formatProgressBar(a.progress))} ` : '';
-          const candidateStep = a.progress?.steps
-            ? (a.progress.steps[a.progress.done] !== a.title
-                ? a.progress.steps[a.progress.done]
-                : a.progress.steps[a.progress.done + 1])
-            : undefined;
-          const nextStep = candidateStep ? fg('muted', ` ▸ ${candidateStep}`) : '';
-          const origin = formatOrigin(a);
-          const sessionIcon = a.sessionFile ? ' ↪' : '';
-          const prefix = `${fg('accent', '⌖')} ${fg('dim', `#${num}`)} ${bar}`;
-          const suffix = ` ${fg('muted', `(${origin}${sessionIcon})`)}`;
-          const availTitle = Math.max(12, width - getDisplayWidth(prefix) - getDisplayWidth(nextStep) - getDisplayWidth(suffix) - 2);
-          const titleClipped = truncateToWidth(a.title, availTitle);
-          return [truncateToWidth(`${prefix}${titleClipped}${nextStep}${suffix}`, width)];
-        }
-
-        // Multiple notes: adaptive horizontal sticky strip (fits narrow 50-col and wide terminals cleanly)
-        const maxItems = width < 68 ? 1 : (width < 100 ? 2 : 3);
-        const visibleSlice = sorted.slice(0, maxItems);
-        const countTag = fg('accent', `⌖ ${sorted.length}: `);
-        const moreCount = sorted.length - visibleSlice.length;
-        const moreSuffix = moreCount > 0 ? fg('dim', ` +${moreCount}`) : '';
-        const perSlotWidth = Math.max(
-          10,
-          Math.floor((width - getDisplayWidth(countTag) - getDisplayWidth(moreSuffix) - (visibleSlice.length - 1) * 5) / visibleSlice.length)
-        );
-
-        const segments = visibleSlice.map(a => {
-          const num = a.id.replace(/^anc-/, '');
-          const bar = a.progress ? `${formatProgressBar(a.progress)} ` : '';
-          const prefix = `#${num} ${bar}`;
-          const titleBudget = Math.max(6, perSlotWidth - getDisplayWidth(prefix));
-          const shortTitle = truncateToWidth(a.title, titleBudget);
-          return `${fg('dim', `#${num}`)} ${bar}${shortTitle}`;
-        });
-        return [truncateToWidth(`${countTag}${segments.join(fg('dim', ' · '))}${moreSuffix}`, width)];
-      },
+      render: (width: number) =>
+        defaultDockController.renderDockLines(active, {
+          width,
+          cwd: ctx.cwd,
+          theme: (ctx as any).ui?.theme ?? theme
+        }),
       invalidate: () => {}
     });
 
@@ -333,9 +295,17 @@ export async function openAnchorDashboard(
     ? `▶ Advance step (${anchor.progress.done}/${anchor.progress.total} ➔ ${Math.min(anchor.progress.total, anchor.progress.done + 1)}/${anchor.progress.total})`
     : '▶ Start progress bar (1/4)';
 
+  const structuredSteps = materializeSteps(anchor.progress);
+  const stepOptions = structuredSteps.map(s => {
+    const g = STATUS_GLYPH[s.status] || '○';
+    const nextAction = s.status === 'completed' ? 'reopen' : 'complete';
+    return `${g} Step ${s.id}: ${s.subject} (${nextAction})`;
+  });
+
   const actions = [
     '✓ Done (tear off note)',
     stepLabel,
+    ...stepOptions,
     ...(canJumpSession ? ['↪ Jump to session (resume linked conversation)'] : []),
     ...(anchor.status === 'sleeping' ? ['⚡ Wake up (mark active)'] : []),
     'ℹ Read full note',
@@ -345,7 +315,7 @@ export async function openAnchorDashboard(
   const action = await ctx.ui.select(`⌖ #${anchor.id.replace(/^anc-/, '')}: "${anchor.title}"`, actions);
   if (!action || action.startsWith('↩')) return;
 
-  if (action.startsWith('✓')) {
+  if (action.startsWith('✓ Done')) {
     store.settle(anchor.id, { settledBy: 'manual' });
     ctx.ui.notify(`⌖ Torn off #${anchor.id.replace(/^anc-/, '')}: "${anchor.title}" (/anchor undo to put back)`, 'info');
     updateAnchorStatusBar(ctx, store);
@@ -359,6 +329,21 @@ export async function openAnchorDashboard(
       );
     } else {
       ctx.ui.notify(`⌖ Advanced #${updated.id.replace(/^anc-/, '')} to ${formatProgressBar(updated.progress)}`, 'info');
+    }
+  } else if (/^[○◐✓✗]\s+Step\s+(\d+):/.test(action)) {
+    const m = action.match(/Step\s+(\d+):/);
+    if (m) {
+      const stepId = parseInt(m[1], 10);
+      const targetStep = structuredSteps.find(s => s.id === stepId);
+      if (targetStep) {
+        const nextStatus = targetStep.status === 'completed' ? 'pending' : 'completed';
+        const updated = store.updateStep(anchor.id, stepId, { status: nextStatus });
+        ctx.ui.notify(
+          `⌖ Step ${stepId} ${nextStatus === 'completed' ? 'completed ✓' : 'reopened ○'} (${formatProgressBar(updated.progress)})`,
+          'info'
+        );
+        updateAnchorStatusBar(ctx, store);
+      }
     }
   } else if (action.startsWith('↪') && anchor.sessionFile) {
     try {

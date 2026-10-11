@@ -6,7 +6,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 11 Passed](https://img.shields.io/badge/Tests-11%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 15 Passed](https://img.shields.io/badge/Tests-15%20Passed-22c55e.svg)](tests/store.test.ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
 **English** | [简体中文](./README_zh.md)
@@ -22,9 +22,14 @@ pi install npm:pi-anchor
 ```text
   ┌─ [aboveEditor stays 100% free for pi-lingual and other HUD widgets] ────────────┐
 ╭─┴─ Pi Editor ────────────────────────────────────────────────────────────────────╮
-│ ❯ pin: Refactor auth flow: 1. Extract interface 2. HttpOnly cookie 3. Unit tests │
+│ ❯ pin: Refactor auth: 1. Extract interface 2. HttpOnly cookie 3. Unit tests      │
 ╰─┬────────────────────────────────────────────────────────────────────────────────╯
-  └─► ⌖ #1 [■■□□ 2/4] Refactor auth flow ▸ Unit tests (app · auth.ts ↪)
+  ├─► ⌖ #1 [■□□□ 1/3] Refactor auth (app · auth.ts ↪)                [Alt+A fold]
+  │   ├─ ✓ 1. Extract auth interface (strikethrough)
+  │   ├─ ◐ 2. HttpOnly cookie (editing auth.ts)
+  │   ├─ ○ 3. Unit tests ⛓ #2
+  │   └─ 📌 #2 Double-check gateway timeout fallback (3h ago)
+  └─► (Folded via Alt+A): ⌖ #1 [■□□□ 1/3] Refactor auth ▸ HttpOnly cookie (auth.ts ↪)
 ```
 
 ---
@@ -112,7 +117,7 @@ In `v0.4` and `v0.5`, I threw away 60% of the codebase and rebuilt Anchor around
 
 ```bash
 npm run typecheck  # Strict tsc --noEmit check (0 errors)
-npm test           # Native Node test runner (11/11 passing)
+npm test           # Native Node test runner (15/15 passing)
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 ```
 

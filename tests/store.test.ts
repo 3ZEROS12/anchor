@@ -219,11 +219,11 @@ test('v0.5.0 Progress Bar & Session Bookmark - parses inline progress ratios/ste
     // 2. Numbered steps syntax: 1. A 2. B 3. C
     const p2 = extractProgressFromText('重构登录流: 1. 抽出接口 2. 替换Cookie 3. 补单测');
     assert.strictEqual(p2.cleanTitle, '重构登录流');
-    assert.deepStrictEqual(p2.progress, {
-      done: 0,
-      total: 3,
-      steps: ['抽出接口', '替换Cookie', '补单测']
-    });
+    assert.strictEqual(p2.progress?.done, 0);
+    assert.strictEqual(p2.progress?.total, 3);
+    assert.deepStrictEqual(p2.progress?.steps, ['抽出接口', '替换Cookie', '补单测']);
+    assert.strictEqual(p2.progress?.items?.length, 3);
+    assert.strictEqual(p2.progress?.items?.[0].status, 'in_progress');
 
     const note = store.create({
       title: '重构登录流: 1. 抽出接口 2. 替换Cookie 3. 补单测',

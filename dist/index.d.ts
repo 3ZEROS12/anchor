@@ -1,6 +1,111 @@
-import { A as Anchor, a as AnchorProgress, b as AnchorStore } from './extension-09AVvgl-.js';
-export { c as AnchorEvidence, d as AnchorPriority, e as AnchorStatus, f as AnchorStoreState, C as COMMENT_FORMATS, M as MS_PER_DAY, Q as QUIET_AFTER_DAYS, T as TodoTaskItem, g as TouchMatchResult, h as acquireSyncLock, i as atomicRenameWithRetry, j as extractPathsFromText, k as extractProgressFromText, l as findMatchedAnchors, m as getDefaultStorageDir, n as globToRegExp, o as isAnchorTargetingWorkspace, p as isSameOrSubPath, q as makeSafeTaskAnnotation, r as matchAnchorAgainstTouchedFiles, s as matchesCommitMessage, t as normalizePath, u as parseAnchorCommandInput, v as parseQuickNoteInput, w as renderActiveAnchorsContext, x as renderColdStartAnchorsContext, y as resolveAnchorTarget, z as sweepQuietNotes } from './extension-09AVvgl-.js';
+import { A as AnchorStep, a as AnchorProgress, D as DockStepLayout, S as StepCounts, b as Anchor, T as TodoTaskItem, c as StepStatus, d as AnchorStore } from './extension-B4JOU06c.js';
+export { e as AnchorEvidence, f as AnchorPriority, g as AnchorStatus, h as AnchorStoreState, C as COMMENT_FORMATS, i as DEFAULT_MAX_DOCK_LINES, M as MS_PER_DAY, Q as QUIET_AFTER_DAYS, j as TouchMatchResult, k as acquireSyncLock, l as atomicRenameWithRetry, m as extractPathsFromText, n as extractProgressFromText, o as findMatchedAnchors, p as getDefaultStorageDir, q as globToRegExp, r as isAnchorTargetingWorkspace, s as isSameOrSubPath, t as makeSafeTaskAnnotation, u as matchAnchorAgainstTouchedFiles, v as matchesCommitMessage, w as normalizePath, x as parseAnchorCommandInput, y as parseQuickNoteInput, z as renderActiveAnchorsContext, B as renderColdStartAnchorsContext, E as resolveAnchorTarget, F as sweepQuietNotes } from './extension-B4JOU06c.js';
 import { ExtensionContext, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
+
+/**
+ * Validate whether adding `newBlockedBy` to `stepId` introduces a cycle, self-dependency,
+ * or reference to a non-existent/deleted step.
+ */
+declare function validateStepDependencies(steps: readonly AnchorStep[], stepId: number, newBlockedBy: readonly number[]): {
+    valid: boolean;
+    error?: string;
+};
+/**
+ * Validate cross-anchor `blockedBy` dependencies for cycles or self-blocks
+ */
+declare function validateAnchorDependencies(anchors: readonly Anchor[], anchorId: string, newBlockedBy: readonly string[]): {
+    valid: boolean;
+    error?: string;
+};
+/**
+ * Build inverse adjacency map: for each step S, which other steps are blocked by S
+ */
+declare function deriveStepBlocks(steps: readonly AnchorStep[]): Map<number, number[]>;
+/**
+ * Materialize structured `AnchorStep[]` from an `AnchorProgress` object
+ * (supports both rich `progress.items` and legacy flat `progress.steps` string arrays)
+ */
+declare function materializeSteps(progress?: AnchorProgress): AnchorStep[];
+/**
+ * Synchronize `progress.done`, `progress.total`, and `progress.steps` from structured `AnchorStep[]`
+ */
+declare function syncProgressFromItems(items: readonly AnchorStep[], existing?: AnchorProgress): AnchorProgress;
+/**
+ * Compute status counts across structured steps
+ */
+declare function selectStepCounts(steps: readonly AnchorStep[]): StepCounts;
+/**
+ * Select which steps to display in the `belowEditor` Dock within a row budget:
+ * 1. Hides completed steps that already had their 1-turn strikethrough grace period (`hiddenCompletedIds`).
+ * 2. If remaining steps fit within `budget`, shows all of them.
+ * 3. On overflow, drops remaining completed steps first, then truncates tail pending steps,
+ *    returning exact `hiddenCompleted` and `truncatedTail` counts for the `+N more` summary line.
+ */
+declare function selectDockStepLayout(steps: readonly AnchorStep[], budget: number, hiddenCompletedIds?: ReadonlySet<number>): DockStepLayout;
+
+/**
+ * Inspect session transcript branch (`ctx.sessionManager.getBranch()`) to recover
+ * the latest `todo` tool snapshot (`@juicesharp/rpiv-todo` or built-in `todo`).
+ */
+declare function replayTodoSnapshotFromBranch(branch?: Iterable<unknown> | null): TodoTaskItem[] | null;
+/**
+ * Convert `TodoTaskItem[]` into structured `AnchorStep[]` preserving `status`, `activeForm`, and `blockedBy` DAG edges.
+ */
+declare function convertTodoTasksToSteps(tasks: readonly TodoTaskItem[]): AnchorStep[];
+/**
+ * Derive a live present-continuous `activeForm` indicator from a real tool execution
+ * (e.g. `editing auth.ts`, `running npm test`, `reading store.ts`).
+ */
+declare function inferLiveActivityLabel(toolName: string, input?: Record<string, unknown> | null, _cwd?: string): string | undefined;
+
+declare const STATUS_GLYPH: Record<StepStatus, string>;
+declare function formatStepGlyph(status: StepStatus, fg: (color: string, text: string) => string): string;
+declare function applyStrikethrough(text: string, theme?: any): string;
+/**
+ * Format a single step row inside the `belowEditor` Tree Dock:
+ * `✓ #1 Extract auth interface` (strikethrough)
+ * `◐ #2 Switch token to HttpOnly cookie (editing auth.ts)`
+ * `○ #3 Add integration tests ⛓ #2`
+ */
+declare function formatDockStepRow(step: AnchorStep, options: {
+    fg: (color: string, text: string) => string;
+    theme?: any;
+    showId?: boolean;
+    fallbackActiveForm?: string;
+}): string;
+/**
+ * Stateful Dock Controller managing:
+ * - Expanded Tree Dock vs 1-Line Compact Strip (`collapsed` state, toggled via `Alt+A` or `/anchor fold`)
+ * - 1-Turn Completed Step Grace Period (`completedStepIdsPendingHide` -> `hiddenCompletedStepIds` on `agent_start`)
+ */
+declare class AnchorDockController {
+    private collapsed;
+    private pendingHideByAnchor;
+    private hiddenByAnchor;
+    isCollapsed(): boolean;
+    setCollapsed(val: boolean): void;
+    toggleCollapsed(): boolean;
+    resetGraceState(anchorId?: string): void;
+    /**
+     * Called on `agent_start`: folds away completed steps that were shown with `✓` strikethrough
+     * during the previous turn so the dock stays compact while coding.
+     */
+    foldCompletedStepsFromPreviousTurn(): boolean;
+    /**
+     * Render the `belowEditor` widget lines for active anchors.
+     * - If `collapsed === true` OR no anchor has multi-step items, renders the 1-line Sticky Strip.
+     * - If `collapsed === false` AND the primary anchor has structured steps (`total >= 2`),
+     *   renders the multi-row Tree Dock (up to `maxStepRows = 4` step rows + optional side note summary).
+     */
+    renderDockLines(activeAnchors: readonly Anchor[], options: {
+        width: number;
+        cwd?: string;
+        theme?: any;
+        maxStepRows?: number;
+    }): string[];
+    private renderSingleLineStrip;
+}
+declare const defaultDockController: AnchorDockController;
 
 declare function stripAnsi(str: string): string;
 /**
@@ -34,7 +139,7 @@ declare function sortAnchorsForDisplay(anchors: Anchor[], cwd?: string): Anchor[
  */
 declare function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore): void;
 /**
- * Render persistent 1-line sticky-note strip BELOW the editor (`placement: 'belowEditor'`).
+ * Render persistent `belowEditor` Anchor Dock (Tree Dock when expanded, 1-line strip when folded).
  * Never collides with `pi-lingual` (`aboveEditor`), stays visible while you work,
  * and takes 0 lines when there are no active notes.
  */
@@ -44,4 +149,4 @@ declare function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore):
  */
 declare function openAnchorDashboard(ctx: ExtensionContext | ExtensionCommandContext, store: AnchorStore): Promise<void>;
 
-export { Anchor, AnchorProgress, AnchorStore, formatOrigin, formatProgressBar, formatRelativeAge, getDisplayWidth, hasActiveUI, openAnchorDashboard, padToWidth, sortAnchorsForDisplay, stripAnsi, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };
+export { Anchor, AnchorDockController, AnchorProgress, AnchorStep, AnchorStore, DockStepLayout, STATUS_GLYPH, StepCounts, StepStatus, TodoTaskItem, applyStrikethrough, convertTodoTasksToSteps, defaultDockController, deriveStepBlocks, formatDockStepRow, formatOrigin, formatProgressBar, formatRelativeAge, formatStepGlyph, getDisplayWidth, hasActiveUI, inferLiveActivityLabel, materializeSteps, openAnchorDashboard, padToWidth, replayTodoSnapshotFromBranch, selectDockStepLayout, selectStepCounts, sortAnchorsForDisplay, stripAnsi, syncProgressFromItems, truncateToWidth, updateAnchorStatusBar, updateStartupBanner, validateAnchorDependencies, validateStepDependencies };
