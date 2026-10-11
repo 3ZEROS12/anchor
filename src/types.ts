@@ -69,6 +69,7 @@ export interface AnchorStoreState {
   version: number;
   anchors: Anchor[];
   lastSweepAt: number;
+  nextId?: number;
 }
 
 export interface TouchMatchResult {

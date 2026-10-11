@@ -61,63 +61,65 @@ export interface SweepResult {
  * Run decay sweep across store: transitions statuses and evicts expired anchors
  */
 export function sweepStore(store: AnchorStore, now: number = Date.now()): SweepResult {
-  const state = store.loadState();
-  const result: SweepResult = {
-    transitionedToSleeping: [],
-    wokenToActive: [],
-    evictedToGraveyard: []
-  };
+  return store.withLock(() => {
+    const state = store.loadState();
+    const result: SweepResult = {
+      transitionedToSleeping: [],
+      wokenToActive: [],
+      evictedToGraveyard: []
+    };
 
-  const toEvict: Anchor[] = [];
-  let stateModified = false;
+    const toEvict: Anchor[] = [];
+    let stateModified = false;
 
-  for (const anchor of state.anchors) {
-    const evalResult = evaluateAnchorDecay(anchor, now);
+    for (const anchor of state.anchors) {
+      const evalResult = evaluateAnchorDecay(anchor, now);
 
-    if (evalResult.nextStatus === 'graveyard') {
-      toEvict.push(anchor);
-    } else if (evalResult.nextStatus !== anchor.status) {
-      if (evalResult.nextStatus === 'sleeping' && anchor.status === 'active') {
-        anchor.status = 'sleeping';
-        anchor.updatedAt = now;
-        result.transitionedToSleeping.push(anchor.id);
-        stateModified = true;
-      } else if (evalResult.nextStatus === 'active' && anchor.status === 'sleeping') {
-        anchor.status = 'active';
-        anchor.updatedAt = now;
-        result.wokenToActive.push(anchor.id);
-        stateModified = true;
+      if (evalResult.nextStatus === 'graveyard') {
+        toEvict.push(anchor);
+      } else if (evalResult.nextStatus !== anchor.status) {
+        if (evalResult.nextStatus === 'sleeping' && anchor.status === 'active') {
+          anchor.status = 'sleeping';
+          anchor.updatedAt = now;
+          result.transitionedToSleeping.push(anchor.id);
+          stateModified = true;
+        } else if (evalResult.nextStatus === 'active' && anchor.status === 'sleeping') {
+          anchor.status = 'active';
+          anchor.updatedAt = now;
+          result.wokenToActive.push(anchor.id);
+          stateModified = true;
+        }
       }
     }
-  }
 
-  // Single-pass batch eviction and state save
-  if (toEvict.length > 0) {
-    const evictIds = new Set(toEvict.map(e => e.id));
-    state.anchors = state.anchors.filter(a => !evictIds.has(a.id));
-    stateModified = true;
+    // Single-pass batch eviction and state save
+    if (toEvict.length > 0) {
+      const evictIds = new Set(toEvict.map(e => e.id));
+      state.anchors = state.anchors.filter(a => !evictIds.has(a.id));
+      stateModified = true;
 
-    const graveyardLines = toEvict.map(exp => {
-      const rec = {
-        ...exp,
-        status: 'graveyard',
-        updatedAt: now,
-        evictedAt: now,
-        evictionReason: `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`
-      };
-      return JSON.stringify(rec);
-    }).join('\n') + '\n';
+      const graveyardLines = toEvict.map(exp => {
+        const rec = {
+          ...exp,
+          status: 'graveyard',
+          updatedAt: now,
+          evictedAt: now,
+          evictionReason: `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`
+        };
+        return JSON.stringify(rec);
+      }).join('\n') + '\n';
 
-    fs.appendFileSync(store.graveyardPath, graveyardLines, 'utf-8');
-    for (const exp of toEvict) {
-      result.evictedToGraveyard.push(exp.id);
+      fs.appendFileSync(store.graveyardPath, graveyardLines, 'utf-8');
+      for (const exp of toEvict) {
+        result.evictedToGraveyard.push(exp.id);
+      }
     }
-  }
 
-  state.lastSweepAt = now;
-  if (stateModified) {
-    store.saveState(state);
-  }
+    state.lastSweepAt = now;
+    if (stateModified) {
+      store.saveState(state);
+    }
 
-  return result;
+    return result;
+  });
 }

@@ -22,12 +22,28 @@ export function normalizePath(filePath: string, baseCwd?: string): string {
   if (typeof filePath !== 'string') return '';
   let norm = filePath.trim().replace(/\\/g, '/').replace(/^\.\//, '');
   if (baseCwd && (path.isAbsolute(filePath) || norm.startsWith('/'))) {
-    const normBase = baseCwd.trim().replace(/\\/g, '/');
-    if (norm.toLowerCase().startsWith(normBase.toLowerCase())) {
-      norm = norm.slice(normBase.length).replace(/^\/+/, '');
+    const normBase = baseCwd.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    const lowerNorm = norm.toLowerCase();
+    const lowerBase = normBase.toLowerCase();
+    if (lowerNorm === lowerBase) {
+      norm = '';
+    } else if (lowerNorm.startsWith(lowerBase + '/')) {
+      norm = norm.slice(normBase.length + 1).replace(/^\/+/, '');
     }
   }
   return norm;
+}
+
+/**
+ * Compare two workspace CWDs safely (case-insensitive on Windows, supports subdirectory scoping)
+ */
+export function isSameOrSubPath(anchorCwd?: string, targetCwd?: string): boolean {
+  if (!anchorCwd || !targetCwd) return false;
+  const normA = anchorCwd.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const normT = targetCwd.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const cmpA = process.platform === 'win32' ? normA.toLowerCase() : normA;
+  const cmpT = process.platform === 'win32' ? normT.toLowerCase() : normT;
+  return cmpA === cmpT || cmpT.startsWith(cmpA + '/') || cmpA.startsWith(cmpT + '/');
 }
 
 /**

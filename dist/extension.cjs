@@ -66,12 +66,24 @@ function normalizePath(filePath, baseCwd) {
   if (typeof filePath !== "string") return "";
   let norm = filePath.trim().replace(/\\/g, "/").replace(/^\.\//, "");
   if (baseCwd && (import_node_path.default.isAbsolute(filePath) || norm.startsWith("/"))) {
-    const normBase = baseCwd.trim().replace(/\\/g, "/");
-    if (norm.toLowerCase().startsWith(normBase.toLowerCase())) {
-      norm = norm.slice(normBase.length).replace(/^\/+/, "");
+    const normBase = baseCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    const lowerNorm = norm.toLowerCase();
+    const lowerBase = normBase.toLowerCase();
+    if (lowerNorm === lowerBase) {
+      norm = "";
+    } else if (lowerNorm.startsWith(lowerBase + "/")) {
+      norm = norm.slice(normBase.length + 1).replace(/^\/+/, "");
     }
   }
   return norm;
+}
+function isSameOrSubPath(anchorCwd, targetCwd) {
+  if (!anchorCwd || !targetCwd) return false;
+  const normA = anchorCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const normT = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const cmpA = process.platform === "win32" ? normA.toLowerCase() : normA;
+  const cmpT = process.platform === "win32" ? normT.toLowerCase() : normT;
+  return cmpA === cmpT || cmpT.startsWith(cmpA + "/") || cmpA.startsWith(cmpT + "/");
 }
 function matchAnchorAgainstTouchedFiles(anchor, touchedFiles) {
   if (!anchor.files || anchor.files.length === 0) return null;
@@ -456,16 +468,19 @@ var AnchorStore = class {
    */
   saveState(state) {
     this.ensureDirs();
-    const tempPath = import_node_path2.default.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}`);
+    const rand = Math.random().toString(36).slice(2, 7);
+    const tempPath = import_node_path2.default.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}.${rand}`);
     import_node_fs.default.writeFileSync(tempPath, JSON.stringify(state, null, 2), "utf-8");
     atomicRenameWithRetry(tempPath, this.statePath);
   }
-  generateId(existingAnchors) {
-    const numbers = existingAnchors.map((a) => {
+  generateId(state) {
+    const numbers = state.anchors.map((a) => {
       const match = a.id.match(/^anc-(\d+)$/);
       return match ? parseInt(match[1], 10) : 0;
     }).filter((n) => n > 0);
-    const nextNum = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+    const maxExisting = numbers.length > 0 ? Math.max(...numbers) : 0;
+    const nextNum = Math.max(maxExisting + 1, state.nextId || 1);
+    state.nextId = nextNum + 1;
     return `anc-${nextNum}`;
   }
   /**
@@ -475,7 +490,7 @@ var AnchorStore = class {
     return this.withLock(() => {
       const state = this.loadState();
       const now = Date.now();
-      const id = this.generateId(state.anchors);
+      const id = this.generateId(state);
       const cwd = input.cwd ? normalizePath(input.cwd) : "";
       const projectName = input.project ? input.project.trim() : cwd ? import_node_path2.default.basename(cwd) : "global";
       const recurrence = input.recurrence || detectRecurrence(input.title);
@@ -535,7 +550,7 @@ var AnchorStore = class {
       if (filter?.status && a.status !== filter.status) return false;
       if (filter?.priority && a.priority !== filter.priority) return false;
       if (!filter?.all && targetCwd) {
-        if (a.files.length > 0 && a.cwd && a.cwd !== targetCwd) {
+        if (a.files.length > 0 && a.cwd && !isSameOrSubPath(a.cwd, targetCwd)) {
           return false;
         }
       }
@@ -646,8 +661,27 @@ var AnchorStore = class {
       anchor.status = "active";
       anchor.updatedAt = Date.now();
       delete anchor.evidence;
+      delete anchor.settledForDate;
+      if (anchor.recurrence === "daily") {
+        delete anchor.lastCompletedDate;
+      }
       const state = this.loadState();
-      state.anchors.push(anchor);
+      const existingIdx = state.anchors.findIndex((a) => a.id === anchor.id);
+      if (existingIdx !== -1) {
+        if (state.anchors[existingIdx].title === anchor.title) {
+          state.anchors[existingIdx] = anchor;
+        } else {
+          anchor.id = this.generateId(state);
+          state.anchors.push(anchor);
+        }
+      } else {
+        const match = anchor.id.match(/^anc-(\d+)$/);
+        if (match) {
+          const restoredNum = parseInt(match[1], 10);
+          state.nextId = Math.max(state.nextId || 1, restoredNum + 1);
+        }
+        state.anchors.push(anchor);
+      }
       this.saveState(state);
       return anchor;
     });
@@ -682,7 +716,7 @@ var AnchorStore = class {
       const all = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l));
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
-      return all.filter((a) => !a.cwd || a.cwd === targetCwd);
+      return all.filter((a) => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
     } catch {
       return [];
     }
@@ -694,7 +728,7 @@ var AnchorStore = class {
       const all = raw.split("\n").filter(Boolean).map((l) => JSON.parse(l));
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
-      return all.filter((a) => !a.cwd || a.cwd === targetCwd);
+      return all.filter((a) => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
     } catch {
       return [];
     }
@@ -850,56 +884,58 @@ function evaluateAnchorDecay(anchor, now = Date.now()) {
   };
 }
 function sweepStore(store, now = Date.now()) {
-  const state = store.loadState();
-  const result = {
-    transitionedToSleeping: [],
-    wokenToActive: [],
-    evictedToGraveyard: []
-  };
-  const toEvict = [];
-  let stateModified = false;
-  for (const anchor of state.anchors) {
-    const evalResult = evaluateAnchorDecay(anchor, now);
-    if (evalResult.nextStatus === "graveyard") {
-      toEvict.push(anchor);
-    } else if (evalResult.nextStatus !== anchor.status) {
-      if (evalResult.nextStatus === "sleeping" && anchor.status === "active") {
-        anchor.status = "sleeping";
-        anchor.updatedAt = now;
-        result.transitionedToSleeping.push(anchor.id);
-        stateModified = true;
-      } else if (evalResult.nextStatus === "active" && anchor.status === "sleeping") {
-        anchor.status = "active";
-        anchor.updatedAt = now;
-        result.wokenToActive.push(anchor.id);
-        stateModified = true;
+  return store.withLock(() => {
+    const state = store.loadState();
+    const result = {
+      transitionedToSleeping: [],
+      wokenToActive: [],
+      evictedToGraveyard: []
+    };
+    const toEvict = [];
+    let stateModified = false;
+    for (const anchor of state.anchors) {
+      const evalResult = evaluateAnchorDecay(anchor, now);
+      if (evalResult.nextStatus === "graveyard") {
+        toEvict.push(anchor);
+      } else if (evalResult.nextStatus !== anchor.status) {
+        if (evalResult.nextStatus === "sleeping" && anchor.status === "active") {
+          anchor.status = "sleeping";
+          anchor.updatedAt = now;
+          result.transitionedToSleeping.push(anchor.id);
+          stateModified = true;
+        } else if (evalResult.nextStatus === "active" && anchor.status === "sleeping") {
+          anchor.status = "active";
+          anchor.updatedAt = now;
+          result.wokenToActive.push(anchor.id);
+          stateModified = true;
+        }
       }
     }
-  }
-  if (toEvict.length > 0) {
-    const evictIds = new Set(toEvict.map((e) => e.id));
-    state.anchors = state.anchors.filter((a) => !evictIds.has(a.id));
-    stateModified = true;
-    const graveyardLines = toEvict.map((exp) => {
-      const rec = {
-        ...exp,
-        status: "graveyard",
-        updatedAt: now,
-        evictedAt: now,
-        evictionReason: `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`
-      };
-      return JSON.stringify(rec);
-    }).join("\n") + "\n";
-    import_node_fs2.default.appendFileSync(store.graveyardPath, graveyardLines, "utf-8");
-    for (const exp of toEvict) {
-      result.evictedToGraveyard.push(exp.id);
+    if (toEvict.length > 0) {
+      const evictIds = new Set(toEvict.map((e) => e.id));
+      state.anchors = state.anchors.filter((a) => !evictIds.has(a.id));
+      stateModified = true;
+      const graveyardLines = toEvict.map((exp) => {
+        const rec = {
+          ...exp,
+          status: "graveyard",
+          updatedAt: now,
+          evictedAt: now,
+          evictionReason: `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`
+        };
+        return JSON.stringify(rec);
+      }).join("\n") + "\n";
+      import_node_fs2.default.appendFileSync(store.graveyardPath, graveyardLines, "utf-8");
+      for (const exp of toEvict) {
+        result.evictedToGraveyard.push(exp.id);
+      }
     }
-  }
-  state.lastSweepAt = now;
-  if (stateModified) {
-    store.saveState(state);
-  }
-  return result;
+    state.lastSweepAt = now;
+    if (stateModified) {
+      store.saveState(state);
+    }
+    return result;
+  });
 }
 
 // src/context_injector.ts
@@ -1246,7 +1282,7 @@ function updateStartupBanner(ctx, store) {
         ];
         for (let i = 0; i < topItems.length; i++) {
           const a = topItems[i];
-          const num = (i + 1).toString().padStart(2, "0");
+          const num = a.id.replace(/^anc-/, "").padStart(2, "0");
           const q = classifyAnchor(a);
           const tgt = formatTargetDate(a);
           const titlePadded = truncateToWidth(a.title, maxTitleWidth);
@@ -1281,20 +1317,23 @@ async function openAnchorDashboard(ctx, store) {
   ];
   const optionMap = /* @__PURE__ */ new Map();
   const displayOptions = [];
+  const termCols = process.stdout?.columns || 96;
+  const isNarrow = termCols < 88;
+  const titleWidth = isNarrow ? Math.max(18, termCols - 36) : 34;
   for (let i = 0; i < sortedList.length; i++) {
     const a = sortedList[i];
-    const num = (i + 1).toString().padStart(2, "0");
+    const num = a.id.replace(/^anc-/, "").padStart(2, "0");
     const category = padToWidth(`[${classifyAnchor(a)}]`, 12);
     const origin = formatOrigin(a);
     const target = formatTargetDate(a);
     const created = formatCreationTime(a.createdAt);
     const titleWithFiles = a.files && a.files.length > 0 ? `${a.title} [${a.files.slice(0, 1).join(", ")}]` : a.title;
     const colNum = `${num}  `;
-    const colTitle = padToWidth(titleWithFiles, 34);
+    const colTitle = padToWidth(titleWithFiles, titleWidth);
     const colOrigin = padToWidth(origin, 10);
     const colTarget = padToWidth(target, 12);
     const colCreated = created;
-    const label = `${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
+    const label = isNarrow ? `${colNum}${category}${colTitle}  ${colTarget}`.trimEnd() : `${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
     optionMap.set(label, a);
     displayOptions.push(label);
   }
@@ -1370,16 +1409,24 @@ function extension_default(pi) {
       const pendingPath = import_node_path5.default.join(home, ".anchor", "pending_exit.json");
       if (import_node_fs3.default.existsSync(pendingPath)) {
         const pending = JSON.parse(import_node_fs3.default.readFileSync(pendingPath, "utf-8"));
-        if (pending.cwd === ctx.cwd && Date.now() - pending.timestamp < 24 * 60 * 60 * 1e3) {
-          ctx.ui.notify(`\u2316 [Anchor \u9000\u51FA\u5B88\u62A4] \u68C0\u6D4B\u5230\u4E0A\u6B21\u5F02\u5E38\u9000\u51FA\u4E14\u6709 ${pending.modifiedCount} \u4E2A\u672A\u63D0\u4EA4\u6539\u52A8\uFF0C\u53EF\u7528 anchor(action="pin") \u56FA\u5316\u4EFB\u52A1\u3002`, "info");
+        const isExpired = Date.now() - pending.timestamp >= 24 * 60 * 60 * 1e3;
+        if (!isExpired && isSameOrSubPath(pending.cwd, ctx.cwd)) {
+          ctx.ui.notify(`\u2316 [Exit Guard] Detected ${pending.modifiedCount} uncommitted changes from previous session exit. Run /pin to record.`, "info");
+          import_node_fs3.default.unlinkSync(pendingPath);
+        } else if (isExpired) {
+          import_node_fs3.default.unlinkSync(pendingPath);
         }
-        import_node_fs3.default.unlinkSync(pendingPath);
       }
     } catch (_) {
     }
     updateAnchorStatusBar(ctx, store);
     if (event.reason !== "resume") {
       updateStartupBanner(ctx, store);
+    } else if (hasActiveUI(ctx)) {
+      try {
+        ctx.ui.setWidget("anchor-startup", void 0);
+      } catch {
+      }
     }
   });
   pi.on("agent_start", async (_event, ctx) => {
@@ -1411,7 +1458,7 @@ ${contextSnippet}`
     }
     const pathInput = event.input?.path;
     if (typeof pathInput !== "string") return;
-    const touchedPath = normalizePath(pathInput);
+    const touchedPath = normalizePath(pathInput, ctx.cwd);
     const anchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
     const matches = findMatchedAnchors(anchors, [touchedPath]);
     if (matches.length > 0) {
@@ -1447,8 +1494,8 @@ ${contextSnippet}`
         encoding: "utf-8",
         timeout: 2e3,
         stdio: ["ignore", "pipe", "ignore"]
-      }).trim();
-      const changed = gitStatus.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
+      }).replace(/[\r\n]+$/, "");
+      const changed = gitStatus.split(/\r?\n/).filter(Boolean).map((l) => l.slice(3).replace(/^"(.*)"$/, "$1").trim()).filter(Boolean);
       for (const f of changed) {
         observer.addTouchedFile(f);
       }
@@ -1722,6 +1769,12 @@ Mark as completed and archive?`
       const anc = store.create({ title, cwd: ctx.cwd });
       ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"`, "info");
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.registerCommand("anchors", {
+    description: "Inspect and settle active anchors",
+    handler: async (_args, ctx) => {
+      await openAnchorDashboard(ctx, store);
     }
   });
 }

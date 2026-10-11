@@ -346,7 +346,7 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
 
         for (let i = 0; i < topItems.length; i++) {
           const a = topItems[i];
-          const num = (i + 1).toString().padStart(2, '0');
+          const num = a.id.replace(/^anc-/, '').padStart(2, '0');
           const q = classifyAnchor(a);
           const tgt = formatTargetDate(a);
           const titlePadded = truncateToWidth(a.title, maxTitleWidth);
@@ -396,10 +396,13 @@ export async function openAnchorDashboard(
 
   const optionMap = new Map<string, Anchor>();
   const displayOptions: string[] = [];
+  const termCols = process.stdout?.columns || 96;
+  const isNarrow = termCols < 88;
+  const titleWidth = isNarrow ? Math.max(18, termCols - 36) : 34;
 
   for (let i = 0; i < sortedList.length; i++) {
     const a = sortedList[i];
-    const num = (i + 1).toString().padStart(2, '0');
+    const num = a.id.replace(/^anc-/, '').padStart(2, '0');
     const category = padToWidth(`[${classifyAnchor(a)}]`, 12);
     const origin = formatOrigin(a);
     const target = formatTargetDate(a);
@@ -411,12 +414,14 @@ export async function openAnchorDashboard(
 
     // Clean tabular column alignment: ID, Category, Title, Project, Target, Created
     const colNum = `${num}  `;
-    const colTitle = padToWidth(titleWithFiles, 34);
+    const colTitle = padToWidth(titleWithFiles, titleWidth);
     const colOrigin = padToWidth(origin, 10);
     const colTarget = padToWidth(target, 12);
     const colCreated = created;
 
-    const label = `${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
+    const label = isNarrow
+      ? `${colNum}${category}${colTitle}  ${colTarget}`.trimEnd()
+      : `${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
 
     optionMap.set(label, a);
     displayOptions.push(label);

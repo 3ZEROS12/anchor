@@ -4,7 +4,7 @@ import { AnchorStore } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
 import { renderColdStartAnchorsContext, renderActiveAnchorsContext, makeSafeTaskAnnotation } from './context_injector.ts';
 import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
-import { normalizePath, findMatchedAnchors } from './matcher.ts';
+import { normalizePath, isSameOrSubPath, findMatchedAnchors } from './matcher.ts';
 import { sweepStore } from './decay.ts';
 import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner, truncateToWidth, hasActiveUI } from './tui.ts';
 import { execSync } from 'node:child_process';
@@ -57,10 +57,13 @@ export default function (pi: ExtensionAPI) {
       const pendingPath = path.join(home, '.anchor', 'pending_exit.json');
       if (fs.existsSync(pendingPath)) {
         const pending = JSON.parse(fs.readFileSync(pendingPath, 'utf-8'));
-        if (pending.cwd === ctx.cwd && Date.now() - pending.timestamp < 24 * 60 * 60 * 1000) {
-          ctx.ui.notify(`⌖ [Anchor 退出守护] 检测到上次异常退出且有 ${pending.modifiedCount} 个未提交改动，可用 anchor(action="pin") 固化任务。`, 'info');
+        const isExpired = Date.now() - pending.timestamp >= 24 * 60 * 60 * 1000;
+        if (!isExpired && isSameOrSubPath(pending.cwd, ctx.cwd)) {
+          ctx.ui.notify(`⌖ [Exit Guard] Detected ${pending.modifiedCount} uncommitted changes from previous session exit. Run /pin to record.`, 'info');
+          fs.unlinkSync(pendingPath);
+        } else if (isExpired) {
+          fs.unlinkSync(pendingPath);
         }
-        fs.unlinkSync(pendingPath);
       }
     } catch (_) {}
 
@@ -69,6 +72,10 @@ export default function (pi: ExtensionAPI) {
     // Only render startup banner on initial startup or new session, not on mid-session resume
     if (event.reason !== 'resume') {
       updateStartupBanner(ctx, store);
+    } else if (hasActiveUI(ctx)) {
+      try {
+        ctx.ui.setWidget('anchor-startup', undefined);
+      } catch {}
     }
   });
 
@@ -107,7 +114,7 @@ export default function (pi: ExtensionAPI) {
     const pathInput = (event.input as any)?.path;
     if (typeof pathInput !== 'string') return;
 
-    const touchedPath = normalizePath(pathInput);
+    const touchedPath = normalizePath(pathInput, ctx.cwd);
     const anchors = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active' || a.status === 'sleeping');
     const matches = findMatchedAnchors(anchors, [touchedPath]);
 
@@ -153,10 +160,11 @@ export default function (pi: ExtensionAPI) {
         encoding: 'utf-8',
         timeout: 2000,
         stdio: ['ignore', 'pipe', 'ignore']
-      }).trim();
+      }).replace(/[\r\n]+$/, '');
       const changed = gitStatus
-        .split('\n')
-        .map((l: string) => l.slice(3).trim())
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((l: string) => l.slice(3).replace(/^"(.*)"$/, '$1').trim())
         .filter(Boolean);
       for (const f of changed) {
         observer.addTouchedFile(f);
@@ -461,6 +469,14 @@ export default function (pi: ExtensionAPI) {
       const anc = store.create({ title, cwd: ctx.cwd });
       ctx.ui.notify(`⌖ Pinned #${anc.id}: "${anc.title}"`, 'info');
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+
+  // Alias /anchors to open dashboard
+  pi.registerCommand('anchors', {
+    description: 'Inspect and settle active anchors',
+    handler: async (_args: string, ctx: ExtensionContext) => {
+      await openAnchorDashboard(ctx, store);
     }
   });
 }

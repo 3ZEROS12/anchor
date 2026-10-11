@@ -27,6 +27,7 @@ import {
   globToRegExp,
   groupAnchorsByQuadrant,
   hasActiveUI,
+  isSameOrSubPath,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
   normalizePath,
@@ -40,7 +41,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-GPJPN27S.js";
+} from "./chunk-D4O5HZWV.js";
 
 // src/protocol.ts
 var AnchorProtocol = class {
@@ -130,6 +131,7 @@ export {
   globToRegExp,
   groupAnchorsByQuadrant,
   hasActiveUI,
+  isSameOrSubPath,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
   normalizePath,

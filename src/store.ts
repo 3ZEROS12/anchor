@@ -11,7 +11,7 @@ import type {
   AnchorStoreState
 } from './types.ts';
 import { DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, EPHEMERAL_DECAY_POLICY } from './types.ts';
-import { normalizePath } from './matcher.ts';
+import { normalizePath, isSameOrSubPath } from './matcher.ts';
 
 /**
  * Detect whether a task is a short-term ephemeral reminder or a long-term architectural vision
@@ -362,19 +362,22 @@ export class AnchorStore {
    */
   public saveState(state: AnchorStoreState): void {
     this.ensureDirs();
-    const tempPath = path.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}`);
+    const rand = Math.random().toString(36).slice(2, 7);
+    const tempPath = path.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}.${rand}`);
     fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8');
     atomicRenameWithRetry(tempPath, this.statePath);
   }
 
-  private generateId(existingAnchors: Anchor[]): string {
-    const numbers = existingAnchors
+  private generateId(state: AnchorStoreState): string {
+    const numbers = state.anchors
       .map(a => {
         const match = a.id.match(/^anc-(\d+)$/);
         return match ? parseInt(match[1], 10) : 0;
       })
       .filter(n => n > 0);
-    const nextNum = numbers.length > 0 ? Math.max(...numbers) + 1 : 1;
+    const maxExisting = numbers.length > 0 ? Math.max(...numbers) : 0;
+    const nextNum = Math.max(maxExisting + 1, state.nextId || 1);
+    state.nextId = nextNum + 1;
     return `anc-${nextNum}`;
   }
 
@@ -398,7 +401,7 @@ export class AnchorStore {
     return this.withLock(() => {
       const state = this.loadState();
       const now = Date.now();
-      const id = this.generateId(state.anchors);
+      const id = this.generateId(state);
 
       const cwd = input.cwd ? normalizePath(input.cwd) : '';
       const projectName = input.project
@@ -485,7 +488,7 @@ export class AnchorStore {
       // If an anchor has specific code files attached, scope it to that cwd.
       // If an anchor has NO code files attached (habits, general tasks, study), it is universal and visible everywhere!
       if (!filter?.all && targetCwd) {
-        if (a.files.length > 0 && a.cwd && a.cwd !== targetCwd) {
+        if (a.files.length > 0 && a.cwd && !isSameOrSubPath(a.cwd, targetCwd)) {
           return false;
         }
       }
@@ -619,9 +622,28 @@ export class AnchorStore {
       anchor.status = 'active';
       anchor.updatedAt = Date.now();
       delete anchor.evidence;
+      delete (anchor as any).settledForDate;
+      if (anchor.recurrence === 'daily') {
+        delete anchor.lastCompletedDate;
+      }
 
       const state = this.loadState();
-      state.anchors.push(anchor);
+      const existingIdx = state.anchors.findIndex(a => a.id === anchor.id);
+      if (existingIdx !== -1) {
+        if (state.anchors[existingIdx].title === anchor.title) {
+          state.anchors[existingIdx] = anchor;
+        } else {
+          anchor.id = this.generateId(state);
+          state.anchors.push(anchor);
+        }
+      } else {
+        const match = anchor.id.match(/^anc-(\d+)$/);
+        if (match) {
+          const restoredNum = parseInt(match[1], 10);
+          state.nextId = Math.max(state.nextId || 1, restoredNum + 1);
+        }
+        state.anchors.push(anchor);
+      }
       this.saveState(state);
 
       return anchor;
@@ -661,7 +683,7 @@ export class AnchorStore {
       const all: Anchor[] = raw.split('\n').filter(Boolean).map((l: string) => JSON.parse(l));
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
-      return all.filter(a => !a.cwd || a.cwd === targetCwd);
+      return all.filter(a => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
     } catch {
       return [];
     }
@@ -674,7 +696,7 @@ export class AnchorStore {
       const all: Anchor[] = raw.split('\n').filter(Boolean).map((l: string) => JSON.parse(l));
       if (filter?.all || !filter?.cwd) return all;
       const targetCwd = normalizePath(filter.cwd);
-      return all.filter(a => !a.cwd || a.cwd === targetCwd);
+      return all.filter(a => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
     } catch {
       return [];
     }

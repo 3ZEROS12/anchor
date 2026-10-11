@@ -66,6 +66,7 @@ interface AnchorStoreState {
     version: number;
     anchors: Anchor[];
     lastSweepAt: number;
+    nextId?: number;
 }
 interface TouchMatchResult {
     anchor: Anchor;
@@ -236,6 +237,10 @@ declare function globToRegExp(pattern: string): RegExp;
  * Normalize path separators to POSIX forward slashes and optionally relative to baseCwd
  */
 declare function normalizePath(filePath: string, baseCwd?: string): string;
+/**
+ * Compare two workspace CWDs safely (case-insensitive on Windows, supports subdirectory scoping)
+ */
+declare function isSameOrSubPath(anchorCwd?: string, targetCwd?: string): boolean;
 /**
  * Match touched files against an anchor's registered physical patterns
  * Only anchors with explicit files/globs/prefixes are matched against file touches.
@@ -446,4 +451,4 @@ declare class AnchorProtocol {
     };
 }
 
-export { type AgentAdapter, type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, AnchorProtocol, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, COMMENT_FORMATS, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, acquireSyncLock, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, hasActiveUI, makeSafeTaskAnnotation, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, stripAnsi, sweepStore, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };
+export { type AgentAdapter, type Anchor, type AnchorDecayPolicy, type AnchorDurability, type AnchorEvidence, type AnchorPriority, AnchorProtocol, type AnchorQuadrant, type AnchorStatus, AnchorStore, type AnchorStoreState, COMMENT_FORMATS, DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, type DecayEvaluation, EPHEMERAL_DECAY_POLICY, type GroupedAnchors, SessionTouchObserver, type SettlementProposal, type SweepResult, type TouchMatchResult, acquireSyncLock, atomicRenameWithRetry, classifyAnchor, detectDurability, detectRecurrence, detectTargetDate, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDefaultStorageDir, getDisplayWidth, getEphemeralDecayPolicy, getTodayDateString, globToRegExp, groupAnchorsByQuadrant, hasActiveUI, isSameOrSubPath, makeSafeTaskAnnotation, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, stripAnsi, sweepStore, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };

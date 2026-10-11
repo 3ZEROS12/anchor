@@ -9,6 +9,7 @@ import {
   detectDurability,
   getEphemeralDecayPolicy
 } from '../src/store.ts';
+import { normalizePath, isSameOrSubPath } from '../src/matcher.ts';
 
 function createTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-test-'));
@@ -188,3 +189,37 @@ test('AnchorStore - atomicRenameWithRetry successfully replaces files atomically
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('QA - monotonic nextId prevents ID reuse after settle and undoSettle avoids duplicate IDs', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const a1 = store.create({ title: 'First task' });
+    assert.strictEqual(a1.id, 'anc-1');
+
+    store.settle('anc-1');
+    const a2 = store.create({ title: 'Second task after settle' });
+    assert.strictEqual(a2.id, 'anc-2');
+
+    const restored = store.undoSettle();
+    assert.strictEqual(restored.id, 'anc-1');
+
+    const active = store.list({ all: true });
+    const ids = active.map(a => a.id);
+    assert.deepStrictEqual(ids, ['anc-2', 'anc-1']);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('QA - normalizePath protects sibling folder prefixes and isSameOrSubPath handles subdirectories', () => {
+  const sibling = normalizePath('D:/Workspace/project-b/src/a.ts', 'D:/Workspace/proj');
+  assert.strictEqual(sibling, 'D:/Workspace/project-b/src/a.ts');
+
+  const child = normalizePath('D:/Workspace/proj/src/a.ts', 'D:/Workspace/proj');
+  assert.strictEqual(child, 'src/a.ts');
+
+  assert.strictEqual(isSameOrSubPath('D:/Workspace/proj', 'D:/Workspace/proj/src'), true);
+  assert.strictEqual(isSameOrSubPath('D:/Workspace/proj', 'D:/Workspace/project-b'), false);
+});
+

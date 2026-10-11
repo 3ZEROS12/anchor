@@ -4,6 +4,7 @@ import {
   findMatchedAnchors,
   generateSettlementProposals,
   hasActiveUI,
+  isSameOrSubPath,
   makeSafeTaskAnnotation,
   normalizePath,
   openAnchorDashboard,
@@ -13,7 +14,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-GPJPN27S.js";
+} from "./chunk-D4O5HZWV.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
@@ -57,16 +58,24 @@ function extension_default(pi) {
       const pendingPath = path.join(home, ".anchor", "pending_exit.json");
       if (fs.existsSync(pendingPath)) {
         const pending = JSON.parse(fs.readFileSync(pendingPath, "utf-8"));
-        if (pending.cwd === ctx.cwd && Date.now() - pending.timestamp < 24 * 60 * 60 * 1e3) {
-          ctx.ui.notify(`\u2316 [Anchor \u9000\u51FA\u5B88\u62A4] \u68C0\u6D4B\u5230\u4E0A\u6B21\u5F02\u5E38\u9000\u51FA\u4E14\u6709 ${pending.modifiedCount} \u4E2A\u672A\u63D0\u4EA4\u6539\u52A8\uFF0C\u53EF\u7528 anchor(action="pin") \u56FA\u5316\u4EFB\u52A1\u3002`, "info");
+        const isExpired = Date.now() - pending.timestamp >= 24 * 60 * 60 * 1e3;
+        if (!isExpired && isSameOrSubPath(pending.cwd, ctx.cwd)) {
+          ctx.ui.notify(`\u2316 [Exit Guard] Detected ${pending.modifiedCount} uncommitted changes from previous session exit. Run /pin to record.`, "info");
+          fs.unlinkSync(pendingPath);
+        } else if (isExpired) {
+          fs.unlinkSync(pendingPath);
         }
-        fs.unlinkSync(pendingPath);
       }
     } catch (_) {
     }
     updateAnchorStatusBar(ctx, store);
     if (event.reason !== "resume") {
       updateStartupBanner(ctx, store);
+    } else if (hasActiveUI(ctx)) {
+      try {
+        ctx.ui.setWidget("anchor-startup", void 0);
+      } catch {
+      }
     }
   });
   pi.on("agent_start", async (_event, ctx) => {
@@ -98,7 +107,7 @@ ${contextSnippet}`
     }
     const pathInput = event.input?.path;
     if (typeof pathInput !== "string") return;
-    const touchedPath = normalizePath(pathInput);
+    const touchedPath = normalizePath(pathInput, ctx.cwd);
     const anchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
     const matches = findMatchedAnchors(anchors, [touchedPath]);
     if (matches.length > 0) {
@@ -134,8 +143,8 @@ ${contextSnippet}`
         encoding: "utf-8",
         timeout: 2e3,
         stdio: ["ignore", "pipe", "ignore"]
-      }).trim();
-      const changed = gitStatus.split("\n").map((l) => l.slice(3).trim()).filter(Boolean);
+      }).replace(/[\r\n]+$/, "");
+      const changed = gitStatus.split(/\r?\n/).filter(Boolean).map((l) => l.slice(3).replace(/^"(.*)"$/, "$1").trim()).filter(Boolean);
       for (const f of changed) {
         observer.addTouchedFile(f);
       }
@@ -409,6 +418,12 @@ Mark as completed and archive?`
       const anc = store.create({ title, cwd: ctx.cwd });
       ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"`, "info");
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.registerCommand("anchors", {
+    description: "Inspect and settle active anchors",
+    handler: async (_args, ctx) => {
+      await openAnchorDashboard(ctx, store);
     }
   });
 }
