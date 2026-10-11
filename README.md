@@ -2,14 +2,14 @@
 
 > **A digital sticky note docked below your Pi editor — 0ms instant stick, micro progress bars `[■■□□ 2/4]`, 1-click session teleport (`↪`), and automatic teardown on `git commit`.**
 
+[![npm version](https://img.shields.io/npm/v/pi-anchor?color=blue)](https://www.npmjs.com/package/pi-anchor)
+[![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
+[![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
-[![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
 [![Tests: 10 Passed](https://img.shields.io/badge/Tests-10%20Passed-22c55e.svg)](tests/store.test.ts)
-[![Startup: < 45ms](https://img.shields.io/badge/Startup-%3C%2045ms-success.svg)](package.json)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
-**English** | [简体中文](./README_zh.md)
+**English** | [日本語](./README_ja.md) | [简体中文](./README_zh.md)
 
 ```bash
 pi install npm:pi-anchor
@@ -114,6 +114,19 @@ npm run typecheck  # Strict tsc --noEmit check (0 errors)
 npm test           # Native Node test runner (10/10 passing)
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 ```
+
+---
+
+## Ecosystem: Pi Terminal Suite
+
+Each extension occupies a distinct terminal slot (`aboveEditor`, `belowEditor`, `status-only` footer, and runtime tool hooks) so all four run together with zero widget overlap:
+
+| Package | Terminal Slot & Mechanism | Install |
+| :--- | :--- | :--- |
+| **[`pi-lingual`](https://github.com/3ZEROS12/pi-lingual)** | `二 ⇄ two` `aboveEditor` HUD (≤9 lines, UAX #11 tree layout) & prompt-to-English transformer (0 chat history tokens) | `pi install npm:pi-lingual` |
+| **[`toolflow`](https://github.com/3ZEROS12/toolflow)** | `⌬` Runtime tool hooks — stage-gated MCP mounting & >40-line log dehydration to disk (-95% log tokens) | `pi install npm:toolflow` |
+| **[`pi-tui-status-beautifier`](https://github.com/3ZEROS12/pi-tui-status-beautifier)** | `status-only` footer hook — 6 badge presets, `<80`-col idle folding `(+N idle)`, 0 render-loop disk reads | `pi install npm:pi-tui-status-beautifier` |
+| **[`pi-anchor`](https://github.com/3ZEROS12/anchor)** *(Current)* | `⌖` `belowEditor` 1-line sticky strip, 0ms `pin:` intercept, `[■■□□]` step bar & `↪` session jump | `pi install npm:pi-anchor` |
 
 ---
 

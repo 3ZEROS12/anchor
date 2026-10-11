@@ -2,14 +2,14 @@
 
 > **贴在 Pi 输入框正下方的电子便签 —— `便签: ...` 0ms 瞬贴上屏、长线任务迷你进度条 `[■■□□ 2/4]`、一键切回原对话上下文 (`↪`)，`git commit` 提交代码自动撕便签。**
 
+[![npm version](https://img.shields.io/npm/v/pi-anchor?color=blue)](https://www.npmjs.com/package/pi-anchor)
+[![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
+[![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
-[![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
 [![Tests: 10 Passed](https://img.shields.io/badge/Tests-10%20通过-22c55e.svg)](tests/store.test.ts)
-[![启动耗时: < 45ms](https://img.shields.io/badge/启动耗时-%3C%2045ms-success.svg)](package.json)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
 
-[English](./README.md) | **简体中文**
+[English](./README.md) | [日本語](./README_ja.md) | **简体中文**
 
 ```bash
 pi install npm:pi-anchor
@@ -114,6 +114,19 @@ npm run typecheck  # TypeScript 严格类型检查 (0 错误)
 npm test           # 原生 Node 测试运行器 (10/10 全绿通过)
 npm run build      # tsup 双格式打包与类型声明生成
 ```
+
+---
+
+## 配套生态套件 (Pi Terminal Suite)
+
+四款扩展分别挂载于终端的不同物理槽位（`aboveEditor`、`belowEditor`、`status-only` 底栏与运行时工具钩子），独立运行或组合安装均不产生小部件重叠：
+
+| 插件仓库 | 终端挂载槽位与核心机制 | 一键安装 |
+| :--- | :--- | :--- |
+| **[`pi-lingual`](https://github.com/3ZEROS12/pi-lingual)** | `二 ⇄ two` `aboveEditor` 双语伴学视窗（≤9 行 UAX #11 树状排版）与母语提示词转写（0 会话历史 Token 注入） | `pi install npm:pi-lingual` |
+| **[`toolflow`](https://github.com/3ZEROS12/toolflow)** | `⌬` 运行时工具钩子 —— 按阶段动态挂载重型 MCP，>40 行终端长日志自动落盘脱水（削减 95% 日志 Token） | `pi install npm:toolflow` |
+| **[`pi-tui-status-beautifier`](https://github.com/3ZEROS12/pi-tui-status-beautifier)** | `status-only` 底栏微钩子 —— 6 套徽章预设、`<80` 列窄屏折叠 `(+N idle)`、重绘循环 0 磁盘读取 | `pi install npm:pi-tui-status-beautifier` |
+| **[`pi-anchor`](https://github.com/3ZEROS12/anchor)** *(当前)* | `⌖` `belowEditor` 1 行常驻便签条、0ms `pin:` 输入拦截、迷你进度条 `[■■□□]` 与原会话跳转 `↪` | `pi install npm:pi-anchor` |
 
 ---
 
