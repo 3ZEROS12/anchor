@@ -5,6 +5,7 @@ import {
   AnchorStore,
   findMatchedAnchors,
   isAnchorTargetingWorkspace,
+  isSameOrSubPath,
   makeSafeTaskAnnotation,
   matchesCommitMessage,
   normalizePath,
@@ -193,15 +194,33 @@ export default function (pi: ExtensionAPI) {
   });
 
   // 4. Clever Touches on Tool Execution:
-  //    (a) Auto-tear off sticky notes on matching `git commit`
-  //    (b) Slip a 1-line comment whisper when reading/editing a matching file & bind current sessionFile
+  //    (a) Auto-Bridge for `todo` tool (`@juicesharp/rpiv-todo` / built-in `todo`):
+  //        Mirrors unfinished session todos into a persistent cross-session checkpoint, and auto-clears when 100% done!
+  //    (b) Auto-tear off sticky notes on matching `git commit`
+  //    (c) Slip a 1-line comment whisper when reading/editing a matching file & bind current sessionFile
   pi.on('tool_result', async (event: any, ctx: ExtensionContext) => {
     if (event.isError) return;
 
     const lowerTool = String(event.toolName || '').toLowerCase();
     const currentSessionFile = getSessionFileSafe(ctx);
 
-    // (a) Real-time auto-tear on `git commit -m "..."`
+    // (a) Auto-Bridge for intra-session `todo` tool
+    if (lowerTool === 'todo') {
+      const tasks = event?.details?.tasks;
+      if (Array.isArray(tasks)) {
+        const syncRes = store.syncFromTodoTool(tasks, {
+          cwd: ctx.cwd,
+          sessionFile: currentSessionFile,
+          recentFiles: recentSessionFiles
+        });
+        if (syncRes.status !== 'noop') {
+          updateAnchorStatusBar(ctx, store);
+        }
+      }
+      return;
+    }
+
+    // (b) Real-time auto-tear on `git commit -m "..."`
     if (lowerTool === 'bash' || lowerTool === 'powershell') {
       const cmd = String((event.input as any)?.command || '');
       if (cmd.includes('git commit')) {
@@ -521,6 +540,43 @@ export default function (pi: ExtensionAPI) {
     description: 'View sticky notes',
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
       await openAnchorDashboard(ctx, store);
+    }
+  });
+
+  // 1-click Session Time-Machine: `/back` (or `/back 1`) jumps straight to the saved session of an unfinished note/todo checkpoint
+  pi.registerCommand('back', {
+    description: 'Jump back to the conversation session of the latest unfinished note or todo checkpoint (/back [id])',
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const targetArg = (args || '').trim();
+      const currentSession = getSessionFileSafe(ctx);
+
+      if (targetArg) {
+        const resolvedId = resolveAnchorTarget(store, targetArg, ctx.cwd);
+        const note = resolvedId ? store.get(resolvedId) : undefined;
+        if (!note || !note.sessionFile || !fs.existsSync(note.sessionFile)) {
+          ctx.ui.notify(`⌖ No saved session found for #${targetArg}`, 'error');
+          return;
+        }
+        await ctx.switchSession(note.sessionFile);
+        return;
+      }
+
+      const candidates = sortAnchorsForDisplay(
+        store.list({ cwd: ctx.cwd, all: true }).filter(a => a.status === 'active' || a.status === 'sleeping'),
+        ctx.cwd
+      );
+      const jumpTarget = candidates.find(a =>
+        a.sessionFile &&
+        fs.existsSync(a.sessionFile) &&
+        (!currentSession || !isSameOrSubPath(a.sessionFile, currentSession))
+      );
+
+      if (!jumpTarget || !jumpTarget.sessionFile) {
+        ctx.ui.notify('⌖ No other linked conversation session found to jump back to.', 'info');
+        return;
+      }
+
+      await ctx.switchSession(jumpTarget.sessionFile);
     }
   });
 }

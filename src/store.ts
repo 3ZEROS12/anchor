@@ -8,6 +8,7 @@ import {
   type AnchorProgress,
   type AnchorStatus,
   type AnchorStoreState,
+  type TodoTaskItem,
   type TouchMatchResult,
   QUIET_AFTER_DAYS,
   MS_PER_DAY
@@ -291,12 +292,16 @@ export function renderColdStartAnchorsContext(
 
   const lines = activeNotes.map(a => {
     const num = a.id.replace(/^anc-/, '');
+    const tag = a.source === 'todo-sync' ? `[Todo Checkpoint · ${a.project}]` : `[${a.project}]`;
     const files = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(', ')})` : '';
+    const nextStep = a.progress?.steps && a.progress.steps[a.progress.done] && a.progress.steps[a.progress.done] !== a.title
+      ? ` · current/next: ${a.progress.steps[a.progress.done]}`
+      : '';
     const prog = a.progress
-      ? ` [${a.progress.done}/${a.progress.total}${a.progress.steps && a.progress.steps[a.progress.done] ? ` · next: ${a.progress.steps[a.progress.done]}` : ''}]`
+      ? ` [${a.progress.done}/${a.progress.total}${nextStep}]`
       : '';
     const desc = a.description ? ` — ${a.description}` : '';
-    return `• #${num} [${a.project}] ${a.title}${prog}${files}${desc}`;
+    return `• #${num} ${tag} ${a.title}${prog}${files}${desc}`;
   });
 
   return [
@@ -484,6 +489,7 @@ export class AnchorStore {
     title: string;
     description?: string;
     priority?: AnchorPriority;
+    source?: 'manual' | 'todo-sync';
     cwd?: string;
     project?: string;
     files?: string[];
@@ -520,6 +526,7 @@ export class AnchorStore {
         description: input.description?.trim(),
         priority: input.priority || 'p1',
         status: 'active',
+        ...(input.source ? { source: input.source } : {}),
         project: projectName,
         cwd,
         createdAt: now,
@@ -646,6 +653,120 @@ export class AnchorStore {
       state.anchors[idx] = current;
       this.saveState(state);
       return { anchor: current, completed: nextDone >= total };
+    });
+  }
+
+  /**
+   * Clever Touch 4 (Todo-Bridge): Automatically mirror intra-session `todo` tool lists
+   * into a cross-session checkpoint!
+   * - While tasks are in_progress/pending: updates the live `[■■□□ done/total]` checkpoint on disk;
+   * - When all tasks in the todo list reach `completed`: automatically tears off the checkpoint!
+   */
+  public syncFromTodoTool(
+    tasks: TodoTaskItem[],
+    options: { cwd?: string; sessionFile?: string; recentFiles?: string[] } = {}
+  ): { status: 'synced' | 'completed' | 'noop'; anchor?: Anchor } {
+    if (!Array.isArray(tasks)) return { status: 'noop' };
+
+    const visible = tasks.filter(t => t && typeof t.subject === 'string' && t.status !== 'deleted');
+    const normCwd = options.cwd ? normalizePath(options.cwd) : '';
+    const normSession = options.sessionFile ? normalizePath(options.sessionFile) : undefined;
+
+    return this.withLock(() => {
+      const state = this.loadState();
+      const existingIdx = state.anchors.findIndex(a =>
+        a.source === 'todo-sync' &&
+        ((normSession && a.sessionFile === normSession) || (normCwd && isSameOrSubPath(a.cwd, normCwd)))
+      );
+
+      // 1. If todo list was cleared or 100% completed, auto-tear off the synced checkpoint
+      const completedTasks = visible.filter(t => t.status === 'completed');
+      const unfinishedTasks = visible.filter(t => t.status !== 'completed');
+
+      if (visible.length === 0 || unfinishedTasks.length === 0) {
+        if (existingIdx !== -1) {
+          const [settled] = state.anchors.splice(existingIdx, 1);
+          settled.status = 'settled';
+          settled.updatedAt = Date.now();
+          settled.evidence = {
+            settledAt: Date.now(),
+            settledBy: 'todo-complete',
+            summary: `All ${completedTasks.length} session todo(s) completed`
+          };
+          this.ensureDirs();
+          fs.appendFileSync(this.archivePath, JSON.stringify(settled) + '\n', 'utf-8');
+          this.saveState(state);
+          return { status: 'completed', anchor: settled };
+        }
+        return { status: 'noop' };
+      }
+
+      // 2. Active unfinished todos exist: build live progress & next-step snapshot
+      const inProgress = unfinishedTasks.find(t => t.status === 'in_progress') || unfinishedTasks[0];
+      const orderedSteps = [
+        ...completedTasks.map(t => t.subject.trim()),
+        ...unfinishedTasks.filter(t => t.status === 'in_progress').map(t => t.subject.trim()),
+        ...unfinishedTasks.filter(t => t.status === 'pending').map(t => t.subject.trim())
+      ];
+      const progress: AnchorProgress = {
+        done: completedTasks.length,
+        total: visible.length,
+        steps: orderedSteps
+      };
+
+      const remainingSummary = unfinishedTasks
+        .slice(0, 3)
+        .map(t => t.subject.trim())
+        .join(' → ');
+      const headline = inProgress.subject.trim();
+      const now = Date.now();
+
+      if (existingIdx !== -1) {
+        const current = state.anchors[existingIdx];
+        current.title = headline;
+        current.description = `Remaining (${unfinishedTasks.length}/${visible.length}): ${remainingSummary}`;
+        current.progress = progress;
+        current.status = 'active';
+        current.updatedAt = now;
+        current.lastTouchedAt = now;
+        if (normSession) current.sessionFile = normSession;
+        if (options.recentFiles && options.recentFiles.length > 0) {
+          const merged = Array.from(new Set([...options.recentFiles.map(f => normalizePath(f)), ...current.files])).slice(0, 5);
+          current.files = merged;
+        }
+        state.anchors[existingIdx] = current;
+        this.saveState(state);
+        return { status: 'synced', anchor: current };
+      }
+
+      // Create new todo-synced checkpoint
+      const id = this.generateId(state);
+      const inferredFiles = (options.recentFiles && options.recentFiles.length > 0)
+        ? options.recentFiles.map(f => normalizePath(f)).filter(Boolean)
+        : extractPathsFromText(orderedSteps.join(' '));
+      const projectName = normCwd ? path.basename(normCwd) : 'global';
+
+      const created: Anchor = {
+        id,
+        title: headline,
+        description: `Remaining (${unfinishedTasks.length}/${visible.length}): ${remainingSummary}`,
+        priority: 'p1',
+        status: 'active',
+        source: 'todo-sync',
+        project: projectName,
+        cwd: normCwd,
+        createdAt: now,
+        updatedAt: now,
+        lastTouchedAt: now,
+        files: inferredFiles,
+        tags: ['todo-sync'],
+        ...(normSession ? { sessionFile: normSession } : {}),
+        progress
+      };
+
+      state.anchors.push(created);
+      this.saveState(state);
+      return { status: 'synced', anchor: created };
     });
   }
 

@@ -34,7 +34,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-XL3YH2AF.js";
+} from "./chunk-6NYXKR4F.js";
 export {
   AnchorStore,
   COMMENT_FORMATS,

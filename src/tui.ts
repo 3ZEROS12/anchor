@@ -226,14 +226,17 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
           const a = sorted[0];
           const num = a.id.replace(/^anc-/, '');
           const bar = a.progress ? `${fg('accent', formatProgressBar(a.progress))} ` : '';
-          const nextStep = a.progress?.steps && a.progress.steps[a.progress.done]
-            ? fg('muted', ` ▸ ${a.progress.steps[a.progress.done]}`)
-            : '';
+          const candidateStep = a.progress?.steps
+            ? (a.progress.steps[a.progress.done] !== a.title
+                ? a.progress.steps[a.progress.done]
+                : a.progress.steps[a.progress.done + 1])
+            : undefined;
+          const nextStep = candidateStep ? fg('muted', ` ▸ ${candidateStep}`) : '';
           const origin = formatOrigin(a);
           const sessionIcon = a.sessionFile ? ' ↪' : '';
           const prefix = `${fg('accent', '⌖')} ${fg('dim', `#${num}`)} ${bar}`;
           const suffix = ` ${fg('muted', `(${origin}${sessionIcon})`)}`;
-          const availTitle = Math.max(12, width - getDisplayWidth(prefix) - getDisplayWidth( nextStep) - getDisplayWidth(suffix) - 2);
+          const availTitle = Math.max(12, width - getDisplayWidth(prefix) - getDisplayWidth(nextStep) - getDisplayWidth(suffix) - 2);
           const titleClipped = truncateToWidth(a.title, availTitle);
           return [truncateToWidth(`${prefix}${titleClipped}${nextStep}${suffix}`, width)];
         }

@@ -1,7 +1,7 @@
 {
   "name": "pi-anchor",
-  "version": "0.5.1",
-  "description": "A digital sticky note docked below your Pi editor — stick notes in 0ms (pin: ...), track long tasks with micro progress bars [■■□□], jump back to the original session (↪), and auto-tear off on git commit.",
+  "version": "0.6.0",
+  "description": "Cross-session sticky note & auto-todo checkpoint for Pi — automatically saves unfinished todos across terminal restarts, docks a 1-line progress bar [■■□□] below your editor, jumps back to the original session (/back), and auto-clears on git commit.",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",

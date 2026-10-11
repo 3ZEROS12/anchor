@@ -17,10 +17,18 @@ export interface AnchorProgress {
 
 export interface AnchorEvidence {
   settledAt?: number;
-  settledBy?: 'commit' | 'manual' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
+  settledBy?: 'commit' | 'manual' | 'todo-complete' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
   commitHash?: string;
   summary?: string;
   touchedFiles?: string[];
+}
+
+export interface TodoTaskItem {
+  id: number;
+  subject: string;
+  status: 'pending' | 'in_progress' | 'completed' | 'deleted';
+  activeForm?: string;
+  description?: string;
 }
 
 export interface Anchor {
@@ -32,6 +40,8 @@ export interface Anchor {
   description?: string;
   /** Lifecycle status: 'active' (recent) or 'sleeping' (>7d untouched, 0 prompt tokens) */
   status: AnchorStatus;
+  /** Origin source: 'manual' (user/tool pinned) or 'todo-sync' (auto-bridged from unfinished session todos) */
+  source?: 'manual' | 'todo-sync';
   /** Short workspace label (e.g. 'anchor', 'College/优化', or 'global') */
   project: string;
   /** Workspace directory path where the note applies */

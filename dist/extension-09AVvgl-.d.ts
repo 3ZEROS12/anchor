@@ -16,10 +16,17 @@ interface AnchorProgress {
 }
 interface AnchorEvidence {
     settledAt?: number;
-    settledBy?: 'commit' | 'manual' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
+    settledBy?: 'commit' | 'manual' | 'todo-complete' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
     commitHash?: string;
     summary?: string;
     touchedFiles?: string[];
+}
+interface TodoTaskItem {
+    id: number;
+    subject: string;
+    status: 'pending' | 'in_progress' | 'completed' | 'deleted';
+    activeForm?: string;
+    description?: string;
 }
 interface Anchor {
     /** Sequential identifier, e.g. 'anc-1' */
@@ -30,6 +37,8 @@ interface Anchor {
     description?: string;
     /** Lifecycle status: 'active' (recent) or 'sleeping' (>7d untouched, 0 prompt tokens) */
     status: AnchorStatus;
+    /** Origin source: 'manual' (user/tool pinned) or 'todo-sync' (auto-bridged from unfinished session todos) */
+    source?: 'manual' | 'todo-sync';
     /** Short workspace label (e.g. 'anchor', 'College/优化', or 'global') */
     project: string;
     /** Workspace directory path where the note applies */
@@ -153,6 +162,7 @@ declare class AnchorStore {
         title: string;
         description?: string;
         priority?: AnchorPriority;
+        source?: 'manual' | 'todo-sync';
         cwd?: string;
         project?: string;
         files?: string[];
@@ -177,6 +187,20 @@ declare class AnchorStore {
     step(id: string, delta?: number, explicitTotal?: number): {
         anchor: Anchor;
         completed: boolean;
+    };
+    /**
+     * Clever Touch 4 (Todo-Bridge): Automatically mirror intra-session `todo` tool lists
+     * into a cross-session checkpoint!
+     * - While tasks are in_progress/pending: updates the live `[■■□□ done/total]` checkpoint on disk;
+     * - When all tasks in the todo list reach `completed`: automatically tears off the checkpoint!
+     */
+    syncFromTodoTool(tasks: TodoTaskItem[], options?: {
+        cwd?: string;
+        sessionFile?: string;
+        recentFiles?: string[];
+    }): {
+        status: 'synced' | 'completed' | 'noop';
+        anchor?: Anchor;
     };
     /**
      * Tear off (settle) a completed sticky note and archive it to archive.jsonl
@@ -207,4 +231,4 @@ declare function parseQuickNoteInput(text: string): string | null;
 declare function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?: string): string | undefined;
 declare function export_default(pi: ExtensionAPI): void;
 
-export { type Anchor as A, COMMENT_FORMATS as C, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type TouchMatchResult as T, type AnchorProgress as a, AnchorStore as b, type AnchorEvidence as c, type AnchorPriority as d, type AnchorStatus as e, type AnchorStoreState as f, acquireSyncLock as g, atomicRenameWithRetry as h, extractPathsFromText as i, extractProgressFromText as j, findMatchedAnchors as k, getDefaultStorageDir as l, globToRegExp as m, isAnchorTargetingWorkspace as n, isSameOrSubPath as o, makeSafeTaskAnnotation as p, matchAnchorAgainstTouchedFiles as q, matchesCommitMessage as r, normalizePath as s, parseAnchorCommandInput as t, parseQuickNoteInput as u, renderActiveAnchorsContext as v, renderColdStartAnchorsContext as w, resolveAnchorTarget as x, sweepQuietNotes as y, export_default as z };
+export { type Anchor as A, export_default as B, COMMENT_FORMATS as C, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type TodoTaskItem as T, type AnchorProgress as a, AnchorStore as b, type AnchorEvidence as c, type AnchorPriority as d, type AnchorStatus as e, type AnchorStoreState as f, type TouchMatchResult as g, acquireSyncLock as h, atomicRenameWithRetry as i, extractPathsFromText as j, extractProgressFromText as k, findMatchedAnchors as l, getDefaultStorageDir as m, globToRegExp as n, isAnchorTargetingWorkspace as o, isSameOrSubPath as p, makeSafeTaskAnnotation as q, matchAnchorAgainstTouchedFiles as r, matchesCommitMessage as s, normalizePath as t, parseAnchorCommandInput as u, parseQuickNoteInput as v, renderActiveAnchorsContext as w, renderColdStartAnchorsContext as x, resolveAnchorTarget as y, sweepQuietNotes as z };

@@ -295,10 +295,12 @@ function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
   if (activeNotes.length === 0) return "";
   const lines = activeNotes.map((a) => {
     const num = a.id.replace(/^anc-/, "");
+    const tag = a.source === "todo-sync" ? `[Todo Checkpoint \xB7 ${a.project}]` : `[${a.project}]`;
     const files = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(", ")})` : "";
-    const prog = a.progress ? ` [${a.progress.done}/${a.progress.total}${a.progress.steps && a.progress.steps[a.progress.done] ? ` \xB7 next: ${a.progress.steps[a.progress.done]}` : ""}]` : "";
+    const nextStep = a.progress?.steps && a.progress.steps[a.progress.done] && a.progress.steps[a.progress.done] !== a.title ? ` \xB7 current/next: ${a.progress.steps[a.progress.done]}` : "";
+    const prog = a.progress ? ` [${a.progress.done}/${a.progress.total}${nextStep}]` : "";
     const desc = a.description ? ` \u2014 ${a.description}` : "";
-    return `\u2022 #${num} [${a.project}] ${a.title}${prog}${files}${desc}`;
+    return `\u2022 #${num} ${tag} ${a.title}${prog}${files}${desc}`;
   });
   return [
     `<sticky-notes count="${activeNotes.length}">`,
@@ -489,6 +491,7 @@ var AnchorStore = class {
         description: input.description?.trim(),
         priority: input.priority || "p1",
         status: "active",
+        ...input.source ? { source: input.source } : {},
         project: projectName,
         cwd,
         createdAt: now,
@@ -594,6 +597,97 @@ var AnchorStore = class {
       state.anchors[idx] = current;
       this.saveState(state);
       return { anchor: current, completed: nextDone >= total };
+    });
+  }
+  /**
+   * Clever Touch 4 (Todo-Bridge): Automatically mirror intra-session `todo` tool lists
+   * into a cross-session checkpoint!
+   * - While tasks are in_progress/pending: updates the live `[■■□□ done/total]` checkpoint on disk;
+   * - When all tasks in the todo list reach `completed`: automatically tears off the checkpoint!
+   */
+  syncFromTodoTool(tasks, options = {}) {
+    if (!Array.isArray(tasks)) return { status: "noop" };
+    const visible = tasks.filter((t) => t && typeof t.subject === "string" && t.status !== "deleted");
+    const normCwd = options.cwd ? normalizePath(options.cwd) : "";
+    const normSession = options.sessionFile ? normalizePath(options.sessionFile) : void 0;
+    return this.withLock(() => {
+      const state = this.loadState();
+      const existingIdx = state.anchors.findIndex(
+        (a) => a.source === "todo-sync" && (normSession && a.sessionFile === normSession || normCwd && isSameOrSubPath(a.cwd, normCwd))
+      );
+      const completedTasks = visible.filter((t) => t.status === "completed");
+      const unfinishedTasks = visible.filter((t) => t.status !== "completed");
+      if (visible.length === 0 || unfinishedTasks.length === 0) {
+        if (existingIdx !== -1) {
+          const [settled] = state.anchors.splice(existingIdx, 1);
+          settled.status = "settled";
+          settled.updatedAt = Date.now();
+          settled.evidence = {
+            settledAt: Date.now(),
+            settledBy: "todo-complete",
+            summary: `All ${completedTasks.length} session todo(s) completed`
+          };
+          this.ensureDirs();
+          import_node_fs.default.appendFileSync(this.archivePath, JSON.stringify(settled) + "\n", "utf-8");
+          this.saveState(state);
+          return { status: "completed", anchor: settled };
+        }
+        return { status: "noop" };
+      }
+      const inProgress = unfinishedTasks.find((t) => t.status === "in_progress") || unfinishedTasks[0];
+      const orderedSteps = [
+        ...completedTasks.map((t) => t.subject.trim()),
+        ...unfinishedTasks.filter((t) => t.status === "in_progress").map((t) => t.subject.trim()),
+        ...unfinishedTasks.filter((t) => t.status === "pending").map((t) => t.subject.trim())
+      ];
+      const progress = {
+        done: completedTasks.length,
+        total: visible.length,
+        steps: orderedSteps
+      };
+      const remainingSummary = unfinishedTasks.slice(0, 3).map((t) => t.subject.trim()).join(" \u2192 ");
+      const headline = inProgress.subject.trim();
+      const now = Date.now();
+      if (existingIdx !== -1) {
+        const current = state.anchors[existingIdx];
+        current.title = headline;
+        current.description = `Remaining (${unfinishedTasks.length}/${visible.length}): ${remainingSummary}`;
+        current.progress = progress;
+        current.status = "active";
+        current.updatedAt = now;
+        current.lastTouchedAt = now;
+        if (normSession) current.sessionFile = normSession;
+        if (options.recentFiles && options.recentFiles.length > 0) {
+          const merged = Array.from(/* @__PURE__ */ new Set([...options.recentFiles.map((f) => normalizePath(f)), ...current.files])).slice(0, 5);
+          current.files = merged;
+        }
+        state.anchors[existingIdx] = current;
+        this.saveState(state);
+        return { status: "synced", anchor: current };
+      }
+      const id = this.generateId(state);
+      const inferredFiles = options.recentFiles && options.recentFiles.length > 0 ? options.recentFiles.map((f) => normalizePath(f)).filter(Boolean) : extractPathsFromText(orderedSteps.join(" "));
+      const projectName = normCwd ? import_node_path.default.basename(normCwd) : "global";
+      const created = {
+        id,
+        title: headline,
+        description: `Remaining (${unfinishedTasks.length}/${visible.length}): ${remainingSummary}`,
+        priority: "p1",
+        status: "active",
+        source: "todo-sync",
+        project: projectName,
+        cwd: normCwd,
+        createdAt: now,
+        updatedAt: now,
+        lastTouchedAt: now,
+        files: inferredFiles,
+        tags: ["todo-sync"],
+        ...normSession ? { sessionFile: normSession } : {},
+        progress
+      };
+      state.anchors.push(created);
+      this.saveState(state);
+      return { status: "synced", anchor: created };
     });
   }
   /**
@@ -814,7 +908,8 @@ function updateStartupBanner(ctx, store) {
           const a = sorted[0];
           const num = a.id.replace(/^anc-/, "");
           const bar = a.progress ? `${fg("accent", formatProgressBar(a.progress))} ` : "";
-          const nextStep = a.progress?.steps && a.progress.steps[a.progress.done] ? fg("muted", ` \u25B8 ${a.progress.steps[a.progress.done]}`) : "";
+          const candidateStep = a.progress?.steps ? a.progress.steps[a.progress.done] !== a.title ? a.progress.steps[a.progress.done] : a.progress.steps[a.progress.done + 1] : void 0;
+          const nextStep = candidateStep ? fg("muted", ` \u25B8 ${candidateStep}`) : "";
           const origin = formatOrigin(a);
           const sessionIcon = a.sessionFile ? " \u21AA" : "";
           const prefix = `${fg("accent", "\u2316")} ${fg("dim", `#${num}`)} ${bar}`;
@@ -1065,6 +1160,20 @@ ${snippet}` };
     if (event.isError) return;
     const lowerTool = String(event.toolName || "").toLowerCase();
     const currentSessionFile = getSessionFileSafe(ctx);
+    if (lowerTool === "todo") {
+      const tasks = event?.details?.tasks;
+      if (Array.isArray(tasks)) {
+        const syncRes = store.syncFromTodoTool(tasks, {
+          cwd: ctx.cwd,
+          sessionFile: currentSessionFile,
+          recentFiles: recentSessionFiles
+        });
+        if (syncRes.status !== "noop") {
+          updateAnchorStatusBar(ctx, store);
+        }
+      }
+      return;
+    }
     if (lowerTool === "bash" || lowerTool === "powershell") {
       const cmd = String(event.input?.command || "");
       if (cmd.includes("git commit")) {
@@ -1358,6 +1467,35 @@ ${snippet}` };
     description: "View sticky notes",
     handler: async (_args, ctx) => {
       await openAnchorDashboard(ctx, store);
+    }
+  });
+  pi.registerCommand("back", {
+    description: "Jump back to the conversation session of the latest unfinished note or todo checkpoint (/back [id])",
+    handler: async (args, ctx) => {
+      const targetArg = (args || "").trim();
+      const currentSession = getSessionFileSafe(ctx);
+      if (targetArg) {
+        const resolvedId = resolveAnchorTarget(store, targetArg, ctx.cwd);
+        const note = resolvedId ? store.get(resolvedId) : void 0;
+        if (!note || !note.sessionFile || !import_node_fs3.default.existsSync(note.sessionFile)) {
+          ctx.ui.notify(`\u2316 No saved session found for #${targetArg}`, "error");
+          return;
+        }
+        await ctx.switchSession(note.sessionFile);
+        return;
+      }
+      const candidates = sortAnchorsForDisplay(
+        store.list({ cwd: ctx.cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping"),
+        ctx.cwd
+      );
+      const jumpTarget = candidates.find(
+        (a) => a.sessionFile && import_node_fs3.default.existsSync(a.sessionFile) && (!currentSession || !isSameOrSubPath(a.sessionFile, currentSession))
+      );
+      if (!jumpTarget || !jumpTarget.sessionFile) {
+        ctx.ui.notify("\u2316 No other linked conversation session found to jump back to.", "info");
+        return;
+      }
+      await ctx.switchSession(jumpTarget.sessionFile);
     }
   });
 }

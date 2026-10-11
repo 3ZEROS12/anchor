@@ -255,3 +255,52 @@ test('v0.5.0 Progress Bar & Session Bookmark - parses inline progress ratios/ste
   }
 });
 
+test('v0.6.0 Auto-Todo Bridge - automatically mirrors unfinished todo snapshots across sessions and auto-settles at 100%', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+
+    // 1. Simulate rpiv-todo / todo tool emitting a 3-step snapshot (1 completed, 1 in_progress, 1 pending)
+    const sync1 = store.syncFromTodoTool(
+      [
+        { id: 1, subject: 'Extract auth interface', status: 'completed' },
+        { id: 2, subject: 'Switch token to HttpOnly cookie', status: 'in_progress' },
+        { id: 3, subject: 'Add integration tests', status: 'pending' }
+      ],
+      {
+        cwd: '/workspace/app',
+        sessionFile: '/home/user/.pi/sessions/sess-auth.jsonl',
+        recentFiles: ['src/auth.ts']
+      }
+    );
+
+    assert.strictEqual(sync1.status, 'synced');
+    assert.ok(sync1.anchor);
+    assert.strictEqual(sync1.anchor!.source, 'todo-sync');
+    assert.strictEqual(sync1.anchor!.title, 'Switch token to HttpOnly cookie');
+    assert.deepStrictEqual(sync1.anchor!.progress?.done, 1);
+    assert.deepStrictEqual(sync1.anchor!.progress?.total, 3);
+    assert.strictEqual(sync1.anchor!.sessionFile, '/home/user/.pi/sessions/sess-auth.jsonl');
+    assert.deepStrictEqual(sync1.anchor!.files, ['src/auth.ts']);
+
+    // 2. When all todos in the session reach completed (3/3), the checkpoint automatically tears itself off!
+    const syncDone = store.syncFromTodoTool(
+      [
+        { id: 1, subject: 'Extract auth interface', status: 'completed' },
+        { id: 2, subject: 'Switch token to HttpOnly cookie', status: 'completed' },
+        { id: 3, subject: 'Add integration tests', status: 'completed' }
+      ],
+      {
+        cwd: '/workspace/app',
+        sessionFile: '/home/user/.pi/sessions/sess-auth.jsonl'
+      }
+    );
+
+    assert.strictEqual(syncDone.status, 'completed');
+    assert.strictEqual(store.list({ cwd: '/workspace/app' }).length, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+
