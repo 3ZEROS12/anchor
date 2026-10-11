@@ -1,11 +1,12 @@
 # ⌖ Anchor
 
-> **关掉终端也不丢待办 —— 一句话钉住跨会话任务（`/pin`），触碰关联代码时自动提醒 AI，提交代码（`git commit`）自动销账，0 `TODO.md` 污染。**
+> **面向 Pi Coding Agent 的「小巧 · 自主 · 持久」跨会话任务记忆**  
+> 一句话钉住待办（`/pin`），进入目标工程或触碰关联文件自动唤醒，会话内执行 `git commit` 当场实时自动销账 —— **0 `TODO.md` 仓库污染，0 闲置 Token 损耗**。
 
 [![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
 [![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
 [![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
-[![Tests: 31 Passed](https://img.shields.io/badge/Tests-31%20通过-22c55e.svg)](tests/store.test.ts)
+[![Tests: 34 Passed](https://img.shields.io/badge/Tests-34%20通过-22c55e.svg)](tests/store.test.ts)
 [![启动耗时: < 90ms](https://img.shields.io/badge/启动耗时-%3C%2090ms-success.svg)](package.json)
 [![零仓库污染](https://img.shields.io/badge/存储-零仓库污染-success.svg)](#1-绝对零仓库污染与跨进程文件锁)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
@@ -20,25 +21,28 @@ pi install npm:pi-anchor
   <img src="assets/hero-zh.svg" alt="Anchor 终端仪表盘实录" width="820">
 </p>
 
-### 3 步看懂它怎么工作
-
-1. **随手钉住待办**：直接对 AI 说 *“记一下明天把鉴权改成 HttpOnly Cookie”*，或敲 `/pin 重构鉴权模块 --due tomorrow`。保存在全局 `~/.anchor/state.json`，不在项目里留任何 `TODO.md` 垃圾文件。
-2. **下次开终端自动唤醒（平时 0 Token）**：重新打开 Pi 时，编辑器上方展示 3 行今日聚焦清单，并在第 1 轮自动提醒 AI；从第 2 轮起 **0 Token 损耗**，只有当 AI 读/改关联代码文件时才附带 1 行注释精准提醒。
-3. **提交代码自动销账**：`git commit` 提交关联代码、单测命令通过、或敲 `/done 1`，任务自动归档结案。
-
 ```text
-⌖ Anchors (4 active):
+⌖ Anchors (3 active, 1 quiet):
 
-  [Today · 今日聚焦]
-  01  [Today]     今天完成anchor项目后端优化         Desktop     Today         Today 10:02
+  01  [P0]      重构鉴权模块为 HttpOnly Cookie [src/auth.ts]            anchor        Today           Today 10:02
+  02  [P1]      补充并发文件锁单元测试                                  anchor        Tomorrow        Yesterday 21:34
+  03  [P1]      打磨 CLI 交互式极简工程列表                             Desktop       In 2d           Today 10:02
+  04  [Quiet]   College 重构前置查阅外部架构参考库                      College/优化  Quiet (0 tok)   09-28 14:20
 
-  [Upcoming · 近期排期]
-  02  [Upcoming]  明天优化并发文件锁单元测试         Desktop     Tomorrow      Yesterday 21:34
-  03  [Upcoming]  重构鉴权模块为HttpOnly Cookie      Desktop     Tomorrow      Today 10:02
-  04  [Upcoming]  完善CLI交互式仪表盘与TUI组件       Desktop     In 2d         Today 10:02
-
-  Use `anchor done <id>` to complete.
+  Use `anchor done <id>` to complete, or `anchor undo` to restore.
 ```
+
+### 三大核心设计：小巧 · 自主 · 持久
+
+1. **小巧 (Compact · 极简顺手 & 0 闲置 Token)**：
+   - 纯 TypeScript 实现（~20KB 产物，0 外部二进制依赖，不在仓库塞数据库，不开后台常驻进程）。
+   - 砍掉繁琐的四象限与打卡分类，回归一屏看清的优先级工程列表（`/anchor`、`/pin`、`/done 1`）。第 1 轮冷启动简要提醒 AI，第 2 轮起 **0 Token 损耗**。
+2. **自主 (Autonomous · 智能路径识别 & 会话内实时核销)**：
+   - 即使你在别的目录随口记下一句任务，也会自动提取标题/描述里的文件与目录路径并绑定目标工程，下次切换到该目录时自动唤醒。
+   - **不等关闭终端**：会话内一旦执行 `git commit` 或通过测试命令（`verifyCommand`），哪怕没填 `files` 也能根据提交信息当场实时自动核销，状态栏 `⌖` 即刻更新。
+3. **持久 (Persistent · 永不莫名丢任务)**：
+   - 独立托管于全局 `~/.anchor/state.json`，项目 Git 树 100% 纯净。
+   - **绝不因过期而静默删任务**：超过 7 天未触碰的任务自动转为 `[Quiet]` 静默省流态（不在无关会话塞 Prompt），但在 `/anchor` 面板中始终可见，可随时一键唤醒或在进入对应工程时自动激活。
 
 ---
 
@@ -204,7 +208,7 @@ Anchor 选择了一条极度克制的工程路径：把状态移出代码仓库�
 
 ```bash
 npm run typecheck  # TypeScript 严格类型检查 (0 错误)
-npm test           # 全套自动化单元测试 (31/31 全绿通过)
+npm test           # 全套自动化单元测试 (34/34 全绿通过)
 npm run build      # tsup 双格式打包 (ESM/CJS) 与 .d.ts 类型生成
 ```
 

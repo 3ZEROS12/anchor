@@ -1,5 +1,5 @@
-import { a as AnchorStatus, b as Anchor, A as AnchorStore, T as TouchMatchResult, S as SettlementProposal } from './store-BNKjzhS_.js';
-export { c as AnchorDecayPolicy, d as AnchorDurability, e as AnchorEvidence, f as AnchorPriority, g as AnchorStoreState, D as DEFAULT_DECAY_POLICY, h as DURABLE_DECAY_POLICY, E as EPHEMERAL_DECAY_POLICY, i as acquireSyncLock, j as atomicRenameWithRetry, k as detectDurability, l as detectRecurrence, m as detectTargetDate, n as getDefaultStorageDir, o as getEphemeralDecayPolicy, p as getTodayDateString } from './store-BNKjzhS_.js';
+import { a as AnchorStatus, b as Anchor, A as AnchorStore, T as TouchMatchResult, S as SettlementProposal } from './store-t2_TDhJn.js';
+export { c as AnchorDecayPolicy, d as AnchorDurability, e as AnchorEvidence, f as AnchorPriority, g as AnchorStoreState, D as DEFAULT_DECAY_POLICY, h as DURABLE_DECAY_POLICY, E as EPHEMERAL_DECAY_POLICY, i as acquireSyncLock, j as atomicRenameWithRetry, k as detectDurability, l as detectRecurrence, m as detectTargetDate, n as getDefaultStorageDir, o as getEphemeralDecayPolicy, p as getTodayDateString } from './store-t2_TDhJn.js';
 import { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 interface DecayEvaluation {
@@ -36,6 +36,16 @@ declare function normalizePath(filePath: string, baseCwd?: string): string;
  */
 declare function isSameOrSubPath(anchorCwd?: string, targetCwd?: string): boolean;
 /**
+ * Extract explicit file or directory paths mentioned in natural language title/description
+ * (e.g. "D:/College/优化/EXTERNAL_ARCHITECTURE_INSPIRATIONS.md", "src/auth/jwt.ts")
+ */
+declare function extractPathsFromText(text?: string): string[];
+/**
+ * Determine whether an anchor specifically targets a given workspace directory (`targetCwd`),
+ * checking `anchor.cwd`, `anchor.project`, and `anchor.files`.
+ */
+declare function isAnchorTargetingWorkspace(anchor: Anchor, targetCwd?: string): boolean;
+/**
  * Match touched files against an anchor's registered physical patterns
  * Only anchors with explicit files/globs/prefixes are matched against file touches.
  * Anchors with files: [] (pure mental notes or macro tasks) NEVER trigger on file operations.
@@ -47,6 +57,35 @@ declare function matchAnchorAgainstTouchedFiles(anchor: Anchor, touchedFiles: st
  */
 declare function findMatchedAnchors(anchors: Anchor[], touchedFiles: string[]): TouchMatchResult[];
 
+declare class SessionTouchObserver {
+    private touchedFiles;
+    private modifiedFiles;
+    private inspectedFiles;
+    private committed;
+    private commitMessages;
+    clear(): void;
+    /**
+     * Observe and record a tool call invocation, separating inspection from mutation
+     */
+    recordToolCall(toolName: string, input: Record<string, unknown>): void;
+    /**
+     * Add a file path manually (e.g. from git status diff)
+     */
+    addTouchedFile(filePath: string, isModified?: boolean): void;
+    getModifiedFiles(): string[];
+    getInspectedFiles(): string[];
+    getTouchedFiles(): string[];
+    hasCommitted(): boolean;
+    getCommitMessages(): string[];
+    /**
+     * Check if any commit message explicitly references or resolves an anchor
+     */
+    matchesCommit(anchor: Anchor): {
+        matched: boolean;
+        message?: string;
+    };
+}
+
 /**
  * Execute physical verification test command for an anchor
  */
@@ -55,9 +94,18 @@ declare function runPhysicalVerification(anchor: Anchor, cwd: string): {
     output: string;
 };
 /**
- * Generate settlement candidates based on files touched during the session
+ * Real-time autonomous settlement during active session:
+ * Triggered immediately when a non-error shell command runs `git commit` or a matching `verifyCommand`.
+ * Works for BOTH file-bound and file-less (`files: []`) anchors!
  */
-declare function generateSettlementProposals(store: AnchorStore, touchedFiles: string[], cwd?: string): SettlementProposal[];
+declare function tryRealtimeAutoSettle(store: AnchorStore, observer: SessionTouchObserver, cwd?: string, executedCommand?: string): Array<{
+    anchor: Anchor;
+    reason: string;
+}>;
+/**
+ * Generate settlement candidates based on files touched or commits made during the session
+ */
+declare function generateSettlementProposals(store: AnchorStore, touchedFiles: string[], cwd?: string, observer?: SessionTouchObserver): SettlementProposal[];
 /**
  * Format settlement proposal into terminal-ready card
  */
@@ -82,6 +130,14 @@ declare function classifyAnchor(anchor: Anchor, now?: number): AnchorQuadrant;
  * Group active anchors by cognitive quadrant
  */
 declare function groupAnchorsByQuadrant(anchors: Anchor[], now?: number): GroupedAnchors;
+/**
+ * Sort unfinished anchors into a single compact, priority-driven engineering list:
+ * 1. Active before Sleeping (quiet)
+ * 2. Matching current workspace before other workspaces
+ * 3. Due Today / Overdue before open-ended
+ * 4. Priority (P0 -> P1 -> P2)
+ */
+declare function sortAnchorsForDisplay(anchors: Anchor[], cwd?: string, now?: number): Anchor[];
 /**
  * Strip ANSI escape codes from string
  */
@@ -134,7 +190,7 @@ declare function formatRelativeTime(timestamp: number, now?: number): string;
  */
 declare function formatRemainingTtl(anchor: Anchor, now?: number): string | undefined;
 /**
- * Format origin creation workspace folder (provenance: where the task was born/created)
+ * Format origin workspace / project label concisely
  */
 declare function formatOrigin(anchor: Anchor | string): string;
 /**
@@ -148,38 +204,9 @@ declare function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore
  */
 declare function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): void;
 /**
- * Clean, columnar-aligned checklist with Target Date and Creation Time columns
+ * Clean, flat priority-sorted engineering checklist (includes both active and quiet/sleeping tasks so nothing is ever lost)
  */
 declare function openAnchorDashboard(ctx: ExtensionContext, store: AnchorStore): Promise<void>;
-
-declare class SessionTouchObserver {
-    private touchedFiles;
-    private modifiedFiles;
-    private inspectedFiles;
-    private committed;
-    private commitMessages;
-    clear(): void;
-    /**
-     * Observe and record a tool call invocation, separating inspection from mutation
-     */
-    recordToolCall(toolName: string, input: Record<string, unknown>): void;
-    /**
-     * Add a file path manually (e.g. from git status diff)
-     */
-    addTouchedFile(filePath: string, isModified?: boolean): void;
-    getModifiedFiles(): string[];
-    getInspectedFiles(): string[];
-    getTouchedFiles(): string[];
-    hasCommitted(): boolean;
-    getCommitMessages(): string[];
-    /**
-     * Check if any commit message explicitly references or resolves an anchor
-     */
-    matchesCommit(anchor: Anchor): {
-        matched: boolean;
-        message?: string;
-    };
-}
 
 /**
  * Universal multi-language comment generator.
@@ -245,4 +272,4 @@ declare class AnchorProtocol {
     };
 }
 
-export { type AgentAdapter, Anchor, AnchorProtocol, type AnchorQuadrant, AnchorStatus, AnchorStore, COMMENT_FORMATS, type DecayEvaluation, type GroupedAnchors, SessionTouchObserver, SettlementProposal, type SweepResult, TouchMatchResult, classifyAnchor, evaluateAnchorDecay, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDisplayWidth, globToRegExp, groupAnchorsByQuadrant, hasActiveUI, isSameOrSubPath, makeSafeTaskAnnotation, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, stripAnsi, sweepStore, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };
+export { type AgentAdapter, Anchor, AnchorProtocol, type AnchorQuadrant, AnchorStatus, AnchorStore, COMMENT_FORMATS, type DecayEvaluation, type GroupedAnchors, SessionTouchObserver, SettlementProposal, type SweepResult, TouchMatchResult, classifyAnchor, evaluateAnchorDecay, extractPathsFromText, findMatchedAnchors, formatCreationTime, formatOrigin, formatRelativeTime, formatRemainingTtl, formatSettlementCard, formatTargetDate, generateSettlementProposals, getDisplayWidth, globToRegExp, groupAnchorsByQuadrant, hasActiveUI, isAnchorTargetingWorkspace, isSameOrSubPath, makeSafeTaskAnnotation, matchAnchorAgainstTouchedFiles, normalizePath, openAnchorDashboard, padToWidth, renderActiveAnchorsContext, renderColdStartAnchorsContext, runPhysicalVerification, sortAnchorsForDisplay, stripAnsi, sweepStore, truncateToWidth, tryRealtimeAutoSettle, updateAnchorStatusBar, updateStartupBanner };

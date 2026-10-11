@@ -4,19 +4,21 @@ import {
   detectTargetDate,
   findMatchedAnchors,
   generateSettlementProposals,
-  groupAnchorsByQuadrant,
   hasActiveUI,
+  isAnchorTargetingWorkspace,
   isSameOrSubPath,
   makeSafeTaskAnnotation,
   normalizePath,
   openAnchorDashboard,
   renderColdStartAnchorsContext,
   runPhysicalVerification,
+  sortAnchorsForDisplay,
   sweepStore,
   truncateToWidth,
+  tryRealtimeAutoSettle,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-G72UHPBN.js";
+} from "./chunk-Q7IILJFA.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
@@ -58,16 +60,10 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   const clean = idOrIndex.trim().replace(/^#/, "");
   if (/^\d+$/.test(clean)) {
     const seqIndex = parseInt(clean, 10);
-    const active = store.list({ status: "active", cwd });
-    const groups = groupAnchorsByQuadrant(active);
-    const sortedActive = [
-      ...groups.today,
-      ...groups.upcoming,
-      ...groups.habits,
-      ...groups.backlog
-    ];
-    if (seqIndex >= 1 && seqIndex <= sortedActive.length) {
-      return sortedActive[seqIndex - 1].id;
+    const visible = store.list({ cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping");
+    const sorted = sortAnchorsForDisplay(visible, cwd);
+    if (seqIndex >= 1 && seqIndex <= sorted.length) {
+      return sorted[seqIndex - 1].id;
     }
   }
   const direct = store.get(clean);
@@ -83,8 +79,12 @@ function extension_default(pi) {
     annotatedThisSession.clear();
     preflightFailures.clear();
     const sweep = sweepStore(store);
-    if (sweep.transitionedToSleeping.length > 0) {
-      ctx.ui.notify(`\u2316 Anchor: ${sweep.transitionedToSleeping.length} inactive tasks transitioned to sleep`, "info");
+    const sleepingForWorkspace = store.list({ status: "sleeping", all: true }).filter((a) => (a.files.length > 0 || a.project && a.project !== "global" || a.cwd) && isAnchorTargetingWorkspace(a, ctx.cwd));
+    for (const sa of sleepingForWorkspace) {
+      store.touch(sa.id);
+    }
+    if (sweep.transitionedToSleeping.length > 0 && sleepingForWorkspace.length === 0) {
+      ctx.ui.notify(`\u2316 Anchor: ${sweep.transitionedToSleeping.length} inactive task(s) moved to quiet mode (/anchor to view)`, "info");
     }
     const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
     for (const a of activeAnchors) {
@@ -153,8 +153,26 @@ ${contextSnippet}`
     }
   });
   pi.on("tool_result", async (event, ctx) => {
+    const lowerTool = String(event.toolName || "").toLowerCase();
     if (!event.isError) {
       observer.recordToolCall(event.toolName, event.input || {});
+      if (lowerTool === "bash" || lowerTool === "powershell") {
+        const executedCmd = String(event.input?.command || "");
+        if (executedCmd.includes("git commit") || executedCmd.length > 0) {
+          const settledNow = tryRealtimeAutoSettle(store, observer, ctx.cwd, executedCmd);
+          if (settledNow.length > 0) {
+            updateAnchorStatusBar(ctx, store);
+            if (hasActiveUI(ctx)) {
+              for (const item of settledNow) {
+                try {
+                  ctx.ui.notify(`\u2316 Auto-settled #${item.anchor.id} ("${item.anchor.title}") via ${item.reason}`, "info");
+                } catch {
+                }
+              }
+            }
+          }
+        }
+      }
     }
     const pathInput = event.input?.path;
     if (typeof pathInput !== "string") return;
@@ -218,8 +236,8 @@ ${contextSnippet}`
       }
     }
     const modified = observer.getModifiedFiles();
-    if (modified.length === 0) return;
-    const proposals = generateSettlementProposals(store, modified, ctx.cwd);
+    if (modified.length === 0 && !observer.hasCommitted()) return;
+    const proposals = generateSettlementProposals(store, modified, ctx.cwd, observer);
     if (proposals.length === 0) return;
     for (const prop of proposals) {
       const a = prop.anchor;

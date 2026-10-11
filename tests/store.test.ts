@@ -9,7 +9,9 @@ import {
   detectDurability,
   getEphemeralDecayPolicy
 } from '../src/store.ts';
-import { normalizePath, isSameOrSubPath } from '../src/matcher.ts';
+import { normalizePath, isSameOrSubPath, extractPathsFromText, isAnchorTargetingWorkspace } from '../src/matcher.ts';
+import { tryRealtimeAutoSettle } from '../src/settlement.ts';
+import { SessionTouchObserver } from '../src/observer.ts';
 
 function createTempDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-test-'));
@@ -143,10 +145,11 @@ test('AnchorStore - temporal durability keywords and project detection', () => {
   assert.strictEqual(detectDurability('大后天完成测试'), 'ephemeral');
   assert.strictEqual(detectDurability('重构鉴权架构'), 'durable');
 
-  // 2. Ephemeral TTL decay scaling
-  assert.strictEqual(getEphemeralDecayPolicy('今天完成优化').graveyardDays, 2);
-  assert.strictEqual(getEphemeralDecayPolicy('后天完成优化').graveyardDays, 3);
-  assert.strictEqual(getEphemeralDecayPolicy('大后天完成优化').graveyardDays, 4);
+  // 2. Persistent 7-day quiet policy: unfinished tasks are NEVER silently auto-deleted (graveyardDays = 9999)
+  assert.strictEqual(getEphemeralDecayPolicy('今天完成优化').activeDays, 7);
+  assert.strictEqual(getEphemeralDecayPolicy('今天完成优化').graveyardDays, 9999);
+  assert.strictEqual(getEphemeralDecayPolicy('后天完成优化').graveyardDays, 9999);
+  assert.strictEqual(getEphemeralDecayPolicy('大后天完成优化').graveyardDays, 9999);
 
   // 3. Provenance folder reflects creation cwd faithfully
   const tempDir = createTempDir();
@@ -222,4 +225,54 @@ test('QA - normalizePath protects sibling folder prefixes and isSameOrSubPath ha
   assert.strictEqual(isSameOrSubPath('D:/Workspace/proj', 'D:/Workspace/proj/src'), true);
   assert.strictEqual(isSameOrSubPath('D:/Workspace/proj', 'D:/Workspace/project-b'), false);
 });
+
+test('v0.3.0 Autonomous - extractPathsFromText and cross-directory workspace matching', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    // Simulate pinning a task for D:/College while sitting in D:/Workspace/X (exact real-world bug scenario)
+    const anc = store.create({
+      title: 'College重构前置查阅外部架构参考库',
+      description: '必须前置查阅 D:/College/优化/EXTERNAL_ARCHITECTURE_INSPIRATIONS.md。',
+      project: 'D:/College/优化',
+      cwd: 'D:/Workspace/X'
+    });
+
+    // Automatically extracts path from description when files not explicitly passed
+    assert.ok(anc.files.includes('D:/College/优化/EXTERNAL_ARCHITECTURE_INSPIRATIONS.md'));
+    // Aligns workspace matching to D:/College even though created in D:/Workspace/X
+    assert.strictEqual(isAnchorTargetingWorkspace(anc, 'D:/College'), true);
+    assert.strictEqual(isAnchorTargetingWorkspace(anc, 'D:/College/优化'), true);
+    assert.strictEqual(store.list({ cwd: 'D:/College' }).some(a => a.id === anc.id), true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('v0.3.0 Autonomous - tryRealtimeAutoSettle settles file-less tasks immediately on git commit', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const obs = new SessionTouchObserver();
+
+    // Create a file-less task (files: [])
+    const anc = store.create({
+      title: '重构鉴权模块为HttpOnly Cookie',
+      cwd: 'D:/Workspace/proj'
+    });
+    assert.strictEqual(anc.files.length, 0);
+
+    // Agent executes git commit in bash during session
+    const cmd = 'git commit -m "feat(auth): 重构鉴权模块为HttpOnly Cookie"';
+    obs.recordToolCall('bash', { command: cmd });
+
+    const settledNow = tryRealtimeAutoSettle(store, obs, 'D:/Workspace/proj', cmd);
+    assert.strictEqual(settledNow.length, 1);
+    assert.strictEqual(settledNow[0].anchor.id, anc.id);
+    assert.strictEqual(store.list({ cwd: 'D:/Workspace/proj' }).length, 0);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 

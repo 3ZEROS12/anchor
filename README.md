@@ -1,11 +1,12 @@
 # ⌖ Anchor
 
-> **Never lose unfinished tasks when closing Pi — pin reminders across sessions, wake them when touching matching files, and auto-complete on `git commit` with zero `TODO.md` clutter.**
+> **Compact, Autonomous, Persistent Task Memory for Pi Coding Agent**  
+> Pin tasks across sessions (`/pin`), wake them automatically when entering the project or touching files, and settle them in real time on `git commit` — with **0 `TODO.md` repo clutter** and **0 idle tokens**.
 
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
 [![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
 [![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
-[![Tests: 31 Passed](https://img.shields.io/badge/Tests-31%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 34 Passed](https://img.shields.io/badge/Tests-34%20Passed-22c55e.svg)](tests/store.test.ts)
 [![Startup: < 90ms](https://img.shields.io/badge/Startup-%3C%2090ms-success.svg)](package.json)
 [![Zero Repo Pollution](https://img.shields.io/badge/Storage-Zero%20Repo%20Pollution-success.svg)](#1-zero-repository-contamination--storage-topology)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
@@ -20,25 +21,28 @@ pi install npm:pi-anchor
   <img src="assets/hero-en.svg" alt="Anchor Terminal Dashboard" width="820">
 </p>
 
-### How It Works in 3 Steps
-
-1. **Pin in 1 second**: Tell the AI *"Remember to migrate auth tomorrow"* or type `/pin Migrate auth to HttpOnly cookies --due tomorrow`. Stored in `~/.anchor/state.json` (zero `TODO.md` files in your git repo).
-2. **Wake up next session (0 idle tokens)**: Next time you open Pi, Anchor shows a 3-line summary above your editor and briefs the AI on Turn 1. From Turn 2 onwards, it consumes **0 tokens** — waking up only with a 1-line comment when the AI reads or edits matching files.
-3. **Auto-complete on commit or test pass**: Commit related code (`git commit`), pass a `verifyCommand`, or run `/done 1` — Anchor archives the task automatically.
-
 ```text
-⌖ Anchors (4 active):
+⌖ Anchors (3 active, 1 quiet):
 
-  [Today · Today's Focus]
-  01  [Today]     Optimize token truncation & JIT safety  Desktop     Today         Today 10:02
+  01  [P0]      Migrate auth module to HttpOnly cookies [src/auth.ts]   anchor        Today           Today 10:02
+  02  [P1]      Add concurrent file lock unit tests                     anchor        Tomorrow        Yesterday 21:34
+  03  [P1]      Polish CLI interactive dashboard & TUI                  Desktop       In 2d           Today 10:02
+  04  [Quiet]   Read external architecture notes before refactor        College/优化  Quiet (0 tok)   09-28 14:20
 
-  [Upcoming · Scheduled]
-  02  [Upcoming]  Add concurrent file lock unit tests     Desktop     Tomorrow      Yesterday 21:34
-  03  [Upcoming]  Migrate auth module to HttpOnly cookies Desktop     Tomorrow      Today 10:02
-  04  [Upcoming]  Polish CLI interactive dashboard & TUI  Desktop     In 2d         Today 10:02
-
-  Use `anchor done <id>` to complete.
+  Use `anchor done <id>` to complete, or `anchor undo` to restore.
 ```
+
+### The Three Pillars: Compact · Autonomous · Persistent
+
+1. **Compact (小巧 · Zero Bloat & 0 Idle Tokens)**:
+   - Pure TypeScript (~20KB bundle, zero external runtime dependencies, zero background daemons, zero SQL databases in your repo).
+   - Flat, priority-sorted engineering list (`/anchor`, `/pin`, `/done 1`). Briefs the AI on Turn 1 of a session, then drops to **0 tokens** from Turn 2+ while you code.
+2. **Autonomous (自主 · Smart Path Inference & Real-Time Commit Settlement)**:
+   - Automatically extracts file/folder paths mentioned in your task description and binds them to the target workspace even if you pinned the task from another directory.
+   - Settles tasks **in real time during the session** the moment `git commit` or a verification test command (`verifyCommand`) succeeds — works for both file-bound and plain-text tasks (`files: []`).
+3. **Persistent (持久 · Never Loses Unfinished Work)**:
+   - Stored safely in `~/.anchor/state.json` outside your git working tree.
+   - Unfinished tasks are **never silently deleted**. Tasks untouched for 7+ days enter `[Quiet]` mode (saving Turn 1 prompt tokens), stay 100% visible in `/anchor`, and automatically wake up the moment you open their target project or touch matching files.
 
 ---
 
@@ -197,7 +201,7 @@ Engineered with strict TypeScript and 100% standard library test coverage using 
 
 ```bash
 npm run typecheck  # Strict tsc --noEmit check (0 errors)
-npm test           # Native Node test runner (31/31 passing)
+npm test           # Native Node test runner (34/34 passing)
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 ```
 

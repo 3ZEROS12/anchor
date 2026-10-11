@@ -87,19 +87,19 @@ export interface SettlementProposal {
 }
 
 export const EPHEMERAL_DECAY_POLICY: AnchorDecayPolicy = {
-  activeDays: 1,      // 24 hours active
-  sleepDays: 1,       // 24 hours sleeping
-  graveyardDays: 2    // 48 hours total before auto-clearing
+  activeDays: 7,      // 7 days active before quiet sleep
+  sleepDays: 30,
+  graveyardDays: 9999 // Never silently auto-delete unfinished tasks
 };
 
 export const DURABLE_DECAY_POLICY: AnchorDecayPolicy = {
-  activeDays: 3,
+  activeDays: 7,      // 7 days active before quiet sleep
   sleepDays: 30,
   graveyardDays: 9999 // Never permanently auto-dropped; preserved indefinitely
 };
 
 export const DEFAULT_DECAY_POLICY: AnchorDecayPolicy = {
-  activeDays: 3,
-  sleepDays: 7,
-  graveyardDays: 14
+  activeDays: 7,
+  sleepDays: 30,
+  graveyardDays: 9999
 };

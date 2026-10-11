@@ -3,10 +3,10 @@ import { Type } from '@sinclair/typebox';
 import { AnchorStore, detectTargetDate } from './store.ts';
 import { SessionTouchObserver } from './observer.ts';
 import { renderColdStartAnchorsContext, renderActiveAnchorsContext, makeSafeTaskAnnotation } from './context_injector.ts';
-import { generateSettlementProposals, runPhysicalVerification } from './settlement.ts';
-import { normalizePath, isSameOrSubPath, findMatchedAnchors } from './matcher.ts';
+import { generateSettlementProposals, runPhysicalVerification, tryRealtimeAutoSettle } from './settlement.ts';
+import { normalizePath, isSameOrSubPath, findMatchedAnchors, isAnchorTargetingWorkspace } from './matcher.ts';
 import { sweepStore } from './decay.ts';
-import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner, truncateToWidth, hasActiveUI, groupAnchorsByQuadrant } from './tui.ts';
+import { updateAnchorStatusBar, openAnchorDashboard, updateStartupBanner, truncateToWidth, hasActiveUI, sortAnchorsForDisplay } from './tui.ts';
 import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -63,19 +63,15 @@ export function parseAnchorCommandInput(raw: string, now: number = Date.now()): 
  */
 export function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?: string): string | undefined {
   const clean = idOrIndex.trim().replace(/^#/, '');
-  // 1. Check 1-based sequential index from the active quadrant-sorted list first when user passes a plain number
+  // 1. Check 1-based sequential index from the sorted display list first when user passes a plain number
   if (/^\d+$/.test(clean)) {
     const seqIndex = parseInt(clean, 10);
-    const active = store.list({ status: 'active', cwd });
-    const groups = groupAnchorsByQuadrant(active);
-    const sortedActive = [
-      ...groups.today,
-      ...groups.upcoming,
-      ...groups.habits,
-      ...groups.backlog
-    ];
-    if (seqIndex >= 1 && seqIndex <= sortedActive.length) {
-      return sortedActive[seqIndex - 1].id;
+    const visible = store
+      .list({ cwd, all: true })
+      .filter(a => a.status === 'active' || a.status === 'sleeping');
+    const sorted = sortAnchorsForDisplay(visible, cwd);
+    if (seqIndex >= 1 && seqIndex <= sorted.length) {
+      return sorted[seqIndex - 1].id;
     }
   }
   // 2. Fallback to direct ID lookup in store
@@ -98,8 +94,16 @@ export default function (pi: ExtensionAPI) {
 
     const sweep = sweepStore(store);
 
-    if (sweep.transitionedToSleeping.length > 0) {
-      ctx.ui.notify(`⌖ Anchor: ${sweep.transitionedToSleeping.length} inactive tasks transitioned to sleep`, 'info');
+    // Smart Workspace Wakeup: if a sleeping anchor specifically targets the workspace we just opened, wake it automatically!
+    const sleepingForWorkspace = store
+      .list({ status: 'sleeping', all: true })
+      .filter(a => (a.files.length > 0 || (a.project && a.project !== 'global') || a.cwd) && isAnchorTargetingWorkspace(a, ctx.cwd));
+    for (const sa of sleepingForWorkspace) {
+      store.touch(sa.id);
+    }
+
+    if (sweep.transitionedToSleeping.length > 0 && sleepingForWorkspace.length === 0) {
+      ctx.ui.notify(`⌖ Anchor: ${sweep.transitionedToSleeping.length} inactive task(s) moved to quiet mode (/anchor to view)`, 'info');
     }
 
     // Physical Pre-flight Verification: auto-settle passing tasks or record failing output (scoped strictly to current cwd)
@@ -174,11 +178,31 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 4. JIT Path-Triggered Context Alert: When agent successfully touches an intersecting file
+  // 4. JIT Path-Triggered Context Alert & Real-Time Autonomous Commit/Test Settlement
   pi.on('tool_result', async (event: any, ctx: ExtensionContext) => {
+    const lowerTool = String(event.toolName || '').toLowerCase();
+
     // Only verified, non-error tool executions are recorded to prevent false-positive settlement
     if (!event.isError) {
       observer.recordToolCall(event.toolName, event.input || {});
+
+      // Real-time autonomous settlement on git commit or passing verifyCommand!
+      if (lowerTool === 'bash' || lowerTool === 'powershell') {
+        const executedCmd = String((event.input as any)?.command || '');
+        if (executedCmd.includes('git commit') || executedCmd.length > 0) {
+          const settledNow = tryRealtimeAutoSettle(store, observer, ctx.cwd, executedCmd);
+          if (settledNow.length > 0) {
+            updateAnchorStatusBar(ctx, store);
+            if (hasActiveUI(ctx)) {
+              for (const item of settledNow) {
+                try {
+                  ctx.ui.notify(`⌖ Auto-settled #${item.anchor.id} ("${item.anchor.title}") via ${item.reason}`, 'info');
+                } catch {}
+              }
+            }
+          }
+        }
+      }
     }
 
     const pathInput = (event.input as any)?.path;
@@ -259,9 +283,9 @@ export default function (pi: ExtensionAPI) {
     }
 
     const modified = observer.getModifiedFiles();
-    if (modified.length === 0) return;
+    if (modified.length === 0 && !observer.hasCommitted()) return;
 
-    const proposals = generateSettlementProposals(store, modified, ctx.cwd);
+    const proposals = generateSettlementProposals(store, modified, ctx.cwd, observer);
     if (proposals.length === 0) return;
 
     // Check proposals for automated verification or one-tap settlement

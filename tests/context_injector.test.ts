@@ -23,9 +23,9 @@ test('ContextInjector - renders only active anchors, sleeping consume 0 tokens',
     const a1 = store.create({ title: 'Active task', files: ['src/main.ts'] });
     store.touch(a1.id, now);
 
-    // 1 sleeping anchor (4 days untouched)
+    // 1 sleeping anchor (8 days untouched -> quiet mode)
     const a2 = store.create({ title: 'Sleeping task' });
-    store.touch(a2.id, now - 4 * 86_400_000);
+    store.touch(a2.id, now - 8 * 86_400_000);
 
     const rendered = renderActiveAnchorsContext(store, now);
     assert.ok(rendered.includes('Active task'));

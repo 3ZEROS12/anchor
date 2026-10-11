@@ -1,7 +1,7 @@
 {
   "name": "pi-anchor",
-  "version": "0.2.4",
-  "description": "Never lose unfinished tasks when closing Pi — pin reminders across sessions (/pin), auto-remind when touching matching files, and auto-complete on git commit with 0 TODO.md clutter.",
+  "version": "0.3.0",
+  "description": "Compact, autonomous, persistent task memory for Pi — pin tasks across sessions (/pin), auto-wake on project/file touch, and auto-settle in real time on git commit with 0 TODO.md clutter.",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",

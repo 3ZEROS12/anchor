@@ -253,14 +253,56 @@ test('AnchorCommands - resolveAnchorTarget maps both 1-based quadrant index and 
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
-    const a1 = store.create({ title: 'Someday backlog task', cwd: '/workspace/proj' });
-    const a2 = store.create({ title: 'Today urgent task', targetDate: '2026-01-01', cwd: '/workspace/proj' });
+  const a1 = store.create({ title: 'Someday backlog task', priority: 'p2', cwd: '/workspace/proj' });
+    const a2 = store.create({ title: 'Today urgent task', priority: 'p0', targetDate: '2026-01-01', cwd: '/workspace/proj' });
 
-    // In quadrant order, 'Today' (a2) comes before 'Backlog' (a1)
+    // In priority/due order, 'Today P0' (a2) comes before 'Someday P2' (a1)
     assert.strictEqual(resolveAnchorTarget(store, '1', '/workspace/proj'), a2.id);
     assert.strictEqual(resolveAnchorTarget(store, '02', '/workspace/proj'), a1.id);
     assert.strictEqual(resolveAnchorTarget(store, a1.id, '/workspace/proj'), a1.id);
     assert.strictEqual(resolveAnchorTarget(store, `#${a2.id}`, '/workspace/proj'), a2.id);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('v0.3.0 Persistent - openAnchorDashboard keeps sleeping/quiet tasks visible and allows waking them', async () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const anc = store.create({
+      title: 'College重构前置查阅外部架构参考库',
+      priority: 'p0',
+      project: 'D:/College/优化',
+      cwd: 'D:/Workspace/X'
+    });
+    // Simulate sleeping status
+    store.update(anc.id, { status: 'sleeping' });
+
+    let renderedOptions: string[] = [];
+    const mockCtx = {
+      cwd: 'D:/Workspace/other',
+      hasUI: true,
+      ui: {
+        select: async (_title: string, options: string[]) => {
+          if (renderedOptions.length === 0) {
+            renderedOptions = options;
+            return options[0];
+          }
+          // Pick '⚡ Wake up'
+          return options.find(o => o.startsWith('⚡')) || options[0];
+        },
+        notify: () => {},
+        setStatus: () => {}
+      }
+    } as unknown as ExtensionContext;
+
+    await openAnchorDashboard(mockCtx, store);
+    assert.strictEqual(renderedOptions.length, 1);
+    assert.ok(renderedOptions[0].includes('[Quiet]'));
+    assert.ok(renderedOptions[0].includes('College重构前置查阅外部架构参考库'));
+    // After selecting '⚡ Wake up', status is restored to 'active'
+    assert.strictEqual(store.get(anc.id)?.status, 'active');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

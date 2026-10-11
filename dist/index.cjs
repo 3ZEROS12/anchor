@@ -44,6 +44,7 @@ __export(index_exports, {
   detectRecurrence: () => detectRecurrence,
   detectTargetDate: () => detectTargetDate,
   evaluateAnchorDecay: () => evaluateAnchorDecay,
+  extractPathsFromText: () => extractPathsFromText,
   findMatchedAnchors: () => findMatchedAnchors,
   formatCreationTime: () => formatCreationTime,
   formatOrigin: () => formatOrigin,
@@ -59,6 +60,7 @@ __export(index_exports, {
   globToRegExp: () => globToRegExp,
   groupAnchorsByQuadrant: () => groupAnchorsByQuadrant,
   hasActiveUI: () => hasActiveUI,
+  isAnchorTargetingWorkspace: () => isAnchorTargetingWorkspace,
   isSameOrSubPath: () => isSameOrSubPath,
   makeSafeTaskAnnotation: () => makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles: () => matchAnchorAgainstTouchedFiles,
@@ -68,9 +70,11 @@ __export(index_exports, {
   renderActiveAnchorsContext: () => renderActiveAnchorsContext,
   renderColdStartAnchorsContext: () => renderColdStartAnchorsContext,
   runPhysicalVerification: () => runPhysicalVerification,
+  sortAnchorsForDisplay: () => sortAnchorsForDisplay,
   stripAnsi: () => stripAnsi,
   sweepStore: () => sweepStore,
   truncateToWidth: () => truncateToWidth,
+  tryRealtimeAutoSettle: () => tryRealtimeAutoSettle,
   updateAnchorStatusBar: () => updateAnchorStatusBar,
   updateStartupBanner: () => updateStartupBanner
 });
@@ -78,23 +82,23 @@ module.exports = __toCommonJS(index_exports);
 
 // src/types.ts
 var EPHEMERAL_DECAY_POLICY = {
-  activeDays: 1,
-  // 24 hours active
-  sleepDays: 1,
-  // 24 hours sleeping
-  graveyardDays: 2
-  // 48 hours total before auto-clearing
+  activeDays: 7,
+  // 7 days active before quiet sleep
+  sleepDays: 30,
+  graveyardDays: 9999
+  // Never silently auto-delete unfinished tasks
 };
 var DURABLE_DECAY_POLICY = {
-  activeDays: 3,
+  activeDays: 7,
+  // 7 days active before quiet sleep
   sleepDays: 30,
   graveyardDays: 9999
   // Never permanently auto-dropped; preserved indefinitely
 };
 var DEFAULT_DECAY_POLICY = {
-  activeDays: 3,
-  sleepDays: 7,
-  graveyardDays: 14
+  activeDays: 7,
+  sleepDays: 30,
+  graveyardDays: 9999
 };
 
 // src/store.ts
@@ -132,6 +136,39 @@ function isSameOrSubPath(anchorCwd, targetCwd) {
   const cmpA = isWinStyle ? normA.toLowerCase() : normA;
   const cmpT = isWinStyle ? normT.toLowerCase() : normT;
   return cmpA === cmpT || cmpT.startsWith(cmpA + "/") || cmpA.startsWith(cmpT + "/");
+}
+function extractPathsFromText(text) {
+  if (!text) return [];
+  const results = /* @__PURE__ */ new Set();
+  const regex = /(?:[a-zA-Z]:[\\/][^\s"'`，。；！？、,;)>\]]+|(?:\b(?:src|lib|dist|tests|test|docs|scripts|packages|extensions|bin|assets)[\\/][^\s"'`，。；！？、,;)>\]]+)|(?:\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|c|cpp|h|cs|md|json|yaml|yml|toml|html|css|sql|sh)\b))/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const cleaned = normalizePath(match[0].replace(/[.:;,'")\]}>]+$/, ""));
+    if (cleaned && cleaned.length >= 3) {
+      results.add(cleaned);
+    }
+  }
+  return Array.from(results);
+}
+function isAnchorTargetingWorkspace(anchor, targetCwd) {
+  if (!targetCwd) return true;
+  const normTarget = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const targetBase = import_node_path.default.basename(normTarget).toLowerCase();
+  if (anchor.project && anchor.project !== "global") {
+    const normProj = anchor.project.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    if (isSameOrSubPath(normProj, normTarget)) return true;
+    const projBase = import_node_path.default.basename(normProj).toLowerCase();
+    if (projBase && projBase === targetBase) return true;
+  }
+  if (anchor.files && anchor.files.length > 0) {
+    for (const f of anchor.files) {
+      if (isSameOrSubPath(f, normTarget)) return true;
+    }
+  }
+  if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) {
+    return true;
+  }
+  return false;
 }
 function matchAnchorAgainstTouchedFiles(anchor, touchedFiles) {
   if (!anchor.files || anchor.files.length === 0) return null;
@@ -235,10 +272,10 @@ function detectDurability(title) {
 function getEphemeralDecayPolicy(title) {
   const lower = title.toLowerCase();
   if (lower.includes("\u5927\u540E\u5929")) {
-    return { activeDays: 3, sleepDays: 1, graveyardDays: 4 };
+    return { activeDays: 7, sleepDays: 30, graveyardDays: 9999 };
   }
   if (lower.includes("\u540E\u5929")) {
-    return { activeDays: 2, sleepDays: 1, graveyardDays: 3 };
+    return { activeDays: 7, sleepDays: 30, graveyardDays: 9999 };
   }
   return { ...EPHEMERAL_DECAY_POLICY };
 }
@@ -549,7 +586,17 @@ var AnchorStore = class {
       const state = this.loadState();
       const now = Date.now();
       const id = this.generateId(state);
-      const cwd = input.cwd ? normalizePath(input.cwd) : "";
+      const explicitFiles = (input.files || []).map((f) => normalizePath(f)).filter(Boolean);
+      const inferredFiles = explicitFiles.length > 0 ? explicitFiles : extractPathsFromText(`${input.title} ${input.description || ""}`);
+      let cwd = input.cwd ? normalizePath(input.cwd) : "";
+      if (input.project && (/^[a-zA-Z]:[\\/]/.test(input.project.trim()) || input.project.trim().startsWith("/"))) {
+        cwd = normalizePath(input.project.trim());
+      } else if (inferredFiles.length > 0 && (/^[a-zA-Z]:\//.test(inferredFiles[0]) || inferredFiles[0].startsWith("/"))) {
+        const firstDir = import_node_path2.default.dirname(inferredFiles[0]);
+        if (firstDir && firstDir !== ".") {
+          cwd = normalizePath(firstDir);
+        }
+      }
       const projectName = input.project ? input.project.trim() : cwd ? import_node_path2.default.basename(cwd) : "global";
       const recurrence = input.recurrence || detectRecurrence(input.title);
       const targetDate = input.targetDate || detectTargetDate(input.title, now);
@@ -569,7 +616,7 @@ var AnchorStore = class {
         createdAt: now,
         updatedAt: now,
         lastTouchedAt: now,
-        files: (input.files || []).map((f) => normalizePath(f)).filter(Boolean),
+        files: inferredFiles,
         tags: (input.tags || []).map((t) => t.trim()).filter(Boolean),
         verifyCommand: input.verifyCommand?.trim() || void 0,
         decay: input.decay ? { ...input.decay } : { ...decayPolicy }
@@ -608,7 +655,7 @@ var AnchorStore = class {
       if (filter?.status && a.status !== filter.status) return false;
       if (filter?.priority && a.priority !== filter.priority) return false;
       if (!filter?.all && targetCwd) {
-        if (a.files.length > 0 && a.cwd && !isSameOrSubPath(a.cwd, targetCwd)) {
+        if (a.files.length > 0 && (a.cwd || a.project) && !isAnchorTargetingWorkspace(a, targetCwd)) {
           return false;
         }
       }
@@ -928,19 +975,65 @@ function runPhysicalVerification(anchor, cwd) {
     return { success: false, output: String(err.stderr || err.stdout || err.message).trim() };
   }
 }
-function generateSettlementProposals(store, touchedFiles, cwd) {
+function tryRealtimeAutoSettle(store, observer, cwd, executedCommand) {
+  const candidates = store.list({ cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
+  if (candidates.length === 0) return [];
+  const settledList = [];
+  const cmdTrimmed = (executedCommand || "").trim();
+  for (const a of candidates) {
+    if (observer.hasCommitted()) {
+      const commitMatch = observer.matchesCommit(a);
+      if (commitMatch.matched && (!cwd || isAnchorTargetingWorkspace(a, cwd))) {
+        const settled = store.settle(a.id, {
+          settledBy: "verification-test",
+          summary: `Auto-settled via Git commit: ${commitMatch.message}`,
+          touchedFiles: observer.getModifiedFiles()
+        });
+        settledList.push({ anchor: settled, reason: `git commit ("${commitMatch.message}")` });
+        continue;
+      }
+    }
+    if (a.verifyCommand && cmdTrimmed && cmdTrimmed.includes(a.verifyCommand.trim())) {
+      const settled = store.settle(a.id, {
+        settledBy: "verification-test",
+        summary: `Auto-settled via passing command: ${a.verifyCommand}`,
+        touchedFiles: observer.getModifiedFiles()
+      });
+      settledList.push({ anchor: settled, reason: `verifyCommand (${a.verifyCommand})` });
+    }
+  }
+  return settledList;
+}
+function generateSettlementProposals(store, touchedFiles, cwd, observer) {
   const activeAndSleeping = store.list({ cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
   const matches = findMatchedAnchors(activeAndSleeping, touchedFiles);
+  const seenIds = /* @__PURE__ */ new Set();
   const proposals = [];
   for (const match of matches) {
+    seenIds.add(match.anchor.id);
     const fileList = match.matchedFiles.slice(0, 3).join(", ");
-    const moreSuffix = match.matchedFiles.length > 3 ? ` \u7B49 ${match.matchedFiles.length} \u4E2A\u6587\u4EF6` : "";
+    const moreSuffix = match.matchedFiles.length > 3 ? ` (+${match.matchedFiles.length - 3} more)` : "";
     proposals.push({
       anchor: match.anchor,
       matchedFiles: match.matchedFiles,
-      reason: `\u672C\u6B21\u4F1A\u8BDD\u4FEE\u6539\u4E86 ${fileList}${moreSuffix}`,
+      reason: `Modified ${fileList}${moreSuffix}`,
       recommendedAction: match.score >= 0.85 ? "settle" : "defer"
     });
+  }
+  if (observer && observer.hasCommitted()) {
+    for (const a of activeAndSleeping) {
+      if (seenIds.has(a.id)) continue;
+      const cm = observer.matchesCommit(a);
+      if (cm.matched) {
+        seenIds.add(a.id);
+        proposals.push({
+          anchor: a,
+          matchedFiles: touchedFiles.slice(0, 3),
+          reason: `Matched git commit: "${cm.message}"`,
+          recommendedAction: "settle"
+        });
+      }
+    }
   }
   return proposals;
 }
@@ -988,6 +1081,27 @@ function groupAnchorsByQuadrant(anchors, now = Date.now()) {
     else groups.backlog.push(a);
   }
   return groups;
+}
+var PRIORITY_RANK = { p0: 0, p1: 1, p2: 2 };
+function sortAnchorsForDisplay(anchors, cwd, now = Date.now()) {
+  const todayStr = getTodayDateString(now);
+  return [...anchors].sort((a, b) => {
+    if (a.status !== b.status) {
+      return a.status === "active" ? -1 : 1;
+    }
+    if (cwd) {
+      const aMatch = isAnchorTargetingWorkspace(a, cwd) ? 0 : 1;
+      const bMatch = isAnchorTargetingWorkspace(b, cwd) ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+    }
+    const aDue = a.targetDate && a.targetDate <= todayStr ? 0 : 1;
+    const bDue = b.targetDate && b.targetDate <= todayStr ? 0 : 1;
+    if (aDue !== bDue) return aDue - bDue;
+    const pA = PRIORITY_RANK[a.priority] ?? 1;
+    const pB = PRIORITY_RANK[b.priority] ?? 1;
+    if (pA !== pB) return pA - pB;
+    return a.createdAt - b.createdAt;
+  });
 }
 var ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 function stripAnsi(str) {
@@ -1117,11 +1231,19 @@ function formatRemainingTtl(anchor, now = Date.now()) {
 }
 function formatOrigin(anchor) {
   if (typeof anchor === "object") {
-    if (!anchor.cwd) return anchor.project || "global";
-    return import_node_path3.default.basename(anchor.cwd) || "global";
+    if (anchor.project && anchor.project !== "global") {
+      const normProj = anchor.project.replace(/\\/g, "/").replace(/\/+$/, "");
+      if (normProj.includes("/")) {
+        const parts = normProj.split("/").filter(Boolean);
+        return parts.slice(-2).join("/");
+      }
+      return normProj;
+    }
+    if (!anchor.cwd) return "global";
+    return import_node_path3.default.basename(anchor.cwd.replace(/\\/g, "/")) || "global";
   }
   if (!anchor) return "global";
-  return import_node_path3.default.basename(anchor) || "global";
+  return import_node_path3.default.basename(anchor.replace(/\\/g, "/")) || "global";
 }
 function updateAnchorStatusBar(ctx, store) {
   if (!hasActiveUI(ctx)) return;
@@ -1176,51 +1298,47 @@ function updateStartupBanner(ctx, store) {
 }
 async function openAnchorDashboard(ctx, store) {
   if (!hasActiveUI(ctx)) return;
-  const list = store.list({ status: "active", cwd: ctx.cwd });
-  if (list.length === 0) {
+  const allUnfinished = store.list({ cwd: ctx.cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping");
+  if (allUnfinished.length === 0) {
     ctx.ui.notify("\u2316 No active anchors. Use /pin <task> to record.", "info");
     return;
   }
-  const groups = groupAnchorsByQuadrant(list);
-  const sortedList = [
-    ...groups.today,
-    ...groups.upcoming,
-    ...groups.habits,
-    ...groups.backlog
-  ];
+  const sortedList = sortAnchorsForDisplay(allUnfinished, ctx.cwd);
   const optionMap = /* @__PURE__ */ new Map();
   const displayOptions = [];
   const termCols = process.stdout?.columns || 96;
   const isNarrow = termCols < 88;
-  const titleWidth = isNarrow ? Math.max(18, termCols - 36) : 34;
+  const titleWidth = isNarrow ? Math.max(18, termCols - 36) : 36;
   for (let i = 0; i < sortedList.length; i++) {
     const a = sortedList[i];
     const num = a.id.replace(/^anc-/, "").padStart(2, "0");
-    const category = padToWidth(`[${classifyAnchor(a)}]`, 12);
+    const badge = a.status === "sleeping" ? padToWidth("[Quiet]", 10) : padToWidth(`[${a.priority.toUpperCase()}]`, 10);
     const origin = formatOrigin(a);
-    const target = formatTargetDate(a);
+    const target = a.status === "sleeping" ? "Quiet (0 tok)" : formatTargetDate(a);
     const created = formatCreationTime(a.createdAt);
     const titleWithFiles = a.files && a.files.length > 0 ? `${a.title} [${a.files.slice(0, 1).join(", ")}]` : a.title;
     const colNum = `${num}  `;
     const colTitle = padToWidth(titleWithFiles, titleWidth);
-    const colOrigin = padToWidth(origin, 10);
-    const colTarget = padToWidth(target, 12);
+    const colOrigin = padToWidth(origin, 12);
+    const colTarget = padToWidth(target, 14);
     const colCreated = created;
-    const label = isNarrow ? `${colNum}${category}${colTitle}  ${colTarget}`.trimEnd() : `${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
+    const label = isNarrow ? `${colNum}${badge}${colTitle}  ${colTarget}`.trimEnd() : `${colNum}${badge}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
     optionMap.set(label, a);
     displayOptions.push(label);
   }
-  const selected = await ctx.ui.select("\u2316 Anchors (select to inspect or settle):", displayOptions);
+  const selected = await ctx.ui.select("\u2316 Anchors (select to settle, wake, or inspect):", displayOptions);
   if (!selected) return;
   const anchor = optionMap.get(selected);
   if (!anchor) return;
+  const actions = [
+    "\u2713 Settle (Mark completed and archive)",
+    ...anchor.status === "sleeping" ? ["\u26A1 Wake up (Activate for current session)"] : [],
+    "\u2139 View details & associated files",
+    "\u21A9 Cancel"
+  ];
   const action = await ctx.ui.select(
     `\u2316 Anchor #${anchor.id}: "${anchor.title}"`,
-    [
-      "\u2713 Settle (Mark completed and archive)",
-      "\u2139 View details & associated files",
-      "\u21A9 Cancel"
-    ]
+    actions
   );
   if (!action || action.startsWith("\u21A9")) return;
   if (action.startsWith("\u2713")) {
@@ -1228,9 +1346,13 @@ async function openAnchorDashboard(ctx, store) {
     const successMsg = anchor.recurrence === "daily" ? `\u2316 Completed for today: "${anchor.title}" (resets tomorrow)` : `\u2316 Settled #${anchor.id}: "${anchor.title}" (/anchor undo to revert)`;
     ctx.ui.notify(successMsg, "info");
     updateAnchorStatusBar(ctx, store);
+  } else if (action.startsWith("\u26A1")) {
+    store.touch(anchor.id);
+    ctx.ui.notify(`\u2316 Woke up #${anchor.id}: "${anchor.title}"`, "info");
+    updateAnchorStatusBar(ctx, store);
   } else if (action.startsWith("\u2139")) {
     const details = [
-      `#${anchor.id} [${anchor.priority.toUpperCase()}] ${anchor.title}`,
+      `#${anchor.id} [${anchor.priority.toUpperCase()} \xB7 ${anchor.status.toUpperCase()}] ${anchor.title}`,
       anchor.description ? `Description: ${anchor.description}` : null,
       anchor.targetDate ? `Target Date: ${anchor.targetDate} (${formatTargetDate(anchor)})` : null,
       anchor.files && anchor.files.length > 0 ? `Files: ${anchor.files.join(", ")}` : null,
@@ -1549,6 +1671,7 @@ var AnchorProtocol = class {
   detectRecurrence,
   detectTargetDate,
   evaluateAnchorDecay,
+  extractPathsFromText,
   findMatchedAnchors,
   formatCreationTime,
   formatOrigin,
@@ -1564,6 +1687,7 @@ var AnchorProtocol = class {
   globToRegExp,
   groupAnchorsByQuadrant,
   hasActiveUI,
+  isAnchorTargetingWorkspace,
   isSameOrSubPath,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
@@ -1573,9 +1697,11 @@ var AnchorProtocol = class {
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
   runPhysicalVerification,
+  sortAnchorsForDisplay,
   stripAnsi,
   sweepStore,
   truncateToWidth,
+  tryRealtimeAutoSettle,
   updateAnchorStatusBar,
   updateStartupBanner
 });

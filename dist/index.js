@@ -12,6 +12,7 @@ import {
   detectRecurrence,
   detectTargetDate,
   evaluateAnchorDecay,
+  extractPathsFromText,
   findMatchedAnchors,
   formatCreationTime,
   formatOrigin,
@@ -27,6 +28,7 @@ import {
   globToRegExp,
   groupAnchorsByQuadrant,
   hasActiveUI,
+  isAnchorTargetingWorkspace,
   isSameOrSubPath,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
@@ -36,12 +38,14 @@ import {
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
   runPhysicalVerification,
+  sortAnchorsForDisplay,
   stripAnsi,
   sweepStore,
   truncateToWidth,
+  tryRealtimeAutoSettle,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-G72UHPBN.js";
+} from "./chunk-Q7IILJFA.js";
 
 // src/protocol.ts
 var AnchorProtocol = class {
@@ -116,6 +120,7 @@ export {
   detectRecurrence,
   detectTargetDate,
   evaluateAnchorDecay,
+  extractPathsFromText,
   findMatchedAnchors,
   formatCreationTime,
   formatOrigin,
@@ -131,6 +136,7 @@ export {
   globToRegExp,
   groupAnchorsByQuadrant,
   hasActiveUI,
+  isAnchorTargetingWorkspace,
   isSameOrSubPath,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
@@ -140,9 +146,11 @@ export {
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
   runPhysicalVerification,
+  sortAnchorsForDisplay,
   stripAnsi,
   sweepStore,
   truncateToWidth,
+  tryRealtimeAutoSettle,
   updateAnchorStatusBar,
   updateStartupBanner
 };

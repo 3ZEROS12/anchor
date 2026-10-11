@@ -1,5 +1,6 @@
 import type { AnchorStore } from './store.ts';
-import { findMatchedAnchors } from './matcher.ts';
+import { findMatchedAnchors, isAnchorTargetingWorkspace } from './matcher.ts';
+import type { SessionTouchObserver } from './observer.ts';
 import type { Anchor, SettlementProposal } from './types.ts';
 import { execSync } from 'node:child_process';
 
@@ -27,29 +28,94 @@ export function runPhysicalVerification(anchor: Anchor, cwd: string): { success:
 }
 
 /**
- * Generate settlement candidates based on files touched during the session
+ * Real-time autonomous settlement during active session:
+ * Triggered immediately when a non-error shell command runs `git commit` or a matching `verifyCommand`.
+ * Works for BOTH file-bound and file-less (`files: []`) anchors!
+ */
+export function tryRealtimeAutoSettle(
+  store: AnchorStore,
+  observer: SessionTouchObserver,
+  cwd?: string,
+  executedCommand?: string
+): Array<{ anchor: Anchor; reason: string }> {
+  const candidates = store.list({ cwd }).filter(a => a.status === 'active' || a.status === 'sleeping');
+  if (candidates.length === 0) return [];
+
+  const settledList: Array<{ anchor: Anchor; reason: string }> = [];
+  const cmdTrimmed = (executedCommand || '').trim();
+
+  for (const a of candidates) {
+    // 1. Check real-time Git Commit semantic match (works even when a.files is empty!)
+    if (observer.hasCommitted()) {
+      const commitMatch = observer.matchesCommit(a);
+      if (commitMatch.matched && (!cwd || isAnchorTargetingWorkspace(a, cwd))) {
+        const settled = store.settle(a.id, {
+          settledBy: 'verification-test',
+          summary: `Auto-settled via Git commit: ${commitMatch.message}`,
+          touchedFiles: observer.getModifiedFiles()
+        });
+        settledList.push({ anchor: settled, reason: `git commit ("${commitMatch.message}")` });
+        continue;
+      }
+    }
+
+    // 2. Check if the executed shell command directly ran and passed the anchor's verifyCommand
+    if (a.verifyCommand && cmdTrimmed && cmdTrimmed.includes(a.verifyCommand.trim())) {
+      const settled = store.settle(a.id, {
+        settledBy: 'verification-test',
+        summary: `Auto-settled via passing command: ${a.verifyCommand}`,
+        touchedFiles: observer.getModifiedFiles()
+      });
+      settledList.push({ anchor: settled, reason: `verifyCommand (${a.verifyCommand})` });
+    }
+  }
+
+  return settledList;
+}
+
+/**
+ * Generate settlement candidates based on files touched or commits made during the session
  */
 export function generateSettlementProposals(
   store: AnchorStore,
   touchedFiles: string[],
-  cwd?: string
+  cwd?: string,
+  observer?: SessionTouchObserver
 ): SettlementProposal[] {
-  // Only match active/sleeping anchors belonging to current workspace
   const activeAndSleeping = store.list({ cwd }).filter(a => a.status === 'active' || a.status === 'sleeping');
   const matches = findMatchedAnchors(activeAndSleeping, touchedFiles);
+  const seenIds = new Set<string>();
 
   const proposals: SettlementProposal[] = [];
 
   for (const match of matches) {
+    seenIds.add(match.anchor.id);
     const fileList = match.matchedFiles.slice(0, 3).join(', ');
-    const moreSuffix = match.matchedFiles.length > 3 ? ` 等 ${match.matchedFiles.length} 个文件` : '';
+    const moreSuffix = match.matchedFiles.length > 3 ? ` (+${match.matchedFiles.length - 3} more)` : '';
 
     proposals.push({
       anchor: match.anchor,
       matchedFiles: match.matchedFiles,
-      reason: `本次会话修改了 ${fileList}${moreSuffix}`,
+      reason: `Modified ${fileList}${moreSuffix}`,
       recommendedAction: match.score >= 0.85 ? 'settle' : 'defer'
     });
+  }
+
+  // Also include file-less (or un-matched) anchors if a git commit message matched them
+  if (observer && observer.hasCommitted()) {
+    for (const a of activeAndSleeping) {
+      if (seenIds.has(a.id)) continue;
+      const cm = observer.matchesCommit(a);
+      if (cm.matched) {
+        seenIds.add(a.id);
+        proposals.push({
+          anchor: a,
+          matchedFiles: touchedFiles.slice(0, 3),
+          reason: `Matched git commit: "${cm.message}"`,
+          recommendedAction: 'settle'
+        });
+      }
+    }
   }
 
   return proposals;

@@ -52,6 +52,57 @@ export function isSameOrSubPath(anchorCwd?: string, targetCwd?: string): boolean
 }
 
 /**
+ * Extract explicit file or directory paths mentioned in natural language title/description
+ * (e.g. "D:/College/优化/EXTERNAL_ARCHITECTURE_INSPIRATIONS.md", "src/auth/jwt.ts")
+ */
+export function extractPathsFromText(text?: string): string[] {
+  if (!text) return [];
+  const results = new Set<string>();
+  // Match absolute Windows/POSIX paths or relative project paths with extensions/slashes
+  const regex = /(?:[a-zA-Z]:[\\/][^\s"'`，。；！？、,;)>\]]+|(?:\b(?:src|lib|dist|tests|test|docs|scripts|packages|extensions|bin|assets)[\\/][^\s"'`，。；！？、,;)>\]]+)|(?:\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|c|cpp|h|cs|md|json|yaml|yml|toml|html|css|sql|sh)\b))/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const cleaned = normalizePath(match[0].replace(/[.:;,'")\]}>]+$/, ''));
+    if (cleaned && cleaned.length >= 3) {
+      results.add(cleaned);
+    }
+  }
+  return Array.from(results);
+}
+
+/**
+ * Determine whether an anchor specifically targets a given workspace directory (`targetCwd`),
+ * checking `anchor.cwd`, `anchor.project`, and `anchor.files`.
+ */
+export function isAnchorTargetingWorkspace(anchor: Anchor, targetCwd?: string): boolean {
+  if (!targetCwd) return true;
+  const normTarget = targetCwd.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const targetBase = path.basename(normTarget).toLowerCase();
+
+  // 1. Check explicit project path or project folder name
+  if (anchor.project && anchor.project !== 'global') {
+    const normProj = anchor.project.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    if (isSameOrSubPath(normProj, normTarget)) return true;
+    const projBase = path.basename(normProj).toLowerCase();
+    if (projBase && projBase === targetBase) return true;
+  }
+
+  // 2. Check associated file paths
+  if (anchor.files && anchor.files.length > 0) {
+    for (const f of anchor.files) {
+      if (isSameOrSubPath(f, normTarget)) return true;
+    }
+  }
+
+  // 3. Check creation cwd (only if files are relative or empty, or if no conflicting absolute project path was given)
+  if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
  * Match touched files against an anchor's registered physical patterns
  * Only anchors with explicit files/globs/prefixes are matched against file touches.
  * Anchors with files: [] (pure mental notes or macro tasks) NEVER trigger on file operations.

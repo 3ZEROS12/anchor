@@ -87,7 +87,8 @@ declare const DEFAULT_DECAY_POLICY: AnchorDecayPolicy;
  */
 declare function detectDurability(title: string): AnchorDurability;
 /**
- * Get custom ephemeral decay policy based on temporal span (e.g. 后天, 大后天)
+ * Get custom ephemeral decay policy based on temporal span.
+ * Note: graveyardDays is always 9999 so unfinished tasks are NEVER silently deleted.
  */
 declare function getEphemeralDecayPolicy(title: string): AnchorDecayPolicy;
 /**

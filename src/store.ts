@@ -11,7 +11,7 @@ import type {
   AnchorStoreState
 } from './types.ts';
 import { DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, EPHEMERAL_DECAY_POLICY } from './types.ts';
-import { normalizePath, isSameOrSubPath } from './matcher.ts';
+import { normalizePath, isSameOrSubPath, extractPathsFromText, isAnchorTargetingWorkspace } from './matcher.ts';
 
 /**
  * Detect whether a task is a short-term ephemeral reminder or a long-term architectural vision
@@ -31,15 +31,16 @@ export function detectDurability(title: string): AnchorDurability {
 }
 
 /**
- * Get custom ephemeral decay policy based on temporal span (e.g. 后天, 大后天)
+ * Get custom ephemeral decay policy based on temporal span.
+ * Note: graveyardDays is always 9999 so unfinished tasks are NEVER silently deleted.
  */
 export function getEphemeralDecayPolicy(title: string): AnchorDecayPolicy {
   const lower = title.toLowerCase();
   if (lower.includes('大后天')) {
-    return { activeDays: 3, sleepDays: 1, graveyardDays: 4 };
+    return { activeDays: 7, sleepDays: 30, graveyardDays: 9999 };
   }
   if (lower.includes('后天')) {
-    return { activeDays: 2, sleepDays: 1, graveyardDays: 3 };
+    return { activeDays: 7, sleepDays: 30, graveyardDays: 9999 };
   }
   return { ...EPHEMERAL_DECAY_POLICY };
 }
@@ -415,7 +416,22 @@ export class AnchorStore {
       const now = Date.now();
       const id = this.generateId(state);
 
-      const cwd = input.cwd ? normalizePath(input.cwd) : '';
+      const explicitFiles = (input.files || []).map(f => normalizePath(f)).filter(Boolean);
+      const inferredFiles = explicitFiles.length > 0
+        ? explicitFiles
+        : extractPathsFromText(`${input.title} ${input.description || ''}`);
+
+      let cwd = input.cwd ? normalizePath(input.cwd) : '';
+      // If project is an explicit absolute path (e.g. "D:/College/优化"), align cwd to it so workspace matching is never split
+      if (input.project && (/^[a-zA-Z]:[\\/]/.test(input.project.trim()) || input.project.trim().startsWith('/'))) {
+        cwd = normalizePath(input.project.trim());
+      } else if (inferredFiles.length > 0 && (/^[a-zA-Z]:\//.test(inferredFiles[0]) || inferredFiles[0].startsWith('/'))) {
+        const firstDir = path.dirname(inferredFiles[0]);
+        if (firstDir && firstDir !== '.') {
+          cwd = normalizePath(firstDir);
+        }
+      }
+
       const projectName = input.project
         ? input.project.trim()
         : (cwd ? path.basename(cwd) : 'global');
@@ -442,7 +458,7 @@ export class AnchorStore {
         createdAt: now,
         updatedAt: now,
         lastTouchedAt: now,
-        files: (input.files || []).map(f => normalizePath(f)).filter(Boolean),
+        files: inferredFiles,
         tags: (input.tags || []).map(t => t.trim()).filter(Boolean),
         verifyCommand: input.verifyCommand?.trim() || undefined,
         decay: input.decay ? { ...input.decay } : { ...decayPolicy }
@@ -497,10 +513,10 @@ export class AnchorStore {
       if (filter?.priority && a.priority !== filter.priority) return false;
 
       // Project context filtering:
-      // If an anchor has specific code files attached, scope it to that cwd.
-      // If an anchor has NO code files attached (habits, general tasks, study), it is universal and visible everywhere!
+      // If an anchor has specific code files attached, match against cwd, project path/name, or file paths.
+      // If an anchor has NO code files attached (general tasks, memos), it is universal and visible everywhere!
       if (!filter?.all && targetCwd) {
-        if (a.files.length > 0 && a.cwd && !isSameOrSubPath(a.cwd, targetCwd)) {
+        if (a.files.length > 0 && (a.cwd || a.project) && !isAnchorTargetingWorkspace(a, targetCwd)) {
           return false;
         }
       }

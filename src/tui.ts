@@ -1,5 +1,6 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AnchorStore, getTodayDateString } from './store.ts';
+import { isAnchorTargetingWorkspace } from './matcher.ts';
 import type { Anchor } from './types.ts';
 import path from 'node:path';
 
@@ -55,6 +56,40 @@ export function groupAnchorsByQuadrant(anchors: Anchor[], now: number = Date.now
   }
 
   return groups;
+}
+
+const PRIORITY_RANK: Record<string, number> = { p0: 0, p1: 1, p2: 2 };
+
+/**
+ * Sort unfinished anchors into a single compact, priority-driven engineering list:
+ * 1. Active before Sleeping (quiet)
+ * 2. Matching current workspace before other workspaces
+ * 3. Due Today / Overdue before open-ended
+ * 4. Priority (P0 -> P1 -> P2)
+ */
+export function sortAnchorsForDisplay(anchors: Anchor[], cwd?: string, now: number = Date.now()): Anchor[] {
+  const todayStr = getTodayDateString(now);
+  return [...anchors].sort((a, b) => {
+    // 1. Active before sleeping
+    if (a.status !== b.status) {
+      return a.status === 'active' ? -1 : 1;
+    }
+    // 2. Current workspace match first
+    if (cwd) {
+      const aMatch = isAnchorTargetingWorkspace(a, cwd) ? 0 : 1;
+      const bMatch = isAnchorTargetingWorkspace(b, cwd) ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+    }
+    // 3. Due today / overdue first
+    const aDue = a.targetDate && a.targetDate <= todayStr ? 0 : 1;
+    const bDue = b.targetDate && b.targetDate <= todayStr ? 0 : 1;
+    if (aDue !== bDue) return aDue - bDue;
+    // 4. Priority P0 -> P1 -> P2
+    const pA = PRIORITY_RANK[a.priority] ?? 1;
+    const pB = PRIORITY_RANK[b.priority] ?? 1;
+    if (pA !== pB) return pA - pB;
+    return a.createdAt - b.createdAt;
+  });
 }
 
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
@@ -286,15 +321,23 @@ export function formatRemainingTtl(anchor: Anchor, now: number = Date.now()): st
 }
 
 /**
- * Format origin creation workspace folder (provenance: where the task was born/created)
+ * Format origin workspace / project label concisely
  */
 export function formatOrigin(anchor: Anchor | string): string {
   if (typeof anchor === 'object') {
-    if (!anchor.cwd) return anchor.project || 'global';
-    return path.basename(anchor.cwd) || 'global';
+    if (anchor.project && anchor.project !== 'global') {
+      const normProj = anchor.project.replace(/\\/g, '/').replace(/\/+$/, '');
+      if (normProj.includes('/')) {
+        const parts = normProj.split('/').filter(Boolean);
+        return parts.slice(-2).join('/');
+      }
+      return normProj;
+    }
+    if (!anchor.cwd) return 'global';
+    return path.basename(anchor.cwd.replace(/\\/g, '/')) || 'global';
   }
   if (!anchor) return 'global';
-  return path.basename(anchor) || 'global';
+  return path.basename(anchor.replace(/\\/g, '/')) || 'global';
 }
 
 /**
@@ -372,7 +415,7 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
 }
 
 /**
- * Clean, columnar-aligned checklist with Target Date and Creation Time columns
+ * Clean, flat priority-sorted engineering checklist (includes both active and quiet/sleeping tasks so nothing is ever lost)
  */
 export async function openAnchorDashboard(
   ctx: ExtensionContext,
@@ -380,66 +423,67 @@ export async function openAnchorDashboard(
 ): Promise<void> {
   if (!hasActiveUI(ctx)) return;
 
-  const list = store.list({ status: 'active', cwd: ctx.cwd });
-  if (list.length === 0) {
+  const allUnfinished = store
+    .list({ cwd: ctx.cwd, all: true })
+    .filter(a => a.status === 'active' || a.status === 'sleeping');
+
+  if (allUnfinished.length === 0) {
     ctx.ui.notify('⌖ No active anchors. Use /pin <task> to record.', 'info');
     return;
   }
 
-  const groups = groupAnchorsByQuadrant(list);
-  const sortedList = [
-    ...groups.today,
-    ...groups.upcoming,
-    ...groups.habits,
-    ...groups.backlog
-  ];
+  const sortedList = sortAnchorsForDisplay(allUnfinished, ctx.cwd);
 
   const optionMap = new Map<string, Anchor>();
   const displayOptions: string[] = [];
   const termCols = process.stdout?.columns || 96;
   const isNarrow = termCols < 88;
-  const titleWidth = isNarrow ? Math.max(18, termCols - 36) : 34;
+  const titleWidth = isNarrow ? Math.max(18, termCols - 36) : 36;
 
   for (let i = 0; i < sortedList.length; i++) {
     const a = sortedList[i];
     const num = a.id.replace(/^anc-/, '').padStart(2, '0');
-    const category = padToWidth(`[${classifyAnchor(a)}]`, 12);
+    const badge = a.status === 'sleeping'
+      ? padToWidth('[Quiet]', 10)
+      : padToWidth(`[${a.priority.toUpperCase()}]`, 10);
     const origin = formatOrigin(a);
-    const target = formatTargetDate(a);
+    const target = a.status === 'sleeping' ? 'Quiet (0 tok)' : formatTargetDate(a);
     const created = formatCreationTime(a.createdAt);
 
     const titleWithFiles = (a.files && a.files.length > 0)
       ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
       : a.title;
 
-    // Clean tabular column alignment: ID, Category, Title, Project, Target, Created
     const colNum = `${num}  `;
     const colTitle = padToWidth(titleWithFiles, titleWidth);
-    const colOrigin = padToWidth(origin, 10);
-    const colTarget = padToWidth(target, 12);
+    const colOrigin = padToWidth(origin, 12);
+    const colTarget = padToWidth(target, 14);
     const colCreated = created;
 
     const label = isNarrow
-      ? `${colNum}${category}${colTitle}  ${colTarget}`.trimEnd()
-      : `${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
+      ? `${colNum}${badge}${colTitle}  ${colTarget}`.trimEnd()
+      : `${colNum}${badge}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
 
     optionMap.set(label, a);
     displayOptions.push(label);
   }
 
-  const selected = await ctx.ui.select('⌖ Anchors (select to inspect or settle):', displayOptions);
+  const selected = await ctx.ui.select('⌖ Anchors (select to settle, wake, or inspect):', displayOptions);
   if (!selected) return;
 
   const anchor = optionMap.get(selected);
   if (!anchor) return;
 
+  const actions = [
+    '✓ Settle (Mark completed and archive)',
+    ...(anchor.status === 'sleeping' ? ['⚡ Wake up (Activate for current session)'] : []),
+    'ℹ View details & associated files',
+    '↩ Cancel'
+  ];
+
   const action = await ctx.ui.select(
     `⌖ Anchor #${anchor.id}: "${anchor.title}"`,
-    [
-      '✓ Settle (Mark completed and archive)',
-      'ℹ View details & associated files',
-      '↩ Cancel'
-    ]
+    actions
   );
   if (!action || action.startsWith('↩')) return;
 
@@ -450,9 +494,13 @@ export async function openAnchorDashboard(
       : `⌖ Settled #${anchor.id}: "${anchor.title}" (/anchor undo to revert)`;
     ctx.ui.notify(successMsg, 'info');
     updateAnchorStatusBar(ctx, store);
+  } else if (action.startsWith('⚡')) {
+    store.touch(anchor.id);
+    ctx.ui.notify(`⌖ Woke up #${anchor.id}: "${anchor.title}"`, 'info');
+    updateAnchorStatusBar(ctx, store);
   } else if (action.startsWith('ℹ')) {
     const details = [
-      `#${anchor.id} [${anchor.priority.toUpperCase()}] ${anchor.title}`,
+      `#${anchor.id} [${anchor.priority.toUpperCase()} · ${anchor.status.toUpperCase()}] ${anchor.title}`,
       anchor.description ? `Description: ${anchor.description}` : null,
       anchor.targetDate ? `Target Date: ${anchor.targetDate} (${formatTargetDate(anchor)})` : null,
       anchor.files && anchor.files.length > 0 ? `Files: ${anchor.files.join(', ')}` : null,

@@ -7,11 +7,10 @@
 
 import {
   AnchorStore,
-  classifyAnchor,
   formatOrigin,
   formatTargetDate,
   formatCreationTime,
-  groupAnchorsByQuadrant,
+  sortAnchorsForDisplay,
   padToWidth
 } from '../dist/index.js';
 
@@ -20,53 +19,45 @@ const args = process.argv.slice(2);
 
 // 1. View pending tasks: `anchor` or `anchor list`
 if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
-  const active = store.list({ status: 'active', cwd: process.cwd() });
+  const allUnfinished = store
+    .list({ cwd: process.cwd(), all: true })
+    .filter(a => a.status === 'active' || a.status === 'sleeping');
 
-  if (active.length === 0) {
+  if (allUnfinished.length === 0) {
     console.log('\n⌖ No active anchors. Use `anchor <task>` to record.\n');
     process.exit(0);
   }
 
-  console.log(`\n⌖ Anchors (${active.length} active):\n`);
+  const sorted = sortAnchorsForDisplay(allUnfinished, process.cwd());
+  const activeCount = sorted.filter(a => a.status === 'active').length;
+  const quietCount = sorted.length - activeCount;
+  const headerSuffix = quietCount > 0 ? `${activeCount} active, ${quietCount} quiet` : `${activeCount} active`;
 
-  const groups = groupAnchorsByQuadrant(active);
-  const sections = [
-    { title: "Today · Today's Focus", list: groups.today },
-    { title: 'Upcoming · Scheduled', list: groups.upcoming },
-    { title: 'Habits · Daily Loop', list: groups.habits },
-    { title: 'Backlog · Someday', list: groups.backlog },
-  ];
+  console.log(`\n⌖ Anchors (${headerSuffix}):\n`);
 
-  let seqNum = 1;
+  sorted.forEach((a, idx) => {
+    const num = String(idx + 1).padStart(2, '0');
+    const badge = a.status === 'sleeping'
+      ? padToWidth('[Quiet]', 10)
+      : padToWidth(`[${a.priority.toUpperCase()}]`, 10);
+    const origin = formatOrigin(a);
+    const target = a.status === 'sleeping' ? 'Quiet (0 tok)' : formatTargetDate(a);
+    const created = formatCreationTime(a.createdAt);
 
-  for (const sec of sections) {
-    if (sec.list.length === 0) continue;
-    console.log(`  [${sec.title}]`);
-    sec.list.forEach((a) => {
-      const num = seqNum.toString().padStart(2, '0');
-      seqNum++;
+    const titleWithFiles = (a.files && a.files.length > 0)
+      ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
+      : a.title;
 
-      const category = padToWidth(`[${classifyAnchor(a)}]`, 12);
-      const origin = formatOrigin(a);
-      const target = formatTargetDate(a);
-      const created = formatCreationTime(a.createdAt);
+    const colNum = `  ${num}  `;
+    const colTitle = padToWidth(titleWithFiles, 36);
+    const colOrigin = padToWidth(origin, 14);
+    const colTarget = padToWidth(target, 14);
+    const colCreated = created;
 
-      const titleWithFiles = (a.files && a.files.length > 0)
-        ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
-        : a.title;
+    console.log(`${colNum}${badge}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`);
+  });
 
-      const colNum = `  ${num}  `;
-      const colTitle = padToWidth(titleWithFiles, 28);
-      const colOrigin = padToWidth(origin, 10);
-      const colTarget = padToWidth(target, 12);
-      const colCreated = created;
-
-      console.log(`${colNum}${category}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`);
-    });
-    console.log('');
-  }
-
-  console.log('  Use `anchor done <id>` to complete.\n');
+  console.log('\n  Use `anchor done <id>` to complete, or `anchor undo` to restore.\n');
   process.exit(0);
 }
 
@@ -110,14 +101,10 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
   }
   try {
     // 1. Check if idInput is a 1-based sequential display number (e.g. '1', '01')
-    const active = store.list({ status: 'active', cwd: process.cwd() });
-    const groups = groupAnchorsByQuadrant(active);
-    const sortedActive = [
-      ...groups.today,
-      ...groups.upcoming,
-      ...groups.habits,
-      ...groups.backlog
-    ];
+    const allUnfinished = store
+      .list({ cwd: process.cwd(), all: true })
+      .filter(a => a.status === 'active' || a.status === 'sleeping');
+    const sortedActive = sortAnchorsForDisplay(allUnfinished, process.cwd());
 
     let targetId = idInput;
     const numMatch = idInput.match(/^\d+$/);
