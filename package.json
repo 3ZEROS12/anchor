@@ -1,6 +1,6 @@
 {
   "name": "pi-anchor",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "A digital sticky note docked below your Pi editor — stick notes in 0ms (pin: ...), track long tasks with micro progress bars [■■□□], jump back to the original session (↪), and auto-tear off on git commit.",
   "type": "module",
   "main": "dist/index.js",

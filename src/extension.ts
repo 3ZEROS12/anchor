@@ -71,14 +71,25 @@ export function parseAnchorCommandInput(raw: string): {
 /**
  * Detect 0ms human-first quick note prefix in the input box:
  * e.g. `pin: 明天把Token改Cookie` or `便签: 检查网关重试 [1/4]`
+ * Returns `{ matched: true, note: '...' }` (or `note: ''` if user typed bare `pin:`)
  */
 export function parseQuickNoteInput(text: string): string | null {
-  const m = (text || '').trim().match(/^(?:pin|note|便签|备忘)\s*[:：]\s*(.+)$/i);
-  return m && m[1].trim() ? m[1].trim() : null;
+  const m = (text || '').trim().match(/^(?:pin|note|便签|备忘)\s*[:：]\s*(.*)$/i);
+  if (!m) return null;
+  return m[1].trim();
 }
 
+/**
+ * Resolve note target by exact ID first (`#2` -> `anc-2`), falling back to 1-based display row index
+ * only when no note with that ID exists. Prevents settling the wrong note when sort order differs from ID order!
+ */
 export function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?: string): string | undefined {
   const clean = idOrIndex.trim().replace(/^#/, '');
+  // 1. Exact ID match first (matches #num shown in TUI and CLI!)
+  const direct = store.get(clean);
+  if (direct) return direct.id;
+
+  // 2. Fallback to 1-based display row index
   if (/^\d+$/.test(clean)) {
     const seqIndex = parseInt(clean, 10);
     const visible = store
@@ -89,7 +100,7 @@ export function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?:
       return sorted[seqIndex - 1].id;
     }
   }
-  return store.get(clean)?.id;
+  return undefined;
 }
 
 function getSessionFileSafe(ctx?: ExtensionContext): string | undefined {
@@ -152,7 +163,14 @@ export default function (pi: ExtensionAPI) {
   pi.on('input', async (event: any, ctx: ExtensionContext) => {
     if (event?.source === 'extension') return { action: 'continue' };
     const quickNote = parseQuickNoteInput(String(event?.text || ''));
-    if (!quickNote) return { action: 'continue' };
+    if (quickNote === null) return { action: 'continue' };
+
+    if (!quickNote) {
+      if (hasActiveUI(ctx)) {
+        await openAnchorDashboard(ctx, store);
+      }
+      return { action: 'handled' };
+    }
 
     const anc = createStickyNoteFromUser(quickNote, ctx);
     const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : '';
@@ -433,7 +451,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const rawTrimmed = (args || '').trim();
-      if (/^(?:#?anc-\d+|#\d+)$/i.test(rawTrimmed)) {
+      if (/^(?:#?anc-\d+|#?\d+)$/i.test(rawTrimmed)) {
         const resolvedId = resolveAnchorTarget(store, rawTrimmed, ctx.cwd);
         if (resolvedId) {
           const settled = store.settle(resolvedId, { settledBy: 'manual' });

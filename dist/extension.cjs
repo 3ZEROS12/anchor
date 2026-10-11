@@ -103,10 +103,10 @@ function extractProgressFromText(rawTitle) {
       progress: { done: 0, total: steps.length, steps }
     };
   }
-  const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\)|(?:^|\s)(\d{1,3})\/(\d{1,3})(?=\s|$))/);
+  const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\))/);
   if (ratioMatch) {
-    const done = parseInt(ratioMatch[1] ?? ratioMatch[3] ?? ratioMatch[5], 10);
-    const total = parseInt(ratioMatch[2] ?? ratioMatch[4] ?? ratioMatch[6], 10);
+    const done = parseInt(ratioMatch[1] ?? ratioMatch[3], 10);
+    const total = parseInt(ratioMatch[2] ?? ratioMatch[4], 10);
     if (!isNaN(done) && !isNaN(total) && total >= 2 && total <= 500 && done >= 0 && done <= total) {
       const stripped = rawTitle.replace(ratioMatch[0], " ").replace(/\s+/g, " ").trim();
       return {
@@ -128,7 +128,8 @@ function isAnchorTargetingWorkspace(anchor, targetCwd) {
   }
   if (anchor.files && anchor.files.length > 0) {
     for (const f of anchor.files) {
-      if (isSameOrSubPath(f, normTarget)) return true;
+      const resolvedFile = !import_node_path.default.isAbsolute(f) && !/^[a-zA-Z]:\//.test(f) && anchor.cwd ? `${anchor.cwd.replace(/\\/g, "/").replace(/\/+$/, "")}/${f.replace(/^\/+/, "")}` : f;
+      if (isSameOrSubPath(resolvedFile, normTarget)) return true;
     }
   }
   if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) {
@@ -218,6 +219,41 @@ function makeSafeTaskAnnotation(filePath, anchor) {
   const num = anchor.id.replace(/^anc-/, "");
   return "\n\n" + fmt(`\u2316 Note #${num}: ${anchor.title}`);
 }
+var COMMIT_STOP_WORDS = /* @__PURE__ */ new Set([
+  "fix",
+  "feat",
+  "chore",
+  "docs",
+  "test",
+  "tests",
+  "refactor",
+  "style",
+  "perf",
+  "build",
+  "ci",
+  "bug",
+  "issue",
+  "update",
+  "add",
+  "remove",
+  "todo",
+  "note",
+  "task",
+  "the",
+  "and",
+  "for",
+  "with",
+  "\u4FEE\u590D",
+  "\u4F18\u5316",
+  "\u66F4\u65B0",
+  "\u6DFB\u52A0",
+  "\u4FEE\u6539",
+  "\u5B8C\u6210",
+  "\u95EE\u9898",
+  "\u4EFB\u52A1",
+  "\u6A21\u5757",
+  "\u529F\u80FD"
+]);
 function matchesCommitMessage(anchor, commitMessages) {
   const idLower = anchor.id.toLowerCase();
   const numId = `#${anchor.id.replace(/^anc-/, "")}`;
@@ -226,21 +262,22 @@ function matchesCommitMessage(anchor, commitMessages) {
   if (typeof Intl !== "undefined" && Intl.Segmenter) {
     try {
       const seg = new Intl.Segmenter("und", { granularity: "word" });
-      titleTokens = Array.from(seg.segment(title)).filter((s) => s.isWordLike).map((s) => s.segment.trim().toLowerCase()).filter((t) => t.length >= 2);
+      titleTokens = Array.from(seg.segment(title)).filter((s) => s.isWordLike).map((s) => s.segment.trim().toLowerCase()).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
     } catch {
-      titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2);
+      titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
     }
   } else {
-    titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2);
+    titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
   }
   for (const msg of commitMessages) {
     const msgLower = msg.toLowerCase();
-    if (msgLower.includes(idLower) || msgLower.includes(numId)) {
+    if (msgLower.includes(idLower) || new RegExp(`(?:^|\\s|\\()${numId}(?:\\b|\\)|$)`).test(msgLower)) {
       return { matched: true, message: msg };
     }
     if (titleTokens.length > 0) {
       const hits = titleTokens.filter((tok) => msgLower.includes(tok)).length;
-      if (hits >= Math.min(2, titleTokens.length)) {
+      const requiredHits = titleTokens.length === 1 ? 1 : 2;
+      if (hits >= requiredHits) {
         return { matched: true, message: msg };
       }
     }
@@ -540,9 +577,10 @@ var AnchorStore = class {
       if (idx === -1) throw new Error(`Note not found: ${id}`);
       const current = state.anchors[idx];
       const now = Date.now();
-      const total = explicitTotal && explicitTotal >= 2 ? explicitTotal : current.progress?.total || 4;
+      const safeDelta = Number.isFinite(delta) ? delta : 1;
+      const total = explicitTotal && Number.isFinite(explicitTotal) && explicitTotal >= 1 ? explicitTotal : current.progress?.total || 4;
       const prevDone = current.progress?.done || 0;
-      const nextDone = Math.max(0, Math.min(total, prevDone + delta));
+      const nextDone = Math.max(0, Math.min(total, prevDone + safeDelta));
       current.progress = {
         ...current.progress || {},
         done: nextDone,
@@ -785,15 +823,24 @@ function updateStartupBanner(ctx, store) {
           const titleClipped = truncateToWidth(a.title, availTitle);
           return [truncateToWidth(`${prefix}${titleClipped}${nextStep}${suffix}`, width)];
         }
-        const countTag = fg("accent", `\u2316 ${sorted.length} notes: `);
-        const segments = sorted.slice(0, 3).map((a) => {
+        const maxItems = width < 68 ? 1 : width < 100 ? 2 : 3;
+        const visibleSlice = sorted.slice(0, maxItems);
+        const countTag = fg("accent", `\u2316 ${sorted.length}: `);
+        const moreCount = sorted.length - visibleSlice.length;
+        const moreSuffix = moreCount > 0 ? fg("dim", ` +${moreCount}`) : "";
+        const perSlotWidth = Math.max(
+          10,
+          Math.floor((width - getDisplayWidth(countTag) - getDisplayWidth(moreSuffix) - (visibleSlice.length - 1) * 5) / visibleSlice.length)
+        );
+        const segments = visibleSlice.map((a) => {
           const num = a.id.replace(/^anc-/, "");
           const bar = a.progress ? `${formatProgressBar(a.progress)} ` : "";
-          const shortTitle = truncateToWidth(a.title, Math.max(14, Math.floor((width - 20) / Math.min(3, sorted.length)) - 12));
+          const prefix = `#${num} ${bar}`;
+          const titleBudget = Math.max(6, perSlotWidth - getDisplayWidth(prefix));
+          const shortTitle = truncateToWidth(a.title, titleBudget);
           return `${fg("dim", `#${num}`)} ${bar}${shortTitle}`;
         });
-        const more = sorted.length > 3 ? fg("dim", ` +${sorted.length - 3}`) : "";
-        return [truncateToWidth(`${countTag}${segments.join(fg("dim", "  \xB7  "))}${more}`, width)];
+        return [truncateToWidth(`${countTag}${segments.join(fg("dim", " \xB7 "))}${moreSuffix}`, width)];
       },
       invalidate: () => {
       }
@@ -834,7 +881,7 @@ async function openAnchorDashboard(ctx, store) {
   if (!anchor) return;
   const currentSessionFile = ctx.sessionManager?.getSessionFile?.();
   const canJumpSession = Boolean(
-    anchor.sessionFile && import_node_fs2.default.existsSync(anchor.sessionFile) && typeof ctx.switchSession === "function" && (!currentSessionFile || import_node_path2.default.resolve(anchor.sessionFile) !== import_node_path2.default.resolve(currentSessionFile))
+    anchor.sessionFile && import_node_fs2.default.existsSync(anchor.sessionFile) && typeof ctx.switchSession === "function" && (!currentSessionFile || !isSameOrSubPath(anchor.sessionFile, currentSessionFile))
   );
   const stepLabel = anchor.progress ? `\u25B6 Advance step (${anchor.progress.done}/${anchor.progress.total} \u2794 ${Math.min(anchor.progress.total, anchor.progress.done + 1)}/${anchor.progress.total})` : "\u25B6 Start progress bar (1/4)";
   const actions = [
@@ -923,11 +970,14 @@ function parseAnchorCommandInput(raw) {
   };
 }
 function parseQuickNoteInput(text) {
-  const m = (text || "").trim().match(/^(?:pin|note|便签|备忘)\s*[:：]\s*(.+)$/i);
-  return m && m[1].trim() ? m[1].trim() : null;
+  const m = (text || "").trim().match(/^(?:pin|note|便签|备忘)\s*[:：]\s*(.*)$/i);
+  if (!m) return null;
+  return m[1].trim();
 }
 function resolveAnchorTarget(store, idOrIndex, cwd) {
   const clean = idOrIndex.trim().replace(/^#/, "");
+  const direct = store.get(clean);
+  if (direct) return direct.id;
   if (/^\d+$/.test(clean)) {
     const seqIndex = parseInt(clean, 10);
     const visible = store.list({ cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping");
@@ -936,7 +986,7 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
       return sorted[seqIndex - 1].id;
     }
   }
-  return store.get(clean)?.id;
+  return void 0;
 }
 function getSessionFileSafe(ctx) {
   try {
@@ -985,7 +1035,13 @@ function extension_default(pi) {
   pi.on("input", async (event, ctx) => {
     if (event?.source === "extension") return { action: "continue" };
     const quickNote = parseQuickNoteInput(String(event?.text || ""));
-    if (!quickNote) return { action: "continue" };
+    if (quickNote === null) return { action: "continue" };
+    if (!quickNote) {
+      if (hasActiveUI(ctx)) {
+        await openAnchorDashboard(ctx, store);
+      }
+      return { action: "handled" };
+    }
     const anc = createStickyNoteFromUser(quickNote, ctx);
     const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : "";
     if (hasActiveUI(ctx)) {
@@ -1237,7 +1293,7 @@ ${snippet}` };
         return;
       }
       const rawTrimmed = (args || "").trim();
-      if (/^(?:#?anc-\d+|#\d+)$/i.test(rawTrimmed)) {
+      if (/^(?:#?anc-\d+|#?\d+)$/i.test(rawTrimmed)) {
         const resolvedId = resolveAnchorTarget(store, rawTrimmed, ctx.cwd);
         if (resolvedId) {
           const settled = store.settle(resolvedId, { settledBy: "manual" });

@@ -207,10 +207,14 @@ test('v0.5.0 Progress Bar & Session Bookmark - parses inline progress ratios/ste
   try {
     const store = new AnchorStore(tempDir);
 
-    // 1. Ratio syntax: [2/5]
+    // 1. Ratio syntax: [5/30] or (2/5) works, while unbracketed dates like 10/12 are NOT hijacked!
     const p1 = extractProgressFromText('刷完 Python-30days [5/30]');
     assert.strictEqual(p1.cleanTitle, '刷完 Python-30days');
     assert.deepStrictEqual(p1.progress, { done: 5, total: 30 });
+
+    const dateTitle = extractProgressFromText('Refactor API before 10/12 release');
+    assert.strictEqual(dateTitle.cleanTitle, 'Refactor API before 10/12 release');
+    assert.strictEqual(dateTitle.progress, undefined);
 
     // 2. Numbered steps syntax: 1. A 2. B 3. C
     const p2 = extractProgressFromText('重构登录流: 1. 抽出接口 2. 替换Cookie 3. 补单测');
@@ -238,6 +242,14 @@ test('v0.5.0 Progress Bar & Session Bookmark - parses inline progress ratios/ste
     const step3 = store.step(note.id, 2);
     assert.strictEqual(step3.anchor.progress?.done, 3);
     assert.strictEqual(step3.completed, true);
+
+    // 3. NaN delta guard & commit stop-word guard
+    const stepNan = store.step(note.id, Number.NaN);
+    assert.strictEqual(stepNan.anchor.progress?.done, 3);
+
+    const genericNote = store.create({ title: 'fix bug in login', cwd: '/workspace/app' });
+    assert.strictEqual(matchesCommitMessage(genericNote, ['fix: typo in bug template']).matched, false);
+    assert.strictEqual(matchesCommitMessage(genericNote, ['fix: login session check']).matched, true);
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

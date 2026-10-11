@@ -30,8 +30,8 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
   const sorted = sortAnchorsForDisplay(allNotes, process.cwd());
   console.log(`\n⌖ Notes (${sorted.length}):\n`);
 
-  sorted.forEach((a, idx) => {
-    const num = String(idx + 1).padStart(2, '0');
+  sorted.forEach((a) => {
+    const num = a.id.replace(/^anc-/, '').padStart(2, '0');
     const bar = a.progress ? `${formatProgressBar(a.progress)} ` : '';
     const origin = formatOrigin(a) + (a.sessionFile ? ' ↪' : '');
     const age = a.status === 'sleeping'
@@ -66,13 +66,13 @@ if (args[0] === 'step' || args[0] === '+') {
   const idInput = args[1] || '1';
   const delta = args[2] ? parseInt(args[2], 10) : 1;
   try {
-    const allNotes = store
-      .list({ cwd: process.cwd(), all: true })
-      .filter(a => a.status === 'active' || a.status === 'sleeping');
-    const sorted = sortAnchorsForDisplay(allNotes, process.cwd());
-
-    let targetId = idInput;
-    if (/^\d+$/.test(idInput)) {
+    const direct = store.get(idInput);
+    let targetId = direct ? direct.id : idInput;
+    if (!direct && /^\d+$/.test(idInput)) {
+      const allNotes = store
+        .list({ cwd: process.cwd(), all: true })
+        .filter(a => a.status === 'active' || a.status === 'sleeping');
+      const sorted = sortAnchorsForDisplay(allNotes, process.cwd());
       const seqIndex = parseInt(idInput, 10);
       if (seqIndex >= 1 && seqIndex <= sorted.length) {
         targetId = sorted[seqIndex - 1].id;
@@ -111,13 +111,13 @@ if (args[0] === 'done' || args[0] === 'rm' || args[0] === 'close') {
     process.exit(1);
   }
   try {
-    const allNotes = store
-      .list({ cwd: process.cwd(), all: true })
-      .filter(a => a.status === 'active' || a.status === 'sleeping');
-    const sorted = sortAnchorsForDisplay(allNotes, process.cwd());
-
-    let targetId = idInput;
-    if (/^\d+$/.test(idInput)) {
+    const direct = store.get(idInput);
+    let targetId = direct ? direct.id : idInput;
+    if (!direct && /^\d+$/.test(idInput)) {
+      const allNotes = store
+        .list({ cwd: process.cwd(), all: true })
+        .filter(a => a.status === 'active' || a.status === 'sleeping');
+      const sorted = sortAnchorsForDisplay(allNotes, process.cwd());
       const seqIndex = parseInt(idInput, 10);
       if (seqIndex >= 1 && seqIndex <= sorted.length) {
         targetId = sorted[seqIndex - 1].id;

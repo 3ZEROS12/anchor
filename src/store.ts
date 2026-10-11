@@ -101,11 +101,11 @@ export function extractProgressFromText(rawTitle: string): { cleanTitle: string;
     };
   }
 
-  // 2. Check explicit ratio tag: "[2/5]", "(0/4)", or trailing/standalone "5/30"
-  const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\)|(?:^|\s)(\d{1,3})\/(\d{1,3})(?=\s|$))/);
+  // 2. Check explicit bracketed ratio tag: "[2/5]" or "(0/4)" (requires brackets so dates like 10/12 are never hijacked)
+  const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\))/);
   if (ratioMatch) {
-    const done = parseInt(ratioMatch[1] ?? ratioMatch[3] ?? ratioMatch[5], 10);
-    const total = parseInt(ratioMatch[2] ?? ratioMatch[4] ?? ratioMatch[6], 10);
+    const done = parseInt(ratioMatch[1] ?? ratioMatch[3], 10);
+    const total = parseInt(ratioMatch[2] ?? ratioMatch[4], 10);
     if (!isNaN(done) && !isNaN(total) && total >= 2 && total <= 500 && done >= 0 && done <= total) {
       const stripped = rawTitle
         .replace(ratioMatch[0], ' ')
@@ -137,7 +137,10 @@ export function isAnchorTargetingWorkspace(anchor: Anchor, targetCwd?: string): 
 
   if (anchor.files && anchor.files.length > 0) {
     for (const f of anchor.files) {
-      if (isSameOrSubPath(f, normTarget)) return true;
+      const resolvedFile = (!path.isAbsolute(f) && !/^[a-zA-Z]:\//.test(f) && anchor.cwd)
+        ? `${anchor.cwd.replace(/\\/g, '/').replace(/\/+$/, '')}/${f.replace(/^\/+/, '')}`
+        : f;
+      if (isSameOrSubPath(resolvedFile, normTarget)) return true;
     }
   }
 
@@ -221,6 +224,12 @@ export function makeSafeTaskAnnotation(filePath: string, anchor: Anchor): string
   return '\n\n' + fmt(`⌖ Note #${num}: ${anchor.title}`);
 }
 
+const COMMIT_STOP_WORDS = new Set([
+  'fix', 'feat', 'chore', 'docs', 'test', 'tests', 'refactor', 'style', 'perf', 'build', 'ci',
+  'bug', 'issue', 'update', 'add', 'remove', 'todo', 'note', 'task', 'the', 'and', 'for', 'with',
+  '修复', '优化', '更新', '添加', '修改', '完成', '问题', '任务', '模块', '功能'
+]);
+
 /**
  * Clever Touch 3: Match a `git commit -m "..."` message against a sticky note (supports CJK & English)
  */
@@ -236,22 +245,23 @@ export function matchesCommitMessage(anchor: Anchor, commitMessages: string[]): 
       titleTokens = Array.from(seg.segment(title))
         .filter((s: any) => s.isWordLike)
         .map((s: any) => s.segment.trim().toLowerCase())
-        .filter((t: string) => t.length >= 2);
+        .filter((t: string) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
     } catch {
-      titleTokens = title.split(/[\s,._\-\/]+/).filter(t => t.length >= 2);
+      titleTokens = title.split(/[\s,._\-\/]+/).filter(t => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
     }
   } else {
-    titleTokens = title.split(/[\s,._\-\/]+/).filter(t => t.length >= 2);
+    titleTokens = title.split(/[\s,._\-\/]+/).filter(t => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
   }
 
   for (const msg of commitMessages) {
     const msgLower = msg.toLowerCase();
-    if (msgLower.includes(idLower) || msgLower.includes(numId)) {
+    if (msgLower.includes(idLower) || new RegExp(`(?:^|\\s|\\()${numId}(?:\\b|\\)|$)`).test(msgLower)) {
       return { matched: true, message: msg };
     }
     if (titleTokens.length > 0) {
       const hits = titleTokens.filter(tok => msgLower.includes(tok)).length;
-      if (hits >= Math.min(2, titleTokens.length)) {
+      const requiredHits = titleTokens.length === 1 ? 1 : 2;
+      if (hits >= requiredHits) {
         return { matched: true, message: msg };
       }
     }
@@ -615,11 +625,12 @@ export class AnchorStore {
 
       const current = state.anchors[idx];
       const now = Date.now();
-      const total = explicitTotal && explicitTotal >= 2
+      const safeDelta = Number.isFinite(delta) ? delta : 1;
+      const total = explicitTotal && Number.isFinite(explicitTotal) && explicitTotal >= 1
         ? explicitTotal
         : (current.progress?.total || 4);
       const prevDone = current.progress?.done || 0;
-      const nextDone = Math.max(0, Math.min(total, prevDone + delta));
+      const nextDone = Math.max(0, Math.min(total, prevDone + safeDelta));
 
       current.progress = {
         ...(current.progress || {}),

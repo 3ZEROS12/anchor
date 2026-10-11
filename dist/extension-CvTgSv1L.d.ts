@@ -197,8 +197,13 @@ declare function parseAnchorCommandInput(raw: string): {
 /**
  * Detect 0ms human-first quick note prefix in the input box:
  * e.g. `pin: 明天把Token改Cookie` or `便签: 检查网关重试 [1/4]`
+ * Returns `{ matched: true, note: '...' }` (or `note: ''` if user typed bare `pin:`)
  */
 declare function parseQuickNoteInput(text: string): string | null;
+/**
+ * Resolve note target by exact ID first (`#2` -> `anc-2`), falling back to 1-based display row index
+ * only when no note with that ID exists. Prevents settling the wrong note when sort order differs from ID order!
+ */
 declare function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?: string): string | undefined;
 declare function export_default(pi: ExtensionAPI): void;
 

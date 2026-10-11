@@ -122,6 +122,7 @@ test('StickyNoteTUI - CJK width alignment, truncation, and command parsing', () 
   assert.strictEqual(parseAnchorCommandInput('Remember to check logs').mode, 'pin');
   assert.strictEqual(parseQuickNoteInput('pin: 明天把Token改Cookie'), '明天把Token改Cookie');
   assert.strictEqual(parseQuickNoteInput('便签：检查网关重试 [1/4]'), '检查网关重试 [1/4]');
+  assert.strictEqual(parseQuickNoteInput('pin:   '), '');
   assert.strictEqual(parseQuickNoteInput('normal chat message'), null);
   assert.strictEqual(formatProgressBar({ done: 2, total: 4 }), '[■■□□ 2/4]');
 
@@ -129,6 +130,11 @@ test('StickyNoteTUI - CJK width alignment, truncation, and command parsing', () 
   try {
     const store = new AnchorStore(tempDir);
     const a1 = store.create({ title: 'Note A', cwd: '/workspace/p' });
+    const a2 = store.create({ title: 'Note B', cwd: '/workspace/p' });
+    // Touch a2 more recently so a2 sorts to Row 1 while its ID is anc-2
+    store.touch(a2.id, Date.now() + 5000);
+    // Exact ID match must win over row index so `/done 2` settles anc-2 (not Row 2 anc-1)!
+    assert.strictEqual(resolveAnchorTarget(store, '2', '/workspace/p'), a2.id);
     assert.strictEqual(resolveAnchorTarget(store, '1', '/workspace/p'), a1.id);
     assert.strictEqual(resolveAnchorTarget(store, '#anc-1', '/workspace/p'), a1.id);
   } finally {

@@ -1,5 +1,5 @@
 import type { ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { AnchorStore, isAnchorTargetingWorkspace } from './store.ts';
+import { AnchorStore, isAnchorTargetingWorkspace, isSameOrSubPath } from './store.ts';
 import type { Anchor, AnchorProgress } from './types.ts';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -238,16 +238,26 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
           return [truncateToWidth(`${prefix}${titleClipped}${nextStep}${suffix}`, width)];
         }
 
-        // Multiple notes: compact horizontal sticky strip (`⌖ #1 ... · #2 ...`)
-        const countTag = fg('accent', `⌖ ${sorted.length} notes: `);
-        const segments = sorted.slice(0, 3).map(a => {
+        // Multiple notes: adaptive horizontal sticky strip (fits narrow 50-col and wide terminals cleanly)
+        const maxItems = width < 68 ? 1 : (width < 100 ? 2 : 3);
+        const visibleSlice = sorted.slice(0, maxItems);
+        const countTag = fg('accent', `⌖ ${sorted.length}: `);
+        const moreCount = sorted.length - visibleSlice.length;
+        const moreSuffix = moreCount > 0 ? fg('dim', ` +${moreCount}`) : '';
+        const perSlotWidth = Math.max(
+          10,
+          Math.floor((width - getDisplayWidth(countTag) - getDisplayWidth(moreSuffix) - (visibleSlice.length - 1) * 5) / visibleSlice.length)
+        );
+
+        const segments = visibleSlice.map(a => {
           const num = a.id.replace(/^anc-/, '');
           const bar = a.progress ? `${formatProgressBar(a.progress)} ` : '';
-          const shortTitle = truncateToWidth(a.title, Math.max(14, Math.floor((width - 20) / Math.min(3, sorted.length)) - 12));
+          const prefix = `#${num} ${bar}`;
+          const titleBudget = Math.max(6, perSlotWidth - getDisplayWidth(prefix));
+          const shortTitle = truncateToWidth(a.title, titleBudget);
           return `${fg('dim', `#${num}`)} ${bar}${shortTitle}`;
         });
-        const more = sorted.length > 3 ? fg('dim', ` +${sorted.length - 3}`) : '';
-        return [truncateToWidth(`${countTag}${segments.join(fg('dim', '  ·  '))}${more}`, width)];
+        return [truncateToWidth(`${countTag}${segments.join(fg('dim', ' · '))}${moreSuffix}`, width)];
       },
       invalidate: () => {}
     });
@@ -313,7 +323,7 @@ export async function openAnchorDashboard(
     anchor.sessionFile &&
     fs.existsSync(anchor.sessionFile) &&
     typeof (ctx as ExtensionCommandContext).switchSession === 'function' &&
-    (!currentSessionFile || path.resolve(anchor.sessionFile) !== path.resolve(currentSessionFile))
+    (!currentSessionFile || !isSameOrSubPath(anchor.sessionFile, currentSessionFile))
   );
 
   const stepLabel = anchor.progress
