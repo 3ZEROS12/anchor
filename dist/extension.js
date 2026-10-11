@@ -14,7 +14,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-NVNWWM3J.js";
+} from "./chunk-G72UHPBN.js";
 
 // src/extension.ts
 import { Type } from "@sinclair/typebox";

@@ -112,7 +112,7 @@ function globToRegExp(pattern) {
 function normalizePath(filePath, baseCwd) {
   if (typeof filePath !== "string") return "";
   let norm = filePath.trim().replace(/\\/g, "/").replace(/^\.\//, "");
-  if (baseCwd && (import_node_path.default.isAbsolute(filePath) || norm.startsWith("/"))) {
+  if (baseCwd && (import_node_path.default.isAbsolute(filePath) || norm.startsWith("/") || /^[a-zA-Z]:\//.test(norm))) {
     const normBase = baseCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
     const lowerNorm = norm.toLowerCase();
     const lowerBase = normBase.toLowerCase();
@@ -128,8 +128,9 @@ function isSameOrSubPath(anchorCwd, targetCwd) {
   if (!anchorCwd || !targetCwd) return false;
   const normA = anchorCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
   const normT = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  const cmpA = process.platform === "win32" ? normA.toLowerCase() : normA;
-  const cmpT = process.platform === "win32" ? normT.toLowerCase() : normT;
+  const isWinStyle = process.platform === "win32" || /^[a-zA-Z]:\//.test(normA) || /^[a-zA-Z]:\//.test(normT);
+  const cmpA = isWinStyle ? normA.toLowerCase() : normA;
+  const cmpT = isWinStyle ? normT.toLowerCase() : normT;
   return cmpA === cmpT || cmpT.startsWith(cmpA + "/") || cmpA.startsWith(cmpT + "/");
 }
 function matchAnchorAgainstTouchedFiles(anchor, touchedFiles) {
