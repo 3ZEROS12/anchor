@@ -6,6 +6,7 @@ import os from 'node:os';
 import { AnchorStore } from '../src/store.ts';
 import {
   formatOrigin,
+  formatProgressBar,
   formatRelativeAge,
   getDisplayWidth,
   openAnchorDashboard,
@@ -14,7 +15,7 @@ import {
   updateAnchorStatusBar,
   updateStartupBanner
 } from '../src/tui.ts';
-import { parseAnchorCommandInput, resolveAnchorTarget } from '../src/extension.ts';
+import { parseAnchorCommandInput, parseQuickNoteInput, resolveAnchorTarget } from '../src/extension.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 function createTempDir(): string {
@@ -27,29 +28,34 @@ test('StickyNoteTUI - status bar badge and clean startup sticky note card', () =
     const store = new AnchorStore(tempDir);
     let currentStatus: string | undefined = 'init';
     let widgetLines: string[] | undefined;
+    let widgetPlacement: string | undefined;
 
     const mockCtx = {
       cwd: '/workspace/app',
       hasUI: true,
       ui: {
         setStatus: (_k: string, val: string | undefined) => { currentStatus = val; },
-        setWidget: (_k: string, lines: string[] | undefined) => { widgetLines = lines; }
+        setWidget: (_k: string, lines: string[] | undefined, opts?: { placement?: string }) => {
+          widgetLines = lines;
+          widgetPlacement = opts?.placement;
+        }
       }
     } as unknown as ExtensionContext;
 
     updateAnchorStatusBar(mockCtx, store);
-    updateStartupBanner(mockCtx, store);
     assert.strictEqual(currentStatus, undefined);
     assert.strictEqual(widgetLines, undefined);
+    assert.strictEqual(widgetPlacement, 'belowEditor');
 
-    store.create({ title: 'Migrate auth to cookies in src/auth.ts', cwd: '/workspace/app' });
+    store.create({ title: 'Migrate auth to cookies in src/auth.ts [2/4]', cwd: '/workspace/app' });
     updateAnchorStatusBar(mockCtx, store);
-    updateStartupBanner(mockCtx, store);
 
     assert.strictEqual(currentStatus, '⌖ 1');
+    assert.strictEqual(widgetPlacement, 'belowEditor');
     const lines = widgetLines as string[] | undefined;
-    assert.ok(lines && lines.some((l: string) => l.includes('⌖ 1 note')));
-    assert.ok(lines && lines.some((l: string) => l.includes('Migrate auth to cookies') && l.includes('app · auth.ts')));
+    assert.ok(lines && lines.length === 1);
+    assert.ok(lines && lines[0].includes('[■■□□ 2/4]'));
+    assert.ok(lines && lines[0].includes('Migrate auth to cookies') && lines[0].includes('app · auth.ts'));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -111,7 +117,13 @@ test('StickyNoteTUI - CJK width alignment, truncation, and command parsing', () 
   assert.strictEqual(parseAnchorCommandInput('').mode, 'dashboard');
   assert.strictEqual(parseAnchorCommandInput('undo').mode, 'undo');
   assert.strictEqual(parseAnchorCommandInput('done 1').mode, 'settle');
+  assert.strictEqual(parseAnchorCommandInput('step 1').mode, 'step');
+  assert.strictEqual(parseAnchorCommandInput('jump 1').mode, 'jump');
   assert.strictEqual(parseAnchorCommandInput('Remember to check logs').mode, 'pin');
+  assert.strictEqual(parseQuickNoteInput('pin: 明天把Token改Cookie'), '明天把Token改Cookie');
+  assert.strictEqual(parseQuickNoteInput('便签：检查网关重试 [1/4]'), '检查网关重试 [1/4]');
+  assert.strictEqual(parseQuickNoteInput('normal chat message'), null);
+  assert.strictEqual(formatProgressBar({ done: 2, total: 4 }), '[■■□□ 2/4]');
 
   const tempDir = createTempDir();
   try {

@@ -1,7 +1,7 @@
 {
   "name": "pi-anchor",
-  "version": "0.4.0",
-  "description": "A digital sticky note for Pi — stick a quick note across sessions (/pin), get a 1-line whisper when touching matching files, and auto-tear off on git commit with 0 TODO.md clutter.",
+  "version": "0.5.0",
+  "description": "A digital sticky note docked below your Pi editor — stick notes in 0ms (pin: ...), track long tasks with micro progress bars [■■□□], jump back to the original session (↪), and auto-tear off on git commit.",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",

@@ -1,6 +1,6 @@
-import { A as Anchor, a as AnchorStore } from './extension-B1-fzCox.js';
-export { b as AnchorEvidence, c as AnchorPriority, d as AnchorStatus, e as AnchorStoreState, C as COMMENT_FORMATS, M as MS_PER_DAY, Q as QUIET_AFTER_DAYS, T as TouchMatchResult, f as acquireSyncLock, g as atomicRenameWithRetry, h as extractPathsFromText, i as findMatchedAnchors, j as getDefaultStorageDir, k as globToRegExp, l as isAnchorTargetingWorkspace, m as isSameOrSubPath, n as makeSafeTaskAnnotation, o as matchAnchorAgainstTouchedFiles, p as matchesCommitMessage, q as normalizePath, r as parseAnchorCommandInput, s as renderActiveAnchorsContext, t as renderColdStartAnchorsContext, u as resolveAnchorTarget, v as sweepQuietNotes } from './extension-B1-fzCox.js';
-import { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { A as Anchor, a as AnchorProgress, b as AnchorStore } from './extension-Cq1NH1jT.js';
+export { c as AnchorEvidence, d as AnchorPriority, e as AnchorStatus, f as AnchorStoreState, C as COMMENT_FORMATS, M as MS_PER_DAY, Q as QUIET_AFTER_DAYS, T as TouchMatchResult, g as acquireSyncLock, h as atomicRenameWithRetry, i as extractPathsFromText, j as extractProgressFromText, k as findMatchedAnchors, l as getDefaultStorageDir, m as globToRegExp, n as isAnchorTargetingWorkspace, o as isSameOrSubPath, p as makeSafeTaskAnnotation, q as matchAnchorAgainstTouchedFiles, r as matchesCommitMessage, s as normalizePath, t as parseAnchorCommandInput, u as parseQuickNoteInput, v as renderActiveAnchorsContext, w as renderColdStartAnchorsContext, x as resolveAnchorTarget, y as sweepQuietNotes } from './extension-Cq1NH1jT.js';
+import { ExtensionContext, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 
 declare function stripAnsi(str: string): string;
 /**
@@ -11,11 +11,15 @@ declare function hasActiveUI(ctx: ExtensionContext | null | undefined): ctx is E
 declare function truncateToWidth(str: string, maxWidth: number, ellipsis?: string): string;
 declare function padToWidth(str: string, targetWidth: number): string;
 /**
+ * Render a 4-cell micro progress bar: e.g. `[■■□□ 2/4]` or `[■□□□ 5/30]`
+ */
+declare function formatProgressBar(progress?: AnchorProgress, cells?: number): string;
+/**
  * Format relative sticky-note age cleanly: 'just now', '15m ago', '3h ago', '2d ago'
  */
 declare function formatRelativeAge(timestamp: number, now?: number): string;
 /**
- * Format workspace & first file context concisely (e.g. 'anchor · src/auth.ts' or 'College/优化')
+ * Format workspace & first file context concisely (e.g. 'anchor · auth.ts' or 'College/优化')
  */
 declare function formatOrigin(anchor: Anchor | string): string;
 /**
@@ -26,17 +30,18 @@ declare function formatOrigin(anchor: Anchor | string): string;
  */
 declare function sortAnchorsForDisplay(anchors: Anchor[], cwd?: string): Anchor[];
 /**
- * Update status bar badge: `⌖ 2` (invisible when 0 active notes)
+ * Update status bar badge (`⌖ 2`) AND the persistent below-editor sticky strip!
  */
 declare function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore): void;
 /**
- * Render clean sticky-note card above editor on session startup.
- * Automatically disappears as soon as the user sends their first message.
+ * Render persistent 1-line sticky-note strip BELOW the editor (`placement: 'belowEditor'`).
+ * Never collides with `pi-lingual` (`aboveEditor`), stays visible while you work,
+ * and takes 0 lines when there are no active notes.
  */
 declare function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): void;
 /**
- * Interactive `/anchor` sticky-note board
+ * Interactive `/anchor` sticky-note board with 1-click progress stepping and session teleport (`switchSession`)
  */
-declare function openAnchorDashboard(ctx: ExtensionContext, store: AnchorStore): Promise<void>;
+declare function openAnchorDashboard(ctx: ExtensionContext | ExtensionCommandContext, store: AnchorStore): Promise<void>;
 
-export { Anchor, AnchorStore, formatOrigin, formatRelativeAge, getDisplayWidth, hasActiveUI, openAnchorDashboard, padToWidth, sortAnchorsForDisplay, stripAnsi, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };
+export { Anchor, AnchorProgress, AnchorStore, formatOrigin, formatProgressBar, formatRelativeAge, getDisplayWidth, hasActiveUI, openAnchorDashboard, padToWidth, sortAnchorsForDisplay, stripAnsi, truncateToWidth, updateAnchorStatusBar, updateStartupBanner };

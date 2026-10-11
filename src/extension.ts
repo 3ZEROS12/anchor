@@ -1,5 +1,6 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
+import fs from 'node:fs';
 import {
   AnchorStore,
   findMatchedAnchors,
@@ -11,6 +12,7 @@ import {
   sweepQuietNotes
 } from './store.ts';
 import {
+  formatProgressBar,
   hasActiveUI,
   openAnchorDashboard,
   sortAnchorsForDisplay,
@@ -22,8 +24,9 @@ import {
 const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
 
 export function parseAnchorCommandInput(raw: string): {
-  mode: 'dashboard' | 'undo' | 'settle' | 'pin';
+  mode: 'dashboard' | 'undo' | 'settle' | 'step' | 'jump' | 'pin';
   targetId?: string;
+  delta?: number;
   title?: string;
 } {
   const trimmed = (raw || '').trim();
@@ -42,10 +45,36 @@ export function parseAnchorCommandInput(raw: string): {
     };
   }
 
+  const stepMatch = trimmed.match(/^(?:step|\+)\s*(\S+)(?:\s+([+-]?\d+))?$/i);
+  if (stepMatch) {
+    return {
+      mode: 'step',
+      targetId: stepMatch[1].trim().replace(/^#/, ''),
+      delta: stepMatch[2] ? parseInt(stepMatch[2], 10) : 1
+    };
+  }
+
+  const jumpMatch = trimmed.match(/^(?:jump|resume|session)\s+(.+)$/i);
+  if (jumpMatch) {
+    return {
+      mode: 'jump',
+      targetId: jumpMatch[1].trim().replace(/^#/, '')
+    };
+  }
+
   return {
     mode: 'pin',
     title: trimmed
   };
+}
+
+/**
+ * Detect 0ms human-first quick note prefix in the input box:
+ * e.g. `pin: 明天把Token改Cookie` or `便签: 检查网关重试 [1/4]`
+ */
+export function parseQuickNoteInput(text: string): string | null {
+  const m = (text || '').trim().match(/^(?:pin|note|便签|备忘)\s*[:：]\s*(.+)$/i);
+  return m && m[1].trim() ? m[1].trim() : null;
 }
 
 export function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?: string): string | undefined {
@@ -63,16 +92,50 @@ export function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?:
   return store.get(clean)?.id;
 }
 
+function getSessionFileSafe(ctx?: ExtensionContext): string | undefined {
+  try {
+    const file = (ctx as any)?.sessionManager?.getSessionFile?.();
+    return typeof file === 'string' && file.trim() ? file.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   const store = new AnchorStore();
   const annotatedThisSession = new Set<string>();
+  const recentSessionFiles: string[] = [];
 
-  // 1. Session start: quiet old notes (>7d), wake notes belonging to this workspace, show sticky note banner
-  pi.on('session_start', async (event: any, ctx: ExtensionContext) => {
+  function rememberTouchedFile(filePath: string, cwd?: string) {
+    const norm = normalizePath(filePath, cwd);
+    if (!norm) return;
+    const idx = recentSessionFiles.indexOf(norm);
+    if (idx !== -1) recentSessionFiles.splice(idx, 1);
+    recentSessionFiles.unshift(norm);
+    if (recentSessionFiles.length > 5) recentSessionFiles.pop();
+  }
+
+  function createStickyNoteFromUser(title: string, ctx: ExtensionContext) {
+    const sessionFile = getSessionFileSafe(ctx);
+    const anc = store.create({
+      title,
+      cwd: ctx.cwd,
+      sessionFile
+    });
+    // If the user didn't write a file path in the note, automatically attach the most recently edited file in this session
+    if (anc.files.length === 0 && recentSessionFiles.length > 0) {
+      store.update(anc.id, { files: [recentSessionFiles[0]] });
+    }
+    updateAnchorStatusBar(ctx, store);
+    return store.get(anc.id) || anc;
+  }
+
+  // 1. Session start: quiet old notes (>7d), wake notes belonging to this workspace, render belowEditor sticky strip
+  pi.on('session_start', async (_event: any, ctx: ExtensionContext) => {
     annotatedThisSession.clear();
+    recentSessionFiles.length = 0;
     sweepQuietNotes(store);
 
-    // Clever Touch: If a quiet note belongs to the workspace we just opened, wake it up automatically
     const quietForHere = store
       .list({ status: 'sleeping', all: true })
       .filter(a => (a.files.length > 0 || (a.project && a.project !== 'global') || a.cwd) && isAnchorTargetingWorkspace(a, ctx.cwd));
@@ -81,23 +144,22 @@ export default function (pi: ExtensionAPI) {
     }
 
     updateAnchorStatusBar(ctx, store);
-
-    if (event.reason !== 'resume') {
-      updateStartupBanner(ctx, store);
-    } else if (hasActiveUI(ctx)) {
-      try {
-        ctx.ui.setWidget('anchor-startup', undefined);
-      } catch {}
-    }
+    updateStartupBanner(ctx, store);
   });
 
-  // 2. Clear sticky note banner as soon as the user sends the first prompt
-  pi.on('agent_start', async (_event: any, ctx: ExtensionContext) => {
+  // 2. Human-First 0ms Input Hook: type `pin: <note>` or `便签: <note>` directly in the editor!
+  //    Intercepted in 0ms without triggering an LLM turn or burning a single token.
+  pi.on('input', async (event: any, ctx: ExtensionContext) => {
+    if (event?.source === 'extension') return { action: 'continue' };
+    const quickNote = parseQuickNoteInput(String(event?.text || ''));
+    if (!quickNote) return { action: 'continue' };
+
+    const anc = createStickyNoteFromUser(quickNote, ctx);
+    const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : '';
     if (hasActiveUI(ctx)) {
-      try {
-        ctx.ui.setWidget('anchor-startup', undefined);
-      } catch {}
+      ctx.ui.notify(`⌖ Pinned #${anc.id.replace(/^anc-/, '')}${bar}: "${anc.title}"`, 'info');
     }
+    return { action: 'handled' };
   });
 
   // 3. Turn 1 Cold-Start Brief (0 tokens on Turn 2+)
@@ -114,11 +176,12 @@ export default function (pi: ExtensionAPI) {
 
   // 4. Clever Touches on Tool Execution:
   //    (a) Auto-tear off sticky notes on matching `git commit`
-  //    (b) Slip a 1-line comment whisper when the AI reads/edits a matching file
+  //    (b) Slip a 1-line comment whisper when reading/editing a matching file & bind current sessionFile
   pi.on('tool_result', async (event: any, ctx: ExtensionContext) => {
     if (event.isError) return;
 
     const lowerTool = String(event.toolName || '').toLowerCase();
+    const currentSessionFile = getSessionFileSafe(ctx);
 
     // (a) Real-time auto-tear on `git commit -m "..."`
     if (lowerTool === 'bash' || lowerTool === 'powershell') {
@@ -143,17 +206,24 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // (b) 1-line syntax-safe file whisper
+    // (b) 1-line syntax-safe file whisper & session bookmark update
     const pathInput = (event.input as any)?.path;
     if (typeof pathInput !== 'string') return;
+
+    const isMutation = MUTATION_TOOLS.has(lowerTool);
+    if (isMutation) {
+      rememberTouchedFile(pathInput, ctx.cwd);
+    }
 
     const touchedPath = normalizePath(pathInput, ctx.cwd);
     const notes = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active' || a.status === 'sleeping');
     const matches = findMatchedAnchors(notes, [touchedPath]);
     if (matches.length === 0) return;
 
-    if (MUTATION_TOOLS.has(lowerTool)) {
-      for (const m of matches) store.touch(m.anchor.id);
+    if (isMutation) {
+      for (const m of matches) {
+        store.touch(m.anchor.id, Date.now(), currentSessionFile);
+      }
       updateAnchorStatusBar(ctx, store);
     }
 
@@ -174,15 +244,15 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 5. Register LLM Tool: anchor
+  // 5. Register LLM Tool: anchor (optional assistant access; primary authoring is human-driven)
   pi.registerTool({
     name: 'anchor',
     label: 'Anchor (Sticky Note)',
     description:
-      'Pin, list, or tear off cross-session sticky notes stored in ~/.anchor/ (zero git repo clutter). Actions: pin (stick a new note), list (view notes), settle (tear off completed note).',
+      'Pin, list, step, or tear off cross-session sticky notes stored in ~/.anchor/ (zero git repo clutter). Actions: pin (stick a new note), list (view notes), step (advance progress bar), settle (tear off completed note).',
     promptSnippet: 'Pin or tear off cross-session sticky notes that survive terminal restarts',
     promptGuidelines: [
-      'Use `anchor` when the user asks to remember something for later/tomorrow or across sessions (e.g. "记一下明天重构鉴权", "晚上清理缓存").',
+      'Use `anchor` when the user explicitly asks to remember something for later/tomorrow or across sessions.',
       'BOUNDARY WITH TODO: `todo` is for multi-step work right now in this session; `anchor` is a sticky note for future sessions.',
       'When a pinned note is completed, call `anchor` with action "settle" to tear it off.'
     ],
@@ -190,22 +260,23 @@ export default function (pi: ExtensionAPI) {
       action: Type.Union([
         Type.Literal('pin'),
         Type.Literal('list'),
+        Type.Literal('step'),
         Type.Literal('settle'),
         Type.Literal('touch'),
         Type.Literal('sweep')
       ]),
-      title: Type.Optional(Type.String({ description: 'Sticky note text (for pin)' })),
+      title: Type.Optional(Type.String({ description: 'Sticky note text (supports [1/4] or 1. A 2. B progress steps)' })),
       description: Type.Optional(Type.String({ description: 'Optional extra details' })),
       project: Type.Optional(Type.String({ description: 'Optional project name or folder' })),
       files: Type.Optional(Type.Array(Type.String(), { description: 'Optional associated file paths' })),
-      id: Type.Optional(Type.String({ description: 'Note ID, e.g. anc-1 or 1 (for settle)' }))
+      id: Type.Optional(Type.String({ description: 'Note ID, e.g. anc-1 or 1 (for step/settle)' }))
     }),
     renderCall(args: any, theme: any) {
       const action = args.action || 'list';
       let title = theme.fg('toolTitle', theme.bold('⌖ anchor ')) + theme.fg('accent', action);
       if (action === 'pin' && args.title) {
         title += ` "${args.title}"`;
-      } else if ((action === 'settle' || action === 'touch') && args.id) {
+      } else if ((action === 'settle' || action === 'touch' || action === 'step') && args.id) {
         title += ` ${theme.fg('dim', `#${String(args.id).replace(/^anc-/, '')}`)}`;
       }
       return {
@@ -234,7 +305,8 @@ export default function (pi: ExtensionAPI) {
           description: params.description,
           project: params.project,
           cwd: ctx.cwd,
-          files: params.files || []
+          files: params.files?.length ? params.files : (recentSessionFiles[0] ? [recentSessionFiles[0]] : []),
+          sessionFile: getSessionFileSafe(ctx)
         });
         updateAnchorStatusBar(ctx, store);
         return {
@@ -249,6 +321,21 @@ export default function (pi: ExtensionAPI) {
           content: [{ type: 'text', text: JSON.stringify(notes, null, 2) }],
           isError: false
         };
+      }
+
+      if (params.action === 'step') {
+        const rawId = params.id || '1';
+        try {
+          const targetId = resolveAnchorTarget(store, String(rawId), ctx.cwd) || String(rawId);
+          const { anchor: updated } = store.step(targetId, 1);
+          updateAnchorStatusBar(ctx, store);
+          return {
+            content: [{ type: 'text', text: `Advanced #${updated.id.replace(/^anc-/, '')} to ${formatProgressBar(updated.progress)}` }],
+            isError: false
+          };
+        } catch (err: any) {
+          return { content: [{ type: 'text', text: err.message }], isError: true };
+        }
       }
 
       if (params.action === 'settle') {
@@ -270,7 +357,7 @@ export default function (pi: ExtensionAPI) {
 
       if (params.action === 'touch' && params.id) {
         try {
-          const touched = store.touch(String(params.id));
+          const touched = store.touch(String(params.id), Date.now(), getSessionFileSafe(ctx));
           updateAnchorStatusBar(ctx, store);
           return { content: [{ type: 'text', text: `Refreshed note #${touched.id}` }], isError: false };
         } catch (err: any) {
@@ -288,10 +375,10 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // 6. Slash Commands: /anchor, /pin, /done
+  // 6. Slash Commands: /anchor, /pin, /step, /done
   pi.registerCommand('anchor', {
-    description: 'View, pin, or tear off sticky notes (/anchor, /anchor done 1, /anchor undo)',
-    handler: async (args: string, ctx: ExtensionContext) => {
+    description: 'View, pin, step, jump to session, or tear off sticky notes (/anchor, /anchor step 1, /anchor jump 1, /anchor done 1)',
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
       const parsed = parseAnchorCommandInput(args);
 
       if (parsed.mode === 'dashboard') {
@@ -307,6 +394,29 @@ export default function (pi: ExtensionAPI) {
         } catch (err: any) {
           ctx.ui.notify(`Undo failed: ${err.message}`, 'error');
         }
+        return;
+      }
+
+      if (parsed.mode === 'step' && parsed.targetId) {
+        const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
+        if (!resolvedId) {
+          ctx.ui.notify(`⌖ Note not found: ${parsed.targetId}`, 'error');
+          return;
+        }
+        const { anchor: updated } = store.step(resolvedId, parsed.delta || 1);
+        ctx.ui.notify(`⌖ Advanced #${updated.id.replace(/^anc-/, '')} to ${formatProgressBar(updated.progress)}`, 'info');
+        updateAnchorStatusBar(ctx, store);
+        return;
+      }
+
+      if (parsed.mode === 'jump' && parsed.targetId) {
+        const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
+        const note = resolvedId ? store.get(resolvedId) : undefined;
+        if (!note || !note.sessionFile || !fs.existsSync(note.sessionFile)) {
+          ctx.ui.notify(`⌖ No saved conversation session found for #${parsed.targetId}`, 'error');
+          return;
+        }
+        await ctx.switchSession(note.sessionFile);
         return;
       }
 
@@ -333,29 +443,46 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      const anc = store.create({ title: parsed.title || rawTrimmed, cwd: ctx.cwd });
-      ctx.ui.notify(`⌖ Pinned #${anc.id.replace(/^anc-/, '')}: "${anc.title}"`, 'info');
-      updateAnchorStatusBar(ctx, store);
+      const anc = createStickyNoteFromUser(parsed.title || rawTrimmed, ctx);
+      const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : '';
+      ctx.ui.notify(`⌖ Pinned #${anc.id.replace(/^anc-/, '')}${bar}: "${anc.title}"`, 'info');
     }
   });
 
   pi.registerCommand('pin', {
-    description: 'Stick a quick note across sessions (e.g. /pin Check auth token expiry)',
-    handler: async (args: string, ctx: ExtensionContext) => {
+    description: 'Stick a quick note across sessions (e.g. /pin Migrate auth [1/3])',
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
       const text = (args || '').trim();
       if (!text) {
         await openAnchorDashboard(ctx, store);
         return;
       }
-      const anc = store.create({ title: text, cwd: ctx.cwd });
-      ctx.ui.notify(`⌖ Pinned #${anc.id.replace(/^anc-/, '')}: "${anc.title}"`, 'info');
+      const anc = createStickyNoteFromUser(text, ctx);
+      const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : '';
+      ctx.ui.notify(`⌖ Pinned #${anc.id.replace(/^anc-/, '')}${bar}: "${anc.title}"`, 'info');
+    }
+  });
+
+  pi.registerCommand('step', {
+    description: 'Advance progress bar on a sticky note (e.g. /step 1)',
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const tokens = (args || '').trim().split(/\s+/).filter(Boolean);
+      const target = tokens[0] || '1';
+      const delta = tokens[1] ? parseInt(tokens[1], 10) : 1;
+      const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+      if (!resolvedId) {
+        ctx.ui.notify(`⌖ Note not found: ${target}`, 'error');
+        return;
+      }
+      const { anchor: updated } = store.step(resolvedId, isNaN(delta) ? 1 : delta);
+      ctx.ui.notify(`⌖ Advanced #${updated.id.replace(/^anc-/, '')} to ${formatProgressBar(updated.progress)}`, 'info');
       updateAnchorStatusBar(ctx, store);
     }
   });
 
   pi.registerCommand('done', {
     description: 'Tear off a sticky note by number or ID (e.g. /done 1)',
-    handler: async (args: string, ctx: ExtensionContext) => {
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
       const target = (args || '').trim();
       if (!target) {
         await openAnchorDashboard(ctx, store);
@@ -374,7 +501,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand('anchors', {
     description: 'View sticky notes',
-    handler: async (_args: string, ctx: ExtensionContext) => {
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
       await openAnchorDashboard(ctx, store);
     }
   });

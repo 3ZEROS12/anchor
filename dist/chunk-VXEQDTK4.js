@@ -1,5 +1,6 @@
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
+import fs3 from "fs";
 
 // src/store.ts
 import fs from "fs";
@@ -52,6 +53,32 @@ function extractPathsFromText(text) {
     }
   }
   return Array.from(results);
+}
+function extractProgressFromText(rawTitle) {
+  if (!rawTitle) return { cleanTitle: "" };
+  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*([^\d]+?)(?=\s+\d+\.\s|$)/g));
+  if (stepParts.length >= 2) {
+    const steps = stepParts.map((m) => m[2].trim().replace(/[;；,，]+$/, "")).filter(Boolean);
+    const firstMatchIdx = rawTitle.indexOf(stepParts[0][0]);
+    const prefix = rawTitle.slice(0, firstMatchIdx).replace(/[:：\-—\s]+$/, "").trim();
+    return {
+      cleanTitle: prefix || steps.join(" \u2192 "),
+      progress: { done: 0, total: steps.length, steps }
+    };
+  }
+  const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\)|(?:^|\s)(\d{1,3})\/(\d{1,3})(?=\s|$))/);
+  if (ratioMatch) {
+    const done = parseInt(ratioMatch[1] ?? ratioMatch[3] ?? ratioMatch[5], 10);
+    const total = parseInt(ratioMatch[2] ?? ratioMatch[4] ?? ratioMatch[6], 10);
+    if (!isNaN(done) && !isNaN(total) && total >= 2 && total <= 500 && done >= 0 && done <= total) {
+      const stripped = rawTitle.replace(ratioMatch[0], " ").replace(/\s+/g, " ").trim();
+      return {
+        cleanTitle: stripped || rawTitle.trim(),
+        progress: { done, total }
+      };
+    }
+  }
+  return { cleanTitle: rawTitle.trim() };
 }
 function isAnchorTargetingWorkspace(anchor, targetCwd) {
   if (!targetCwd) return true;
@@ -195,8 +222,9 @@ function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
   const lines = activeNotes.map((a) => {
     const num = a.id.replace(/^anc-/, "");
     const files = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(", ")})` : "";
+    const prog = a.progress ? ` [${a.progress.done}/${a.progress.total}${a.progress.steps && a.progress.steps[a.progress.done] ? ` \xB7 next: ${a.progress.steps[a.progress.done]}` : ""}]` : "";
     const desc = a.description ? ` \u2014 ${a.description}` : "";
-    return `\u2022 #${num} [${a.project}] ${a.title}${files}${desc}`;
+    return `\u2022 #${num} [${a.project}] ${a.title}${prog}${files}${desc}`;
   });
   return [
     `<sticky-notes count="${activeNotes.length}">`,
@@ -371,8 +399,9 @@ var AnchorStore = class {
       const state = this.loadState();
       const now = Date.now();
       const id = this.generateId(state);
+      const { cleanTitle, progress: parsedProgress } = extractProgressFromText(input.title);
       const explicitFiles = (input.files || []).map((f) => normalizePath(f)).filter(Boolean);
-      const inferredFiles = explicitFiles.length > 0 ? explicitFiles : extractPathsFromText(`${input.title} ${input.description || ""}`);
+      const inferredFiles = explicitFiles.length > 0 ? explicitFiles : extractPathsFromText(`${cleanTitle} ${input.description || ""}`);
       let cwd = input.cwd ? normalizePath(input.cwd) : "";
       if (input.project && (/^[a-zA-Z]:[\\/]/.test(input.project.trim()) || input.project.trim().startsWith("/"))) {
         cwd = normalizePath(input.project.trim());
@@ -383,7 +412,7 @@ var AnchorStore = class {
       const projectName = input.project ? input.project.trim() : cwd ? path.basename(cwd) : "global";
       const anchor = {
         id,
-        title: input.title.trim(),
+        title: cleanTitle,
         description: input.description?.trim(),
         priority: input.priority || "p1",
         status: "active",
@@ -393,7 +422,9 @@ var AnchorStore = class {
         updatedAt: now,
         lastTouchedAt: now,
         files: inferredFiles,
-        tags: (input.tags || []).map((t) => t.trim()).filter(Boolean)
+        tags: (input.tags || []).map((t) => t.trim()).filter(Boolean),
+        ...input.sessionFile ? { sessionFile: normalizePath(input.sessionFile) } : {},
+        ...input.progress || parsedProgress ? { progress: input.progress || parsedProgress } : {}
       };
       state.anchors.push(anchor);
       this.saveState(state);
@@ -442,7 +473,7 @@ var AnchorStore = class {
       return updated;
     });
   }
-  touch(id, timestamp = Date.now()) {
+  touch(id, timestamp = Date.now(), sessionFile) {
     return this.withLock(() => {
       const state = this.loadState();
       const idx = this.findAnchorIndex(state.anchors, id);
@@ -453,9 +484,42 @@ var AnchorStore = class {
       if (current.status === "sleeping") {
         current.status = "active";
       }
+      if (sessionFile) {
+        current.sessionFile = normalizePath(sessionFile);
+      }
       state.anchors[idx] = current;
       this.saveState(state);
       return current;
+    });
+  }
+  /**
+   * Advance (or set) progress on a sticky note:
+   * - If delta is provided (default +1), increments `done` up to `total`.
+   * - If note had no progress yet, initializes a 4-step bar (`1/4`).
+   */
+  step(id, delta = 1, explicitTotal) {
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
+      const current = state.anchors[idx];
+      const now = Date.now();
+      const total = explicitTotal && explicitTotal >= 2 ? explicitTotal : current.progress?.total || 4;
+      const prevDone = current.progress?.done || 0;
+      const nextDone = Math.max(0, Math.min(total, prevDone + delta));
+      current.progress = {
+        ...current.progress || {},
+        done: nextDone,
+        total
+      };
+      current.lastTouchedAt = now;
+      current.updatedAt = now;
+      if (current.status === "sleeping") {
+        current.status = "active";
+      }
+      state.anchors[idx] = current;
+      this.saveState(state);
+      return { anchor: current, completed: nextDone >= total };
     });
   }
   /**
@@ -528,6 +592,7 @@ var AnchorStore = class {
 };
 
 // src/tui.ts
+import fs2 from "fs";
 import path2 from "path";
 var ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 function stripAnsi(str) {
@@ -594,6 +659,14 @@ function padToWidth(str, targetWidth) {
   if (current >= targetWidth) return truncated;
   return truncated + " ".repeat(targetWidth - current);
 }
+function formatProgressBar(progress, cells = 4) {
+  if (!progress || !progress.total || progress.total < 1) return "";
+  const done = Math.max(0, Math.min(progress.total, progress.done || 0));
+  const filled = Math.min(cells, Math.max(done > 0 ? 1 : 0, Math.round(done / progress.total * cells)));
+  const finalFilled = done >= progress.total ? cells : done === 0 ? 0 : filled;
+  const bar = "\u25A0".repeat(finalFilled) + "\u25A1".repeat(Math.max(0, cells - finalFilled));
+  return `[${bar} ${done}/${progress.total}]`;
+}
 function formatRelativeAge(timestamp, now = Date.now()) {
   const diffSec = Math.max(0, Math.floor((now - timestamp) / 1e3));
   if (diffSec < 60) return "just now";
@@ -647,6 +720,7 @@ function updateAnchorStatusBar(ctx, store) {
   try {
     const active = store.list({ status: "active", cwd: ctx.cwd });
     ctx.ui.setStatus("anchor", active.length > 0 ? `\u2316 ${active.length}` : void 0);
+    updateStartupBanner(ctx, store);
   } catch {
   }
 }
@@ -655,41 +729,41 @@ function updateStartupBanner(ctx, store) {
   try {
     const active = store.list({ status: "active", cwd: ctx.cwd });
     if (active.length === 0) {
-      ctx.ui.setWidget("anchor-startup", void 0);
+      ctx.ui.setWidget("anchor-startup", void 0, { placement: "belowEditor" });
       return;
     }
     const sorted = sortAnchorsForDisplay(active, ctx.cwd);
-    const topItems = sorted.slice(0, 3);
     const factory = (_tui, theme) => ({
       render: (width) => {
-        const maxTitleWidth = Math.max(14, width - 34);
         const fg = theme?.fg ? theme.fg.bind(theme) : (_c, text) => text;
-        const label = active.length === 1 ? "1 note" : `${active.length} notes`;
-        const lines = [
-          truncateToWidth(fg("accent", `\u2316 ${label}`), width)
-        ];
-        for (const a of topItems) {
-          const num = a.id.replace(/^anc-/, "").padStart(2, "0");
+        if (sorted.length === 1) {
+          const a = sorted[0];
+          const num = a.id.replace(/^anc-/, "");
+          const bar = a.progress ? `${fg("accent", formatProgressBar(a.progress))} ` : "";
+          const nextStep = a.progress?.steps && a.progress.steps[a.progress.done] ? fg("muted", ` \u25B8 ${a.progress.steps[a.progress.done]}`) : "";
           const origin = formatOrigin(a);
-          const age = formatRelativeAge(a.createdAt);
-          const titleClipped = truncateToWidth(a.title, maxTitleWidth);
-          lines.push(
-            truncateToWidth(
-              `  ${fg("dim", num)}  ${titleClipped}  ${fg("muted", `\xB7 ${origin}`)} ${fg("dim", `(${age})`)}`,
-              width
-            )
-          );
+          const sessionIcon = a.sessionFile ? " \u21AA" : "";
+          const prefix = `${fg("accent", "\u2316")} ${fg("dim", `#${num}`)} ${bar}`;
+          const suffix = ` ${fg("muted", `(${origin}${sessionIcon})`)}`;
+          const availTitle = Math.max(12, width - getDisplayWidth(prefix) - getDisplayWidth(nextStep) - getDisplayWidth(suffix) - 2);
+          const titleClipped = truncateToWidth(a.title, availTitle);
+          return [truncateToWidth(`${prefix}${titleClipped}${nextStep}${suffix}`, width)];
         }
-        if (sorted.length > 3) {
-          lines.push(truncateToWidth(fg("dim", `  +${sorted.length - 3} more \xB7 /anchor`), width));
-        }
-        return lines;
+        const countTag = fg("accent", `\u2316 ${sorted.length} notes: `);
+        const segments = sorted.slice(0, 3).map((a) => {
+          const num = a.id.replace(/^anc-/, "");
+          const bar = a.progress ? `${formatProgressBar(a.progress)} ` : "";
+          const shortTitle = truncateToWidth(a.title, Math.max(14, Math.floor((width - 20) / Math.min(3, sorted.length)) - 12));
+          return `${fg("dim", `#${num}`)} ${bar}${shortTitle}`;
+        });
+        const more = sorted.length > 3 ? fg("dim", ` +${sorted.length - 3}`) : "";
+        return [truncateToWidth(`${countTag}${segments.join(fg("dim", "  \xB7  "))}${more}`, width)];
       },
       invalidate: () => {
       }
     });
     const content = ctx.ui?.theme ? factory : factory().render(80);
-    ctx.ui.setWidget("anchor-startup", content, { placement: "aboveEditor" });
+    ctx.ui.setWidget("anchor-startup", content, { placement: "belowEditor" });
   } catch {
   }
 }
@@ -697,7 +771,7 @@ async function openAnchorDashboard(ctx, store) {
   if (!hasActiveUI(ctx)) return;
   const allNotes = store.list({ cwd: ctx.cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping");
   if (allNotes.length === 0) {
-    ctx.ui.notify("\u2316 No sticky notes. Use /pin <note> to stick one.", "info");
+    ctx.ui.notify("\u2316 No sticky notes. Type `pin: <note>` or `/pin <note>` to stick one.", "info");
     return;
   }
   const sorted = sortAnchorsForDisplay(allNotes, ctx.cwd);
@@ -708,10 +782,11 @@ async function openAnchorDashboard(ctx, store) {
   const titleWidth = isNarrow ? Math.max(20, termCols - 30) : 42;
   for (const a of sorted) {
     const num = a.id.replace(/^anc-/, "").padStart(2, "0");
-    const origin = formatOrigin(a);
+    const bar = a.progress ? `${formatProgressBar(a.progress)} ` : "";
+    const origin = formatOrigin(a) + (a.sessionFile ? " \u21AA" : "");
     const age = a.status === "sleeping" ? `${formatRelativeAge(a.createdAt)} \xB7 quiet` : formatRelativeAge(a.createdAt);
     const colNum = `${num}  `;
-    const colTitle = padToWidth(a.title, titleWidth);
+    const colTitle = padToWidth(`${bar}${a.title}`, titleWidth);
     const colOrigin = padToWidth(origin, 22);
     const label = isNarrow ? `${colNum}${colTitle}  ${age}`.trimEnd() : `${colNum}${colTitle}  ${colOrigin}  ${age}`.trimEnd();
     optionMap.set(label, a);
@@ -721,8 +796,15 @@ async function openAnchorDashboard(ctx, store) {
   if (!selected) return;
   const anchor = optionMap.get(selected);
   if (!anchor) return;
+  const currentSessionFile = ctx.sessionManager?.getSessionFile?.();
+  const canJumpSession = Boolean(
+    anchor.sessionFile && fs2.existsSync(anchor.sessionFile) && typeof ctx.switchSession === "function" && (!currentSessionFile || path2.resolve(anchor.sessionFile) !== path2.resolve(currentSessionFile))
+  );
+  const stepLabel = anchor.progress ? `\u25B6 Advance step (${anchor.progress.done}/${anchor.progress.total} \u2794 ${Math.min(anchor.progress.total, anchor.progress.done + 1)}/${anchor.progress.total})` : "\u25B6 Start progress bar (1/4)";
   const actions = [
     "\u2713 Done (tear off note)",
+    stepLabel,
+    ...canJumpSession ? ["\u21AA Jump to session (resume linked conversation)"] : [],
     ...anchor.status === "sleeping" ? ["\u26A1 Wake up (mark active)"] : [],
     "\u2139 Read full note",
     "\u21A9 Back"
@@ -733,6 +815,23 @@ async function openAnchorDashboard(ctx, store) {
     store.settle(anchor.id, { settledBy: "manual" });
     ctx.ui.notify(`\u2316 Torn off #${anchor.id.replace(/^anc-/, "")}: "${anchor.title}" (/anchor undo to put back)`, "info");
     updateAnchorStatusBar(ctx, store);
+  } else if (action.startsWith("\u25B6")) {
+    const { anchor: updated, completed } = store.step(anchor.id, 1);
+    updateAnchorStatusBar(ctx, store);
+    if (completed) {
+      ctx.ui.notify(
+        `\u2316 #${updated.id.replace(/^anc-/, "")} reached ${formatProgressBar(updated.progress)}! Run /done ${updated.id.replace(/^anc-/, "")} to tear off.`,
+        "info"
+      );
+    } else {
+      ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
+    }
+  } else if (action.startsWith("\u21AA") && anchor.sessionFile) {
+    try {
+      await ctx.switchSession(anchor.sessionFile);
+    } catch (err) {
+      ctx.ui.notify(`Could not switch session: ${err.message}`, "error");
+    }
   } else if (action.startsWith("\u26A1")) {
     store.touch(anchor.id);
     ctx.ui.notify(`\u2316 Woke up #${anchor.id.replace(/^anc-/, "")}: "${anchor.title}"`, "info");
@@ -740,8 +839,10 @@ async function openAnchorDashboard(ctx, store) {
   } else if (action.startsWith("\u2139")) {
     const details = [
       `\u2316 Note #${anchor.id.replace(/^anc-/, "")}: ${anchor.title}`,
+      anchor.progress ? `Progress: ${formatProgressBar(anchor.progress)}${anchor.progress.steps ? ` (${anchor.progress.steps.join(" \u2192 ")})` : ""}` : null,
       anchor.description ? `Details: ${anchor.description}` : null,
       anchor.files.length > 0 ? `Files: ${anchor.files.join(", ")}` : null,
+      anchor.sessionFile ? `Session: ${path2.basename(anchor.sessionFile)}` : null,
       `Workspace: ${anchor.project || "global"} \xB7 Pinned ${formatRelativeAge(anchor.createdAt)}`
     ].filter(Boolean).join("\n");
     ctx.ui.notify(details, "info");
@@ -765,10 +866,29 @@ function parseAnchorCommandInput(raw) {
       targetId: settleMatch[1].trim().replace(/^#/, "")
     };
   }
+  const stepMatch = trimmed.match(/^(?:step|\+)\s*(\S+)(?:\s+([+-]?\d+))?$/i);
+  if (stepMatch) {
+    return {
+      mode: "step",
+      targetId: stepMatch[1].trim().replace(/^#/, ""),
+      delta: stepMatch[2] ? parseInt(stepMatch[2], 10) : 1
+    };
+  }
+  const jumpMatch = trimmed.match(/^(?:jump|resume|session)\s+(.+)$/i);
+  if (jumpMatch) {
+    return {
+      mode: "jump",
+      targetId: jumpMatch[1].trim().replace(/^#/, "")
+    };
+  }
   return {
     mode: "pin",
     title: trimmed
   };
+}
+function parseQuickNoteInput(text) {
+  const m = (text || "").trim().match(/^(?:pin|note|便签|备忘)\s*[:：]\s*(.+)$/i);
+  return m && m[1].trim() ? m[1].trim() : null;
 }
 function resolveAnchorTarget(store, idOrIndex, cwd) {
   const clean = idOrIndex.trim().replace(/^#/, "");
@@ -782,33 +902,60 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   }
   return store.get(clean)?.id;
 }
+function getSessionFileSafe(ctx) {
+  try {
+    const file = ctx?.sessionManager?.getSessionFile?.();
+    return typeof file === "string" && file.trim() ? file.trim() : void 0;
+  } catch {
+    return void 0;
+  }
+}
 function extension_default(pi) {
   const store = new AnchorStore();
   const annotatedThisSession = /* @__PURE__ */ new Set();
-  pi.on("session_start", async (event, ctx) => {
+  const recentSessionFiles = [];
+  function rememberTouchedFile(filePath, cwd) {
+    const norm = normalizePath(filePath, cwd);
+    if (!norm) return;
+    const idx = recentSessionFiles.indexOf(norm);
+    if (idx !== -1) recentSessionFiles.splice(idx, 1);
+    recentSessionFiles.unshift(norm);
+    if (recentSessionFiles.length > 5) recentSessionFiles.pop();
+  }
+  function createStickyNoteFromUser(title, ctx) {
+    const sessionFile = getSessionFileSafe(ctx);
+    const anc = store.create({
+      title,
+      cwd: ctx.cwd,
+      sessionFile
+    });
+    if (anc.files.length === 0 && recentSessionFiles.length > 0) {
+      store.update(anc.id, { files: [recentSessionFiles[0]] });
+    }
+    updateAnchorStatusBar(ctx, store);
+    return store.get(anc.id) || anc;
+  }
+  pi.on("session_start", async (_event, ctx) => {
     annotatedThisSession.clear();
+    recentSessionFiles.length = 0;
     sweepQuietNotes(store);
     const quietForHere = store.list({ status: "sleeping", all: true }).filter((a) => (a.files.length > 0 || a.project && a.project !== "global" || a.cwd) && isAnchorTargetingWorkspace(a, ctx.cwd));
     for (const q of quietForHere) {
       store.touch(q.id);
     }
     updateAnchorStatusBar(ctx, store);
-    if (event.reason !== "resume") {
-      updateStartupBanner(ctx, store);
-    } else if (hasActiveUI(ctx)) {
-      try {
-        ctx.ui.setWidget("anchor-startup", void 0);
-      } catch {
-      }
-    }
+    updateStartupBanner(ctx, store);
   });
-  pi.on("agent_start", async (_event, ctx) => {
+  pi.on("input", async (event, ctx) => {
+    if (event?.source === "extension") return { action: "continue" };
+    const quickNote = parseQuickNoteInput(String(event?.text || ""));
+    if (!quickNote) return { action: "continue" };
+    const anc = createStickyNoteFromUser(quickNote, ctx);
+    const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : "";
     if (hasActiveUI(ctx)) {
-      try {
-        ctx.ui.setWidget("anchor-startup", void 0);
-      } catch {
-      }
+      ctx.ui.notify(`\u2316 Pinned #${anc.id.replace(/^anc-/, "")}${bar}: "${anc.title}"`, "info");
     }
+    return { action: "handled" };
   });
   pi.on("before_agent_start", async (event, ctx) => {
     const entries = ctx.sessionManager?.getEntries() || [];
@@ -825,6 +972,7 @@ ${snippet}` };
   pi.on("tool_result", async (event, ctx) => {
     if (event.isError) return;
     const lowerTool = String(event.toolName || "").toLowerCase();
+    const currentSessionFile = getSessionFileSafe(ctx);
     if (lowerTool === "bash" || lowerTool === "powershell") {
       const cmd = String(event.input?.command || "");
       if (cmd.includes("git commit")) {
@@ -849,12 +997,18 @@ ${snippet}` };
     }
     const pathInput = event.input?.path;
     if (typeof pathInput !== "string") return;
+    const isMutation = MUTATION_TOOLS.has(lowerTool);
+    if (isMutation) {
+      rememberTouchedFile(pathInput, ctx.cwd);
+    }
     const touchedPath = normalizePath(pathInput, ctx.cwd);
     const notes = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
     const matches = findMatchedAnchors(notes, [touchedPath]);
     if (matches.length === 0) return;
-    if (MUTATION_TOOLS.has(lowerTool)) {
-      for (const m of matches) store.touch(m.anchor.id);
+    if (isMutation) {
+      for (const m of matches) {
+        store.touch(m.anchor.id, Date.now(), currentSessionFile);
+      }
       updateAnchorStatusBar(ctx, store);
     }
     const targetNote = matches[0].anchor;
@@ -876,10 +1030,10 @@ ${snippet}` };
   pi.registerTool({
     name: "anchor",
     label: "Anchor (Sticky Note)",
-    description: "Pin, list, or tear off cross-session sticky notes stored in ~/.anchor/ (zero git repo clutter). Actions: pin (stick a new note), list (view notes), settle (tear off completed note).",
+    description: "Pin, list, step, or tear off cross-session sticky notes stored in ~/.anchor/ (zero git repo clutter). Actions: pin (stick a new note), list (view notes), step (advance progress bar), settle (tear off completed note).",
     promptSnippet: "Pin or tear off cross-session sticky notes that survive terminal restarts",
     promptGuidelines: [
-      'Use `anchor` when the user asks to remember something for later/tomorrow or across sessions (e.g. "\u8BB0\u4E00\u4E0B\u660E\u5929\u91CD\u6784\u9274\u6743", "\u665A\u4E0A\u6E05\u7406\u7F13\u5B58").',
+      "Use `anchor` when the user explicitly asks to remember something for later/tomorrow or across sessions.",
       "BOUNDARY WITH TODO: `todo` is for multi-step work right now in this session; `anchor` is a sticky note for future sessions.",
       'When a pinned note is completed, call `anchor` with action "settle" to tear it off.'
     ],
@@ -887,22 +1041,23 @@ ${snippet}` };
       action: Type.Union([
         Type.Literal("pin"),
         Type.Literal("list"),
+        Type.Literal("step"),
         Type.Literal("settle"),
         Type.Literal("touch"),
         Type.Literal("sweep")
       ]),
-      title: Type.Optional(Type.String({ description: "Sticky note text (for pin)" })),
+      title: Type.Optional(Type.String({ description: "Sticky note text (supports [1/4] or 1. A 2. B progress steps)" })),
       description: Type.Optional(Type.String({ description: "Optional extra details" })),
       project: Type.Optional(Type.String({ description: "Optional project name or folder" })),
       files: Type.Optional(Type.Array(Type.String(), { description: "Optional associated file paths" })),
-      id: Type.Optional(Type.String({ description: "Note ID, e.g. anc-1 or 1 (for settle)" }))
+      id: Type.Optional(Type.String({ description: "Note ID, e.g. anc-1 or 1 (for step/settle)" }))
     }),
     renderCall(args, theme) {
       const action = args.action || "list";
       let title = theme.fg("toolTitle", theme.bold("\u2316 anchor ")) + theme.fg("accent", action);
       if (action === "pin" && args.title) {
         title += ` "${args.title}"`;
-      } else if ((action === "settle" || action === "touch") && args.id) {
+      } else if ((action === "settle" || action === "touch" || action === "step") && args.id) {
         title += ` ${theme.fg("dim", `#${String(args.id).replace(/^anc-/, "")}`)}`;
       }
       return {
@@ -932,7 +1087,8 @@ ${snippet}` };
           description: params.description,
           project: params.project,
           cwd: ctx.cwd,
-          files: params.files || []
+          files: params.files?.length ? params.files : recentSessionFiles[0] ? [recentSessionFiles[0]] : [],
+          sessionFile: getSessionFileSafe(ctx)
         });
         updateAnchorStatusBar(ctx, store);
         return {
@@ -946,6 +1102,20 @@ ${snippet}` };
           content: [{ type: "text", text: JSON.stringify(notes, null, 2) }],
           isError: false
         };
+      }
+      if (params.action === "step") {
+        const rawId = params.id || "1";
+        try {
+          const targetId = resolveAnchorTarget(store, String(rawId), ctx.cwd) || String(rawId);
+          const { anchor: updated } = store.step(targetId, 1);
+          updateAnchorStatusBar(ctx, store);
+          return {
+            content: [{ type: "text", text: `Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}` }],
+            isError: false
+          };
+        } catch (err) {
+          return { content: [{ type: "text", text: err.message }], isError: true };
+        }
       }
       if (params.action === "settle") {
         if (!params.id) {
@@ -965,7 +1135,7 @@ ${snippet}` };
       }
       if (params.action === "touch" && params.id) {
         try {
-          const touched = store.touch(String(params.id));
+          const touched = store.touch(String(params.id), Date.now(), getSessionFileSafe(ctx));
           updateAnchorStatusBar(ctx, store);
           return { content: [{ type: "text", text: `Refreshed note #${touched.id}` }], isError: false };
         } catch (err) {
@@ -981,7 +1151,7 @@ ${snippet}` };
     }
   });
   pi.registerCommand("anchor", {
-    description: "View, pin, or tear off sticky notes (/anchor, /anchor done 1, /anchor undo)",
+    description: "View, pin, step, jump to session, or tear off sticky notes (/anchor, /anchor step 1, /anchor jump 1, /anchor done 1)",
     handler: async (args, ctx) => {
       const parsed = parseAnchorCommandInput(args);
       if (parsed.mode === "dashboard") {
@@ -996,6 +1166,27 @@ ${snippet}` };
         } catch (err) {
           ctx.ui.notify(`Undo failed: ${err.message}`, "error");
         }
+        return;
+      }
+      if (parsed.mode === "step" && parsed.targetId) {
+        const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
+        if (!resolvedId) {
+          ctx.ui.notify(`\u2316 Note not found: ${parsed.targetId}`, "error");
+          return;
+        }
+        const { anchor: updated } = store.step(resolvedId, parsed.delta || 1);
+        ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
+        updateAnchorStatusBar(ctx, store);
+        return;
+      }
+      if (parsed.mode === "jump" && parsed.targetId) {
+        const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
+        const note = resolvedId ? store.get(resolvedId) : void 0;
+        if (!note || !note.sessionFile || !fs3.existsSync(note.sessionFile)) {
+          ctx.ui.notify(`\u2316 No saved conversation session found for #${parsed.targetId}`, "error");
+          return;
+        }
+        await ctx.switchSession(note.sessionFile);
         return;
       }
       if (parsed.mode === "settle" && parsed.targetId) {
@@ -1019,21 +1210,37 @@ ${snippet}` };
           return;
         }
       }
-      const anc = store.create({ title: parsed.title || rawTrimmed, cwd: ctx.cwd });
-      ctx.ui.notify(`\u2316 Pinned #${anc.id.replace(/^anc-/, "")}: "${anc.title}"`, "info");
-      updateAnchorStatusBar(ctx, store);
+      const anc = createStickyNoteFromUser(parsed.title || rawTrimmed, ctx);
+      const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : "";
+      ctx.ui.notify(`\u2316 Pinned #${anc.id.replace(/^anc-/, "")}${bar}: "${anc.title}"`, "info");
     }
   });
   pi.registerCommand("pin", {
-    description: "Stick a quick note across sessions (e.g. /pin Check auth token expiry)",
+    description: "Stick a quick note across sessions (e.g. /pin Migrate auth [1/3])",
     handler: async (args, ctx) => {
       const text = (args || "").trim();
       if (!text) {
         await openAnchorDashboard(ctx, store);
         return;
       }
-      const anc = store.create({ title: text, cwd: ctx.cwd });
-      ctx.ui.notify(`\u2316 Pinned #${anc.id.replace(/^anc-/, "")}: "${anc.title}"`, "info");
+      const anc = createStickyNoteFromUser(text, ctx);
+      const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : "";
+      ctx.ui.notify(`\u2316 Pinned #${anc.id.replace(/^anc-/, "")}${bar}: "${anc.title}"`, "info");
+    }
+  });
+  pi.registerCommand("step", {
+    description: "Advance progress bar on a sticky note (e.g. /step 1)",
+    handler: async (args, ctx) => {
+      const tokens = (args || "").trim().split(/\s+/).filter(Boolean);
+      const target = tokens[0] || "1";
+      const delta = tokens[1] ? parseInt(tokens[1], 10) : 1;
+      const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+      if (!resolvedId) {
+        ctx.ui.notify(`\u2316 Note not found: ${target}`, "error");
+        return;
+      }
+      const { anchor: updated } = store.step(resolvedId, isNaN(delta) ? 1 : delta);
+      ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
       updateAnchorStatusBar(ctx, store);
     }
   });
@@ -1070,6 +1277,7 @@ export {
   isSameOrSubPath,
   globToRegExp,
   extractPathsFromText,
+  extractProgressFromText,
   isAnchorTargetingWorkspace,
   matchAnchorAgainstTouchedFiles,
   findMatchedAnchors,
@@ -1088,6 +1296,7 @@ export {
   hasActiveUI,
   truncateToWidth,
   padToWidth,
+  formatProgressBar,
   formatRelativeAge,
   formatOrigin,
   sortAnchorsForDisplay,
@@ -1095,6 +1304,7 @@ export {
   updateStartupBanner,
   openAnchorDashboard,
   parseAnchorCommandInput,
+  parseQuickNoteInput,
   resolveAnchorTarget,
   extension_default
 };

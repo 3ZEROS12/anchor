@@ -1,6 +1,7 @@
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
+import type { ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { AnchorStore, isAnchorTargetingWorkspace } from './store.ts';
-import type { Anchor } from './types.ts';
+import type { Anchor, AnchorProgress } from './types.ts';
+import fs from 'node:fs';
 import path from 'node:path';
 
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
@@ -111,6 +112,18 @@ export function padToWidth(str: string, targetWidth: number): string {
 }
 
 /**
+ * Render a 4-cell micro progress bar: e.g. `[■■□□ 2/4]` or `[■□□□ 5/30]`
+ */
+export function formatProgressBar(progress?: AnchorProgress, cells = 4): string {
+  if (!progress || !progress.total || progress.total < 1) return '';
+  const done = Math.max(0, Math.min(progress.total, progress.done || 0));
+  const filled = Math.min(cells, Math.max(done > 0 ? 1 : 0, Math.round((done / progress.total) * cells)));
+  const finalFilled = done >= progress.total ? cells : (done === 0 ? 0 : filled);
+  const bar = '■'.repeat(finalFilled) + '□'.repeat(Math.max(0, cells - finalFilled));
+  return `[${bar} ${done}/${progress.total}]`;
+}
+
+/**
  * Format relative sticky-note age cleanly: 'just now', '15m ago', '3h ago', '2d ago'
  */
 export function formatRelativeAge(timestamp: number, now: number = Date.now()): string {
@@ -125,7 +138,7 @@ export function formatRelativeAge(timestamp: number, now: number = Date.now()): 
 }
 
 /**
- * Format workspace & first file context concisely (e.g. 'anchor · src/auth.ts' or 'College/优化')
+ * Format workspace & first file context concisely (e.g. 'anchor · auth.ts' or 'College/优化')
  */
 export function formatOrigin(anchor: Anchor | string): string {
   if (typeof anchor === 'string') {
@@ -176,19 +189,21 @@ export function sortAnchorsForDisplay(anchors: Anchor[], cwd?: string): Anchor[]
 }
 
 /**
- * Update status bar badge: `⌖ 2` (invisible when 0 active notes)
+ * Update status bar badge (`⌖ 2`) AND the persistent below-editor sticky strip!
  */
 export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore): void {
   if (!hasActiveUI(ctx)) return;
   try {
     const active = store.list({ status: 'active', cwd: ctx.cwd });
     ctx.ui.setStatus('anchor', active.length > 0 ? `⌖ ${active.length}` : undefined);
+    updateStartupBanner(ctx, store);
   } catch {}
 }
 
 /**
- * Render clean sticky-note card above editor on session startup.
- * Automatically disappears as soon as the user sends their first message.
+ * Render persistent 1-line sticky-note strip BELOW the editor (`placement: 'belowEditor'`).
+ * Never collides with `pi-lingual` (`aboveEditor`), stays visible while you work,
+ * and takes 0 lines when there are no active notes.
  */
 export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): void {
   if (!hasActiveUI(ctx)) return;
@@ -196,54 +211,59 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
   try {
     const active = store.list({ status: 'active', cwd: ctx.cwd });
     if (active.length === 0) {
-      ctx.ui.setWidget('anchor-startup', undefined);
+      ctx.ui.setWidget('anchor-startup', undefined, { placement: 'belowEditor' });
       return;
     }
 
     const sorted = sortAnchorsForDisplay(active, ctx.cwd);
-    const topItems = sorted.slice(0, 3);
 
     const factory = (_tui?: any, theme?: any) => ({
       render: (width: number) => {
-        const maxTitleWidth = Math.max(14, width - 34);
         const fg = theme?.fg ? theme.fg.bind(theme) : (_c: string, text: string) => text;
-        const label = active.length === 1 ? '1 note' : `${active.length} notes`;
 
-        const lines: string[] = [
-          truncateToWidth(fg('accent', `⌖ ${label}`), width)
-        ];
-
-        for (const a of topItems) {
-          const num = a.id.replace(/^anc-/, '').padStart(2, '0');
+        // Single note: render rich 1-line sticky strip with optional progress bar & next step
+        if (sorted.length === 1) {
+          const a = sorted[0];
+          const num = a.id.replace(/^anc-/, '');
+          const bar = a.progress ? `${fg('accent', formatProgressBar(a.progress))} ` : '';
+          const nextStep = a.progress?.steps && a.progress.steps[a.progress.done]
+            ? fg('muted', ` ▸ ${a.progress.steps[a.progress.done]}`)
+            : '';
           const origin = formatOrigin(a);
-          const age = formatRelativeAge(a.createdAt);
-          const titleClipped = truncateToWidth(a.title, maxTitleWidth);
-          lines.push(
-            truncateToWidth(
-              `  ${fg('dim', num)}  ${titleClipped}  ${fg('muted', `· ${origin}`)} ${fg('dim', `(${age})`)}`,
-              width
-            )
-          );
+          const sessionIcon = a.sessionFile ? ' ↪' : '';
+          const prefix = `${fg('accent', '⌖')} ${fg('dim', `#${num}`)} ${bar}`;
+          const suffix = ` ${fg('muted', `(${origin}${sessionIcon})`)}`;
+          const availTitle = Math.max(12, width - getDisplayWidth(prefix) - getDisplayWidth( nextStep) - getDisplayWidth(suffix) - 2);
+          const titleClipped = truncateToWidth(a.title, availTitle);
+          return [truncateToWidth(`${prefix}${titleClipped}${nextStep}${suffix}`, width)];
         }
 
-        if (sorted.length > 3) {
-          lines.push(truncateToWidth(fg('dim', `  +${sorted.length - 3} more · /anchor`), width));
-        }
-
-        return lines;
+        // Multiple notes: compact horizontal sticky strip (`⌖ #1 ... · #2 ...`)
+        const countTag = fg('accent', `⌖ ${sorted.length} notes: `);
+        const segments = sorted.slice(0, 3).map(a => {
+          const num = a.id.replace(/^anc-/, '');
+          const bar = a.progress ? `${formatProgressBar(a.progress)} ` : '';
+          const shortTitle = truncateToWidth(a.title, Math.max(14, Math.floor((width - 20) / Math.min(3, sorted.length)) - 12));
+          return `${fg('dim', `#${num}`)} ${bar}${shortTitle}`;
+        });
+        const more = sorted.length > 3 ? fg('dim', ` +${sorted.length - 3}`) : '';
+        return [truncateToWidth(`${countTag}${segments.join(fg('dim', '  ·  '))}${more}`, width)];
       },
       invalidate: () => {}
     });
 
     const content = (ctx as any).ui?.theme ? factory : factory().render(80);
-    ctx.ui.setWidget('anchor-startup', content as any, { placement: 'aboveEditor' });
+    ctx.ui.setWidget('anchor-startup', content as any, { placement: 'belowEditor' });
   } catch {}
 }
 
 /**
- * Interactive `/anchor` sticky-note board
+ * Interactive `/anchor` sticky-note board with 1-click progress stepping and session teleport (`switchSession`)
  */
-export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorStore): Promise<void> {
+export async function openAnchorDashboard(
+  ctx: ExtensionContext | ExtensionCommandContext,
+  store: AnchorStore
+): Promise<void> {
   if (!hasActiveUI(ctx)) return;
 
   const allNotes = store
@@ -251,7 +271,7 @@ export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorSt
     .filter(a => a.status === 'active' || a.status === 'sleeping');
 
   if (allNotes.length === 0) {
-    ctx.ui.notify('⌖ No sticky notes. Use /pin <note> to stick one.', 'info');
+    ctx.ui.notify('⌖ No sticky notes. Type `pin: <note>` or `/pin <note>` to stick one.', 'info');
     return;
   }
 
@@ -264,13 +284,14 @@ export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorSt
 
   for (const a of sorted) {
     const num = a.id.replace(/^anc-/, '').padStart(2, '0');
-    const origin = formatOrigin(a);
+    const bar = a.progress ? `${formatProgressBar(a.progress)} ` : '';
+    const origin = formatOrigin(a) + (a.sessionFile ? ' ↪' : '');
     const age = a.status === 'sleeping'
       ? `${formatRelativeAge(a.createdAt)} · quiet`
       : formatRelativeAge(a.createdAt);
 
     const colNum = `${num}  `;
-    const colTitle = padToWidth(a.title, titleWidth);
+    const colTitle = padToWidth(`${bar}${a.title}`, titleWidth);
     const colOrigin = padToWidth(origin, 22);
 
     const label = isNarrow
@@ -287,8 +308,22 @@ export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorSt
   const anchor = optionMap.get(selected);
   if (!anchor) return;
 
+  const currentSessionFile = (ctx as any).sessionManager?.getSessionFile?.();
+  const canJumpSession = Boolean(
+    anchor.sessionFile &&
+    fs.existsSync(anchor.sessionFile) &&
+    typeof (ctx as ExtensionCommandContext).switchSession === 'function' &&
+    (!currentSessionFile || path.resolve(anchor.sessionFile) !== path.resolve(currentSessionFile))
+  );
+
+  const stepLabel = anchor.progress
+    ? `▶ Advance step (${anchor.progress.done}/${anchor.progress.total} ➔ ${Math.min(anchor.progress.total, anchor.progress.done + 1)}/${anchor.progress.total})`
+    : '▶ Start progress bar (1/4)';
+
   const actions = [
     '✓ Done (tear off note)',
+    stepLabel,
+    ...(canJumpSession ? ['↪ Jump to session (resume linked conversation)'] : []),
     ...(anchor.status === 'sleeping' ? ['⚡ Wake up (mark active)'] : []),
     'ℹ Read full note',
     '↩ Back'
@@ -301,6 +336,23 @@ export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorSt
     store.settle(anchor.id, { settledBy: 'manual' });
     ctx.ui.notify(`⌖ Torn off #${anchor.id.replace(/^anc-/, '')}: "${anchor.title}" (/anchor undo to put back)`, 'info');
     updateAnchorStatusBar(ctx, store);
+  } else if (action.startsWith('▶')) {
+    const { anchor: updated, completed } = store.step(anchor.id, 1);
+    updateAnchorStatusBar(ctx, store);
+    if (completed) {
+      ctx.ui.notify(
+        `⌖ #${updated.id.replace(/^anc-/, '')} reached ${formatProgressBar(updated.progress)}! Run /done ${updated.id.replace(/^anc-/, '')} to tear off.`,
+        'info'
+      );
+    } else {
+      ctx.ui.notify(`⌖ Advanced #${updated.id.replace(/^anc-/, '')} to ${formatProgressBar(updated.progress)}`, 'info');
+    }
+  } else if (action.startsWith('↪') && anchor.sessionFile) {
+    try {
+      await (ctx as ExtensionCommandContext).switchSession(anchor.sessionFile);
+    } catch (err: any) {
+      ctx.ui.notify(`Could not switch session: ${err.message}`, 'error');
+    }
   } else if (action.startsWith('⚡')) {
     store.touch(anchor.id);
     ctx.ui.notify(`⌖ Woke up #${anchor.id.replace(/^anc-/, '')}: "${anchor.title}"`, 'info');
@@ -308,8 +360,10 @@ export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorSt
   } else if (action.startsWith('ℹ')) {
     const details = [
       `⌖ Note #${anchor.id.replace(/^anc-/, '')}: ${anchor.title}`,
+      anchor.progress ? `Progress: ${formatProgressBar(anchor.progress)}${anchor.progress.steps ? ` (${anchor.progress.steps.join(' → ')})` : ''}` : null,
       anchor.description ? `Details: ${anchor.description}` : null,
       anchor.files.length > 0 ? `Files: ${anchor.files.join(', ')}` : null,
+      anchor.sessionFile ? `Session: ${ path.basename(anchor.sessionFile)}` : null,
       `Workspace: ${anchor.project || 'global'} · Pinned ${formatRelativeAge(anchor.createdAt)}`
     ].filter(Boolean).join('\n');
     ctx.ui.notify(details, 'info');

@@ -8,6 +8,7 @@ import {
   acquireSyncLock,
   atomicRenameWithRetry,
   extractPathsFromText,
+  extractProgressFromText,
   findMatchedAnchors,
   isAnchorTargetingWorkspace,
   isSameOrSubPath,
@@ -15,8 +16,7 @@ import {
   matchAnchorAgainstTouchedFiles,
   matchesCommitMessage,
   normalizePath,
-  renderColdStartAnchorsContext,
-  sweepQuietNotes
+  renderColdStartAnchorsContext
 } from '../src/store.ts';
 import { MS_PER_DAY } from '../src/types.ts';
 
@@ -201,3 +201,45 @@ test('Clever Touch 3 - git commit semantic matching & 7-day quiet mode (0 idle t
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('v0.5.0 Progress Bar & Session Bookmark - parses inline progress ratios/steps and increments cleanly', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+
+    // 1. Ratio syntax: [2/5]
+    const p1 = extractProgressFromText('刷完 Python-30days [5/30]');
+    assert.strictEqual(p1.cleanTitle, '刷完 Python-30days');
+    assert.deepStrictEqual(p1.progress, { done: 5, total: 30 });
+
+    // 2. Numbered steps syntax: 1. A 2. B 3. C
+    const p2 = extractProgressFromText('重构登录流: 1. 抽出接口 2. 替换Cookie 3. 补单测');
+    assert.strictEqual(p2.cleanTitle, '重构登录流');
+    assert.deepStrictEqual(p2.progress, {
+      done: 0,
+      total: 3,
+      steps: ['抽出接口', '替换Cookie', '补单测']
+    });
+
+    const note = store.create({
+      title: '重构登录流: 1. 抽出接口 2. 替换Cookie 3. 补单测',
+      cwd: '/workspace/app',
+      sessionFile: '/home/user/.pi/sessions/session-123.jsonl'
+    });
+
+    assert.strictEqual(note.sessionFile, '/home/user/.pi/sessions/session-123.jsonl');
+    assert.strictEqual(note.progress?.done, 0);
+    assert.strictEqual(note.progress?.total, 3);
+
+    const step1 = store.step(note.id, 1);
+    assert.strictEqual(step1.anchor.progress?.done, 1);
+    assert.strictEqual(step1.completed, false);
+
+    const step3 = store.step(note.id, 2);
+    assert.strictEqual(step3.anchor.progress?.done, 3);
+    assert.strictEqual(step3.completed, true);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+

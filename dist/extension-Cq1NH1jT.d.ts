@@ -6,6 +6,14 @@ import { ExtensionAPI } from '@earendil-works/pi-coding-agent';
  */
 type AnchorStatus = 'active' | 'sleeping' | 'settled';
 type AnchorPriority = 'p0' | 'p1' | 'p2';
+interface AnchorProgress {
+    /** Completed steps or units */
+    done: number;
+    /** Total steps or units */
+    total: number;
+    /** Optional parsed step labels (e.g. ['抽出接口', '替换Cookie', '补单测']) */
+    steps?: string[];
+}
 interface AnchorEvidence {
     settledAt?: number;
     settledBy?: 'commit' | 'manual' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
@@ -32,10 +40,14 @@ interface Anchor {
     updatedAt: number;
     /** Last activity timestamp (ms) */
     lastTouchedAt: number;
-    /** Associated file paths or globs (explicit or auto-extracted from note text) */
+    /** Associated file paths or globs (explicit, auto-extracted from note text, or inherited from active session) */
     files: string[];
     /** Optional tags */
     tags: string[];
+    /** Associated Pi conversation session file (.jsonl) for 1-click session jump/resume */
+    sessionFile?: string;
+    /** Optional lightweight progress tracker for long-term or multi-step notes */
+    progress?: AnchorProgress;
     /** Optional due date ('YYYY-MM-DD') */
     targetDate?: string;
     /** Optional priority kept for backward compatibility */
@@ -76,6 +88,15 @@ declare function globToRegExp(pattern: string): RegExp;
  * (e.g. "src/auth.ts", "D:/College/优化/notes.md") so the user never has to fill out forms.
  */
 declare function extractPathsFromText(text?: string): string[];
+/**
+ * Automatically extract lightweight progress metadata from note text if present:
+ * - Explicit ratio: `[2/5]`, `(3/10)`, or standalone `5/30` (where 0 <= done <= total and 2 <= total <= 500)
+ * - Numbered inline steps: `1. 抽出接口 2. 替换Cookie 3. 补单测`
+ */
+declare function extractProgressFromText(rawTitle: string): {
+    cleanTitle: string;
+    progress?: AnchorProgress;
+};
 /**
  * Check if a sticky note belongs to or targets the given workspace directory
  */
@@ -136,6 +157,8 @@ declare class AnchorStore {
         project?: string;
         files?: string[];
         tags?: string[];
+        sessionFile?: string;
+        progress?: AnchorProgress;
     }): Anchor;
     private findAnchorIndex;
     get(id: string): Anchor | undefined;
@@ -145,7 +168,16 @@ declare class AnchorStore {
         all?: boolean;
     }): Anchor[];
     update(id: string, patch: Partial<Omit<Anchor, 'id' | 'createdAt'>>): Anchor;
-    touch(id: string, timestamp?: number): Anchor;
+    touch(id: string, timestamp?: number, sessionFile?: string): Anchor;
+    /**
+     * Advance (or set) progress on a sticky note:
+     * - If delta is provided (default +1), increments `done` up to `total`.
+     * - If note had no progress yet, initializes a 4-step bar (`1/4`).
+     */
+    step(id: string, delta?: number, explicitTotal?: number): {
+        anchor: Anchor;
+        completed: boolean;
+    };
     /**
      * Tear off (settle) a completed sticky note and archive it to archive.jsonl
      */
@@ -157,11 +189,17 @@ declare class AnchorStore {
 }
 
 declare function parseAnchorCommandInput(raw: string): {
-    mode: 'dashboard' | 'undo' | 'settle' | 'pin';
+    mode: 'dashboard' | 'undo' | 'settle' | 'step' | 'jump' | 'pin';
     targetId?: string;
+    delta?: number;
     title?: string;
 };
+/**
+ * Detect 0ms human-first quick note prefix in the input box:
+ * e.g. `pin: 明天把Token改Cookie` or `便签: 检查网关重试 [1/4]`
+ */
+declare function parseQuickNoteInput(text: string): string | null;
 declare function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?: string): string | undefined;
 declare function export_default(pi: ExtensionAPI): void;
 
-export { type Anchor as A, COMMENT_FORMATS as C, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type TouchMatchResult as T, AnchorStore as a, type AnchorEvidence as b, type AnchorPriority as c, type AnchorStatus as d, type AnchorStoreState as e, acquireSyncLock as f, atomicRenameWithRetry as g, extractPathsFromText as h, findMatchedAnchors as i, getDefaultStorageDir as j, globToRegExp as k, isAnchorTargetingWorkspace as l, isSameOrSubPath as m, makeSafeTaskAnnotation as n, matchAnchorAgainstTouchedFiles as o, matchesCommitMessage as p, normalizePath as q, parseAnchorCommandInput as r, renderActiveAnchorsContext as s, renderColdStartAnchorsContext as t, resolveAnchorTarget as u, sweepQuietNotes as v, export_default as w };
+export { type Anchor as A, COMMENT_FORMATS as C, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type TouchMatchResult as T, type AnchorProgress as a, AnchorStore as b, type AnchorEvidence as c, type AnchorPriority as d, type AnchorStatus as e, type AnchorStoreState as f, acquireSyncLock as g, atomicRenameWithRetry as h, extractPathsFromText as i, extractProgressFromText as j, findMatchedAnchors as k, getDefaultStorageDir as l, globToRegExp as m, isAnchorTargetingWorkspace as n, isSameOrSubPath as o, makeSafeTaskAnnotation as p, matchAnchorAgainstTouchedFiles as q, matchesCommitMessage as r, normalizePath as s, parseAnchorCommandInput as t, parseQuickNoteInput as u, renderActiveAnchorsContext as v, renderColdStartAnchorsContext as w, resolveAnchorTarget as x, sweepQuietNotes as y, export_default as z };

@@ -5,6 +5,7 @@ import {
   type Anchor,
   type AnchorEvidence,
   type AnchorPriority,
+  type AnchorProgress,
   type AnchorStatus,
   type AnchorStoreState,
   type TouchMatchResult,
@@ -78,6 +79,46 @@ export function extractPathsFromText(text?: string): string[] {
     }
   }
   return Array.from(results);
+}
+
+/**
+ * Automatically extract lightweight progress metadata from note text if present:
+ * - Explicit ratio: `[2/5]`, `(3/10)`, or standalone `5/30` (where 0 <= done <= total and 2 <= total <= 500)
+ * - Numbered inline steps: `1. 抽出接口 2. 替换Cookie 3. 补单测`
+ */
+export function extractProgressFromText(rawTitle: string): { cleanTitle: string; progress?: AnchorProgress } {
+  if (!rawTitle) return { cleanTitle: '' };
+
+  // 1. Check numbered inline steps: "重构登录: 1. 抽出接口 2. 替换Cookie 3. 补单测"
+  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*([^\d]+?)(?=\s+\d+\.\s|$)/g));
+  if (stepParts.length >= 2) {
+    const steps = stepParts.map(m => m[2].trim().replace(/[;；,，]+$/, '')).filter(Boolean);
+    const firstMatchIdx = rawTitle.indexOf(stepParts[0][0]);
+    const prefix = rawTitle.slice(0, firstMatchIdx).replace(/[:：\-—\s]+$/, '').trim();
+    return {
+      cleanTitle: prefix || steps.join(' → '),
+      progress: { done: 0, total: steps.length, steps }
+    };
+  }
+
+  // 2. Check explicit ratio tag: "[2/5]", "(0/4)", or trailing/standalone "5/30"
+  const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\)|(?:^|\s)(\d{1,3})\/(\d{1,3})(?=\s|$))/);
+  if (ratioMatch) {
+    const done = parseInt(ratioMatch[1] ?? ratioMatch[3] ?? ratioMatch[5], 10);
+    const total = parseInt(ratioMatch[2] ?? ratioMatch[4] ?? ratioMatch[6], 10);
+    if (!isNaN(done) && !isNaN(total) && total >= 2 && total <= 500 && done >= 0 && done <= total) {
+      const stripped = rawTitle
+        .replace(ratioMatch[0], ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      return {
+        cleanTitle: stripped || rawTitle.trim(),
+        progress: { done, total }
+      };
+    }
+  }
+
+  return { cleanTitle: rawTitle.trim() };
 }
 
 /**
@@ -241,8 +282,11 @@ export function renderColdStartAnchorsContext(
   const lines = activeNotes.map(a => {
     const num = a.id.replace(/^anc-/, '');
     const files = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(', ')})` : '';
+    const prog = a.progress
+      ? ` [${a.progress.done}/${a.progress.total}${a.progress.steps && a.progress.steps[a.progress.done] ? ` · next: ${a.progress.steps[a.progress.done]}` : ''}]`
+      : '';
     const desc = a.description ? ` — ${a.description}` : '';
-    return `• #${num} [${a.project}] ${a.title}${files}${desc}`;
+    return `• #${num} [${a.project}] ${a.title}${prog}${files}${desc}`;
   });
 
   return [
@@ -434,16 +478,19 @@ export class AnchorStore {
     project?: string;
     files?: string[];
     tags?: string[];
+    sessionFile?: string;
+    progress?: AnchorProgress;
   }): Anchor {
     return this.withLock(() => {
       const state = this.loadState();
       const now = Date.now();
       const id = this.generateId(state);
 
+      const { cleanTitle, progress: parsedProgress } = extractProgressFromText(input.title);
       const explicitFiles = (input.files || []).map(f => normalizePath(f)).filter(Boolean);
       const inferredFiles = explicitFiles.length > 0
         ? explicitFiles
-        : extractPathsFromText(`${input.title} ${input.description || ''}`);
+        : extractPathsFromText(`${cleanTitle} ${input.description || ''}`);
 
       let cwd = input.cwd ? normalizePath(input.cwd) : '';
       if (input.project && (/^[a-zA-Z]:[\\/]/.test(input.project.trim()) || input.project.trim().startsWith('/'))) {
@@ -459,7 +506,7 @@ export class AnchorStore {
 
       const anchor: Anchor = {
         id,
-        title: input.title.trim(),
+        title: cleanTitle,
         description: input.description?.trim(),
         priority: input.priority || 'p1',
         status: 'active',
@@ -469,7 +516,9 @@ export class AnchorStore {
         updatedAt: now,
         lastTouchedAt: now,
         files: inferredFiles,
-        tags: (input.tags || []).map(t => t.trim()).filter(Boolean)
+        tags: (input.tags || []).map(t => t.trim()).filter(Boolean),
+        ...(input.sessionFile ? { sessionFile: normalizePath(input.sessionFile) } : {}),
+        ...(input.progress || parsedProgress ? { progress: input.progress || parsedProgress } : {})
       };
 
       state.anchors.push(anchor);
@@ -532,7 +581,7 @@ export class AnchorStore {
     });
   }
 
-  public touch(id: string, timestamp: number = Date.now()): Anchor {
+  public touch(id: string, timestamp: number = Date.now(), sessionFile?: string): Anchor {
     return this.withLock(() => {
       const state = this.loadState();
       const idx = this.findAnchorIndex(state.anchors, id);
@@ -544,9 +593,48 @@ export class AnchorStore {
       if (current.status === 'sleeping') {
         current.status = 'active';
       }
+      if (sessionFile) {
+        current.sessionFile = normalizePath(sessionFile);
+      }
       state.anchors[idx] = current;
       this.saveState(state);
       return current;
+    });
+  }
+
+  /**
+   * Advance (or set) progress on a sticky note:
+   * - If delta is provided (default +1), increments `done` up to `total`.
+   * - If note had no progress yet, initializes a 4-step bar (`1/4`).
+   */
+  public step(id: string, delta = 1, explicitTotal?: number): { anchor: Anchor; completed: boolean } {
+    return this.withLock(() => {
+      const state = this.loadState();
+      const idx = this.findAnchorIndex(state.anchors, id);
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
+
+      const current = state.anchors[idx];
+      const now = Date.now();
+      const total = explicitTotal && explicitTotal >= 2
+        ? explicitTotal
+        : (current.progress?.total || 4);
+      const prevDone = current.progress?.done || 0;
+      const nextDone = Math.max(0, Math.min(total, prevDone + delta));
+
+      current.progress = {
+        ...(current.progress || {}),
+        done: nextDone,
+        total
+      };
+      current.lastTouchedAt = now;
+      current.updatedAt = now;
+      if (current.status === 'sleeping') {
+        current.status = 'active';
+      }
+
+      state.anchors[idx] = current;
+      this.saveState(state);
+      return { anchor: current, completed: nextDone >= total };
     });
   }
 

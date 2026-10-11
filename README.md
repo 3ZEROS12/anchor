@@ -1,12 +1,12 @@
 # ⌖ Anchor
 
-> **A digital sticky note for Pi Coding Agent — with three clever touches.**  
-> Stick a quick note across sessions (`/pin`), get a 1-line comment whisper when the AI touches that file, and watch the note tear itself off when you `git commit`. Zero `TODO.md` clutter in your repo.
+> **A digital sticky note docked below your Pi editor — with four clever touches.**  
+> Stick a note in 0ms (`pin: ...`), see it persistently below your editor (`belowEditor`, zero collision with `aboveEditor` extensions), track long tasks with micro progress bars `[■■□□ 2/4]`, jump straight back to the original conversation session (`↪`), and auto-tear off on `git commit`.
 
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
 [![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
 [![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
-[![Tests: 9 Passed](https://img.shields.io/badge/Tests-9%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 10 Passed](https://img.shields.io/badge/Tests-10%20Passed-22c55e.svg)](tests/store.test.ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
 **English** | [简体中文](./README_zh.md)
@@ -20,53 +20,54 @@ pi install npm:pi-anchor
 </p>
 
 ```text
-⌖ Notes (3):
-
-  01  Switch session token to HttpOnly cookie      app · auth.ts          25m ago
-  02  Double-check rate limit fallback on timeout  app · gateway.ts       3h ago
-  03  Read external architecture notes first       College/优化 · notes.md 8d ago · quiet
-
-  Run `anchor done <num>` to tear off, or `anchor undo` to put back.
+╭─ Pi Editor ──────────────────────────────────────────────────────────────────────╮
+│ ❯ pin: Refactor auth flow: 1. Extract interface 2. HttpOnly cookie 3. Unit tests │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+  ⌖ #1 [■■□□ 2/4] Refactor auth flow ▸ Unit tests (app · auth.ts ↪)
 ```
 
 ---
 
-## Why a Sticky Note Instead of `TODO.md`?
+## Why Anchor?
 
-When you're deep in a coding session at 11 PM and realize *"I still need to fix the token expiry in `src/auth.ts` tomorrow"*, you don't want a heavy task manager:
-- Putting a `TODO.md` inside your repo pollutes `git status` and forces the AI to re-read stale checklists on every single turn.
-- Closing the terminal wipes the agent's working memory clean.
+When you're deep in a coding session and think *"Wait — I need to check the rate-limit fallback in `src/gateway.ts` after this"*, or when you pause a multi-day task for the night:
+- Writing a `TODO.md` inside your repo pollutes `git status` and burns prompt tokens on every turn.
+- Normal startup banners vanish the second you send a message, so you forget what you wrote.
 
-**Anchor is just a physical sticky note stuck to the bezel of your terminal** — stored outside your repo in `~/.anchor/state.json` (<10 KB, zero external dependencies, 4 source files), with three small, thoughtful touches:
+**Anchor is a real sticky note stuck right under your Pi input box (`belowEditor`)** — stored outside your repo in `~/.anchor/state.json` (4 source files, 0 dependencies), designed for **human hands first**:
 
-### 1. Stick It & Forget It (Smart Path Spotting)
-Write a note in plain language:
-```text
-/pin Switch session token to HttpOnly cookie in src/auth.ts
-```
-Anchor spots `src/auth.ts` (or any project path like `D:/College/...`) directly from your sentence — no forms or tags to fill out. Next time you open Pi in that project, a quiet card sits above your editor (`⌖ 1 note`) and disappears the moment you start typing.
+### 1. Docked Below Your Editor & 0ms Instant Stick (`pin: ...`)
+- **Zero Widget Collision**: Anchor docks its 1-line strip **below** your editor (`placement: "belowEditor"`), leaving the space above your editor (`aboveEditor`) 100% free for tools like `pi-lingual`.
+- **0ms Human Input**: Type `pin: Check token expiry` (or `note: ...`, `便签: ...`, `/pin ...`) directly in the editor. Anchor intercepts it in **0.00ms** without triggering an LLM call or burning tokens, and automatically links the file you were just editing.
 
-### 2. A Gentle Whisper When Touching the File (0 Idle Tokens)
-Anchor briefs the AI once on Turn 1 of a session, then drops to **0 tokens** from Turn 2 onwards.  
-When the AI reads or edits `src/auth.ts`, Anchor slips a single syntax-safe comment onto the end of that file read (`// ⌖ Note #1: Switch session token to HttpOnly cookie`), while strictly skipping `.json`, `.env`, and lockfiles.
+### 2. Micro Progress Bar for Long Tasks (`[■■□□ 2/4]`)
+- Write a ratio (`[2/4]` or `5/30`) or numbered steps (`1. Extract interface 2. HttpOnly cookie 3. Unit tests`) in your note:
+  ```text
+  /pin Refactor auth flow: 1. Extract interface 2. HttpOnly cookie 3. Unit tests
+  ```
+- Anchor renders a crisp micro progress bar (`[■■□□ 2/3] ▸ Unit tests`) right on the sticky strip. Run `/step 1` (or select `▶ Advance step` in `/anchor`) to tick it forward. Simple one-off notes stay 100% bar-free.
 
-*(Notes untouched for more than 7 days automatically enter `quiet` mode so they don't spend Turn-1 tokens in unrelated workspaces, while staying 100% visible in `/anchor` and waking up as soon as you open their project.)*
+### 3. Conversation Session Bookmark (`↪ Jump to session`)
+- Every sticky note automatically bookmarks the Pi conversation session (`sessionFile`) where it was created or last worked on.
+- Days later, open `/anchor` and pick **`↪ Jump to session`** (or run `/anchor jump 1`) to teleport Pi straight back into that exact conversation history.
 
-### 3. Auto-Tears Off on `git commit`
-When you or the AI commits the fix (`git commit -m "feat: switch session token to HttpOnly cookie"`), Anchor matches the commit message against your sticky notes and tears the note off in real time (`⌖ Auto-torn off #1`).  
-Tore one off by mistake? Run `/anchor undo` to stick it right back.
+### 4. File Whisper & Auto-Tear on `git commit`
+- **1-Line File Whisper (0 Idle Tokens)**: Briefs the AI once on Turn 1, then consumes **0 tokens** on Turn 2+. When the AI reads or edits a matching file, Anchor slips a 1-line comment (`// ⌖ Note #1: ...`) onto that file result (strictly skipping `.json` and `.env`).
+- **Auto-Tear on Commit**: When `git commit -m "..."` matches your note, Anchor tears the note off automatically (`⌖ Auto-torn off #1`). Run `/anchor undo` anytime to put it back.
 
 ---
 
 ## Commands
 
-| Where | Command | What It Does |
+| Where | Input / Command | What It Does |
 | :--- | :--- | :--- |
-| **Inside Pi** | `/pin <note>` | Stick a new note (or just tell the AI *"Remember to..."*) |
-| **Inside Pi** | `/anchor` | Open the interactive sticky note list (press Enter to tear off or read) |
-| **Inside Pi** | `/done 1` | Tear off note `#01` directly |
-| **Inside Pi** | `/anchor undo` | Put back the last torn-off note |
-| **Terminal CLI** | `anchor` / `anchor "<note>"` / `anchor done 1` | Manage the exact same sticky notes outside Pi |
+| **Pi Editor** | `pin: <note>` or `便签: <note>` | Stick a note in **0ms** without calling the LLM |
+| **Pi Slash** | `/pin <note>` | Stick a note (supports `[1/4]` or `1. A 2. B` steps) |
+| **Pi Slash** | `/anchor` | Open interactive board (tear off, `+1` step, or `↪` jump to session) |
+| **Pi Slash** | `/step 1` | Advance progress bar on note `#1` by `+1` |
+| **Pi Slash** | `/anchor jump 1` | Switch Pi back to the conversation session linked to note `#1` |
+| **Pi Slash** | `/done 1` / `/anchor undo` | Tear off note `#1`, or put back the last torn-off note |
+| **Terminal CLI** | `anchor` / `anchor step 1` / `anchor done 1` | View, step, or tear off notes outside Pi |
 
 ---
 

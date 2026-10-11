@@ -6,8 +6,10 @@ import {
   acquireSyncLock,
   atomicRenameWithRetry,
   extractPathsFromText,
+  extractProgressFromText,
   findMatchedAnchors,
   formatOrigin,
+  formatProgressBar,
   formatRelativeAge,
   getDefaultStorageDir,
   getDisplayWidth,
@@ -22,6 +24,7 @@ import {
   openAnchorDashboard,
   padToWidth,
   parseAnchorCommandInput,
+  parseQuickNoteInput,
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
   resolveAnchorTarget,
@@ -31,7 +34,7 @@ import {
   truncateToWidth,
   updateAnchorStatusBar,
   updateStartupBanner
-} from "./chunk-LKY6WIKH.js";
+} from "./chunk-VXEQDTK4.js";
 export {
   AnchorStore,
   COMMENT_FORMATS,
@@ -40,8 +43,10 @@ export {
   acquireSyncLock,
   atomicRenameWithRetry,
   extractPathsFromText,
+  extractProgressFromText,
   findMatchedAnchors,
   formatOrigin,
+  formatProgressBar,
   formatRelativeAge,
   getDefaultStorageDir,
   getDisplayWidth,
@@ -56,6 +61,7 @@ export {
   openAnchorDashboard,
   padToWidth,
   parseAnchorCommandInput,
+  parseQuickNoteInput,
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
   resolveAnchorTarget,

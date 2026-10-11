@@ -6,6 +6,15 @@
 export type AnchorStatus = 'active' | 'sleeping' | 'settled';
 export type AnchorPriority = 'p0' | 'p1' | 'p2';
 
+export interface AnchorProgress {
+  /** Completed steps or units */
+  done: number;
+  /** Total steps or units */
+  total: number;
+  /** Optional parsed step labels (e.g. ['抽出接口', '替换Cookie', '补单测']) */
+  steps?: string[];
+}
+
 export interface AnchorEvidence {
   settledAt?: number;
   settledBy?: 'commit' | 'manual' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
@@ -33,10 +42,14 @@ export interface Anchor {
   updatedAt: number;
   /** Last activity timestamp (ms) */
   lastTouchedAt: number;
-  /** Associated file paths or globs (explicit or auto-extracted from note text) */
+  /** Associated file paths or globs (explicit, auto-extracted from note text, or inherited from active session) */
   files: string[];
   /** Optional tags */
   tags: string[];
+  /** Associated Pi conversation session file (.jsonl) for 1-click session jump/resume */
+  sessionFile?: string;
+  /** Optional lightweight progress tracker for long-term or multi-step notes */
+  progress?: AnchorProgress;
   /** Optional due date ('YYYY-MM-DD') */
   targetDate?: string;
   /** Optional priority kept for backward compatibility */

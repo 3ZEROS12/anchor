@@ -29,9 +29,13 @@ declare module '@earendil-works/pi-coding-agent' {
     ) => Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }>;
   }
 
+  export interface ExtensionCommandContext extends ExtensionContext {
+    switchSession: (sessionPath: string) => Promise<{ cancelled: boolean }>;
+  }
+
   export interface CommandDefinition {
     description: string;
-    handler: (args: string, ctx: ExtensionContext) => Promise<void>;
+    handler: (args: string, ctx: ExtensionCommandContext) => Promise<void>;
   }
 
   export interface PiHost {
