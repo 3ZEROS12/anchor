@@ -6,7 +6,7 @@
 [![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
 [![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
 [![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
-[![Tests: 26 Passed](https://img.shields.io/badge/Tests-26%20通过-22c55e.svg)](tests/index.test.ts)
+[![Tests: 29 Passed](https://img.shields.io/badge/Tests-29%20通过-22c55e.svg)](tests/store.test.ts)
 [![启动耗时: < 90ms](https://img.shields.io/badge/启动耗时-%3C%2090ms-success.svg)](package.json)
 [![零仓库污染](https://img.shields.io/badge/存储-零仓库污染-success.svg)](#1-绝对零仓库污染与跨进程文件锁)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
@@ -193,7 +193,7 @@ Anchor 选择了一条极度克制的工程路径：把状态移出代码仓库�
 
 ```bash
 npm run typecheck  # TypeScript 严格类型检查 (0 错误)
-npm test           # 全套自动化单元测试 (26/26 全绿通过)
+npm test           # 全套自动化单元测试 (29/29 全绿通过)
 npm run build      # tsup 双格式打包 (ESM/CJS) 与 .d.ts 类型生成
 ```
 

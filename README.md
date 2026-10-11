@@ -6,7 +6,7 @@
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
 [![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
 [![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
-[![Tests: 26 Passed](https://img.shields.io/badge/Tests-26%20Passed-22c55e.svg)](tests/index.test.ts)
+[![Tests: 29 Passed](https://img.shields.io/badge/Tests-29%20Passed-22c55e.svg)](tests/store.test.ts)
 [![Startup: < 90ms](https://img.shields.io/badge/Startup-%3C%2090ms-success.svg)](package.json)
 [![Zero Repo Pollution](https://img.shields.io/badge/Storage-Zero%20Repo%20Pollution-success.svg)](#1-zero-repository-contamination--storage-topology)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
@@ -186,7 +186,7 @@ Engineered with strict TypeScript and 100% standard library test coverage using 
 
 ```bash
 npm run typecheck  # Strict tsc --noEmit check (0 errors)
-npm test           # Native Node test runner (26/26 passing)
+npm test           # Native Node test runner (29/29 passing)
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 ```
 
