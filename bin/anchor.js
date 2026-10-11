@@ -31,10 +31,10 @@ if (args.length === 0 || args[0] === 'list' || args[0] === 'ls') {
 
   const groups = groupAnchorsByQuadrant(active);
   const sections = [
-    { title: 'Today · 今日聚焦', list: groups.today },
-    { title: 'Upcoming · 近期排期', list: groups.upcoming },
-    { title: 'Habits · 每日循环', list: groups.habits },
-    { title: 'Backlog · 长期愿景', list: groups.backlog },
+    { title: "Today · Today's Focus", list: groups.today },
+    { title: 'Upcoming · Scheduled', list: groups.upcoming },
+    { title: 'Habits · Daily Loop', list: groups.habits },
+    { title: 'Backlog · Someday', list: groups.backlog },
   ];
 
   let seqNum = 1;

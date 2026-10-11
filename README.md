@@ -1,21 +1,30 @@
 # ⌖ Anchor
 
-> **Zero-pollution, 0-idle-token cross-session task memory for AI coding agents**  
-> Maintain cross-session intent with zero idle tokens, syntax-safe JIT touch wakeups, and zero git repository pollution.
+> **Never lose unfinished tasks when closing Pi — pin reminders across sessions, wake them when touching matching files, and auto-complete on `git commit` with zero `TODO.md` clutter.**
 
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
 [![Node v20+](https://img.shields.io/badge/Node-v20+-22c55e.svg)](package.json)
 [![TypeScript Strict](https://img.shields.io/badge/TypeScript-Strict-3b82f6.svg)](tsconfig.json)
-[![Tests: 29 Passed](https://img.shields.io/badge/Tests-29%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 31 Passed](https://img.shields.io/badge/Tests-31%20Passed-22c55e.svg)](tests/store.test.ts)
 [![Startup: < 90ms](https://img.shields.io/badge/Startup-%3C%2090ms-success.svg)](package.json)
 [![Zero Repo Pollution](https://img.shields.io/badge/Storage-Zero%20Repo%20Pollution-success.svg)](#1-zero-repository-contamination--storage-topology)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
 **English** | [简体中文](./README_zh.md)
 
+```bash
+pi install npm:pi-anchor
+```
+
 <p align="center">
   <img src="assets/hero-en.svg" alt="Anchor Terminal Dashboard" width="820">
 </p>
+
+### How It Works in 3 Steps
+
+1. **Pin in 1 second**: Tell the AI *"Remember to migrate auth tomorrow"* or type `/pin Migrate auth to HttpOnly cookies --due tomorrow`. Stored in `~/.anchor/state.json` (zero `TODO.md` files in your git repo).
+2. **Wake up next session (0 idle tokens)**: Next time you open Pi, Anchor shows a 3-line summary above your editor and briefs the AI on Turn 1. From Turn 2 onwards, it consumes **0 tokens** — waking up only with a 1-line comment when the AI reads or edits matching files.
+3. **Auto-complete on commit or test pass**: Commit related code (`git commit`), pass a `verifyCommand`, or run `/done 1` — Anchor archives the task automatically.
 
 ```text
 ⌖ Anchors (4 active):
@@ -143,8 +152,10 @@ anchor undo                             # Restore last archived task
 ### Pi Coding Agent Commands
 | Command | Description |
 | :--- | :--- |
-| `/pin "task description"` | Pin an anchor task for the current workspace |
+| `/pin <task> [--due tomorrow]` | Pin a task across sessions with optional due date |
 | `/anchor` | Open interactive terminal task dashboard |
+| `/done <id>` or `/anchor done <id>` | Complete task by row number (`1`) or ID (`anc-1`) |
+| `/anchor undo` | Restore the last settled task |
 | Status bar `⌖ N` | Displays active task count in status row; 100% hidden when 0 tasks exist |
 
 ---
@@ -186,7 +197,7 @@ Engineered with strict TypeScript and 100% standard library test coverage using 
 
 ```bash
 npm run typecheck  # Strict tsc --noEmit check (0 errors)
-npm test           # Native Node test runner (29/29 passing)
+npm test           # Native Node test runner (31/31 passing)
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 ```
 

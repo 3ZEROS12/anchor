@@ -1,8 +1,10 @@
 import {
   AnchorStore,
   SessionTouchObserver,
+  detectTargetDate,
   findMatchedAnchors,
   generateSettlementProposals,
+  groupAnchorsByQuadrant,
   hasActiveUI,
   isSameOrSubPath,
   makeSafeTaskAnnotation,
@@ -22,6 +24,55 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 var MUTATION_TOOLS = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
+function parseAnchorCommandInput(raw, now = Date.now()) {
+  const trimmed = (raw || "").trim();
+  if (!trimmed || trimmed === "list" || trimmed === "ls") {
+    return { mode: "dashboard" };
+  }
+  if (trimmed === "undo") {
+    return { mode: "undo" };
+  }
+  const settleMatch = trimmed.match(/^(?:done|rm|close|settle)\s+(.+)$/i);
+  if (settleMatch) {
+    return {
+      mode: "settle",
+      targetId: settleMatch[1].trim().replace(/^#/, "")
+    };
+  }
+  let targetDate;
+  const tokens = trimmed.split(/\s+/);
+  const dueIdx = tokens.findIndex((t) => t === "--due" || t === "-d");
+  if (dueIdx !== -1 && tokens[dueIdx + 1]) {
+    const rawDue = tokens[dueIdx + 1];
+    targetDate = detectTargetDate(rawDue, now) || rawDue;
+    tokens.splice(dueIdx, 2);
+  }
+  const cleanTitle = tokens.join(" ").trim();
+  return {
+    mode: "pin",
+    title: cleanTitle || trimmed,
+    targetDate
+  };
+}
+function resolveAnchorTarget(store, idOrIndex, cwd) {
+  const clean = idOrIndex.trim().replace(/^#/, "");
+  if (/^\d+$/.test(clean)) {
+    const seqIndex = parseInt(clean, 10);
+    const active = store.list({ status: "active", cwd });
+    const groups = groupAnchorsByQuadrant(active);
+    const sortedActive = [
+      ...groups.today,
+      ...groups.upcoming,
+      ...groups.habits,
+      ...groups.backlog
+    ];
+    if (seqIndex >= 1 && seqIndex <= sortedActive.length) {
+      return sortedActive[seqIndex - 1].id;
+    }
+  }
+  const direct = store.get(clean);
+  return direct?.id;
+}
 function extension_default(pi) {
   const store = new AnchorStore();
   const observer = new SessionTouchObserver();
@@ -33,7 +84,7 @@ function extension_default(pi) {
     preflightFailures.clear();
     const sweep = sweepStore(store);
     if (sweep.transitionedToSleeping.length > 0) {
-      ctx.ui.notify(`Anchor: ${sweep.transitionedToSleeping.length} \u4E2A\u975E\u6D3B\u8DC3\u4EFB\u52A1\u5DF2\u8FDB\u5165\u4F11\u7720`, "info");
+      ctx.ui.notify(`\u2316 Anchor: ${sweep.transitionedToSleeping.length} inactive tasks transitioned to sleep`, "info");
     }
     const activeAnchors = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active");
     for (const a of activeAnchors) {
@@ -45,7 +96,7 @@ function extension_default(pi) {
               settledBy: "verification-test",
               summary: `Physical pre-flight test passed: ${a.verifyCommand}`
             });
-            ctx.ui.notify(`\u2693 \u7269\u7406\u9A8C\u8BC1\u901A\u8FC7\uFF01\u951A\u70B9 #${a.id} ("${a.title}") \u5DF2\u81EA\u52A8\u7ED3\u6848\u5F52\u6863\u3002`, "info");
+            ctx.ui.notify(`\u2316 Verification passed! Auto-settled #${a.id}: "${a.title}"`, "info");
           } else {
             preflightFailures.set(a.id, res.output.slice(-250));
           }
@@ -377,14 +428,14 @@ Mark as completed and archive?`
     }
   });
   pi.registerCommand("anchor", {
-    description: "Inspect and settle active anchors",
+    description: "Inspect, pin, or settle active anchors (e.g. /anchor, /anchor done 1, /anchor undo)",
     handler: async (args, ctx) => {
-      const input = (args || "").trim();
-      if (!input || input === "list" || input === "ls") {
+      const parsed = parseAnchorCommandInput(args);
+      if (parsed.mode === "dashboard") {
         await openAnchorDashboard(ctx, store);
         return;
       }
-      if (input === "undo") {
+      if (parsed.mode === "undo") {
         try {
           const restored = store.undoSettle();
           ctx.ui.notify(`\u2316 Restored #${restored.id}: "${restored.title}"`, "info");
@@ -394,29 +445,68 @@ Mark as completed and archive?`
         }
         return;
       }
-      const targetId = input.startsWith("#") ? input.slice(1) : input;
-      const item = store.get(targetId);
-      if (item) {
-        store.settle(targetId, { settledBy: "manual-command" });
-        ctx.ui.notify(`\u2316 Settled: "${item.title}"`, "info");
+      if (parsed.mode === "settle" && parsed.targetId) {
+        const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
+        if (!resolvedId) {
+          ctx.ui.notify(`\u2316 Anchor not found: ${parsed.targetId}`, "error");
+          return;
+        }
+        const settled = store.settle(resolvedId, { settledBy: "manual-command" });
+        ctx.ui.notify(`\u2316 Settled #${settled.id}: "${settled.title}" (/anchor undo to revert)`, "info");
         updateAnchorStatusBar(ctx, store);
         return;
       }
-      const anc = store.create({ title: input, cwd: ctx.cwd });
-      ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"`, "info");
+      const rawTrimmed = (args || "").trim();
+      if (/^(?:#?anc-\d+|#\d+)$/i.test(rawTrimmed)) {
+        const resolvedId = resolveAnchorTarget(store, rawTrimmed, ctx.cwd);
+        if (resolvedId) {
+          const settled = store.settle(resolvedId, { settledBy: "manual-command" });
+          ctx.ui.notify(`\u2316 Settled #${settled.id}: "${settled.title}" (/anchor undo to revert)`, "info");
+          updateAnchorStatusBar(ctx, store);
+          return;
+        }
+      }
+      const anc = store.create({
+        title: parsed.title || rawTrimmed,
+        targetDate: parsed.targetDate,
+        cwd: ctx.cwd
+      });
+      ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"${anc.targetDate ? ` (due ${anc.targetDate})` : ""}`, "info");
       updateAnchorStatusBar(ctx, store);
     }
   });
   pi.registerCommand("pin", {
-    description: "Quickly pin a task across sessions",
+    description: "Pin a task across sessions (e.g. /pin Refactor auth --due tomorrow)",
     handler: async (args, ctx) => {
-      const title = (args || "").trim();
-      if (!title) {
+      const parsed = parseAnchorCommandInput(args);
+      if (parsed.mode === "dashboard" || !parsed.title) {
         await openAnchorDashboard(ctx, store);
         return;
       }
-      const anc = store.create({ title, cwd: ctx.cwd });
-      ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"`, "info");
+      const anc = store.create({
+        title: parsed.title,
+        targetDate: parsed.targetDate,
+        cwd: ctx.cwd
+      });
+      ctx.ui.notify(`\u2316 Pinned #${anc.id}: "${anc.title}"${anc.targetDate ? ` (due ${anc.targetDate})` : ""}`, "info");
+      updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.registerCommand("done", {
+    description: "Complete an active anchor by row number or ID (e.g. /done 1)",
+    handler: async (args, ctx) => {
+      const target = (args || "").trim();
+      if (!target) {
+        await openAnchorDashboard(ctx, store);
+        return;
+      }
+      const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+      if (!resolvedId) {
+        ctx.ui.notify(`\u2316 Anchor not found: ${target}`, "error");
+        return;
+      }
+      const settled = store.settle(resolvedId, { settledBy: "manual-command" });
+      ctx.ui.notify(`\u2316 Settled #${settled.id}: "${settled.title}" (/anchor undo to revert)`, "info");
       updateAnchorStatusBar(ctx, store);
     }
   });
@@ -428,5 +518,7 @@ Mark as completed and archive?`
   });
 }
 export {
-  extension_default as default
+  extension_default as default,
+  parseAnchorCommandInput,
+  resolveAnchorTarget
 };

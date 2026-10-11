@@ -14,6 +14,7 @@ import {
   padToWidth,
   truncateToWidth
 } from '../src/tui.ts';
+import { parseAnchorCommandInput, resolveAnchorTarget } from '../src/extension.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 function createTempDir(): string {
@@ -224,5 +225,46 @@ test('AnchorTUI - survives stale ExtensionContext without throwing', async () =>
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('AnchorCommands - parseAnchorCommandInput parses --due flags and done/rm/settle subcommands without creating phantom tasks', () => {
+  const now = new Date('2026-10-09T10:00:00Z').getTime();
+
+  const d1 = parseAnchorCommandInput('', now);
+  assert.strictEqual(d1.mode, 'dashboard');
+
+  const d2 = parseAnchorCommandInput('undo', now);
+  assert.strictEqual(d2.mode, 'undo');
+
+  const s1 = parseAnchorCommandInput('done 1', now);
+  assert.strictEqual(s1.mode, 'settle');
+  assert.strictEqual(s1.targetId, '1');
+
+  const s2 = parseAnchorCommandInput('rm #anc-4', now);
+  assert.strictEqual(s2.mode, 'settle');
+  assert.strictEqual(s2.targetId, 'anc-4');
+
+  const p1 = parseAnchorCommandInput('Migrate auth to HttpOnly cookies --due tomorrow', now);
+  assert.strictEqual(p1.mode, 'pin');
+  assert.strictEqual(p1.title, 'Migrate auth to HttpOnly cookies');
+  assert.ok(p1.targetDate && /^\d{4}-\d{2}-\d{2}$/.test(p1.targetDate));
+});
+
+test('AnchorCommands - resolveAnchorTarget maps both 1-based quadrant index and explicit anc-ID accurately', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const a1 = store.create({ title: 'Someday backlog task', cwd: '/workspace/proj' });
+    const a2 = store.create({ title: 'Today urgent task', targetDate: '2026-01-01', cwd: '/workspace/proj' });
+
+    // In quadrant order, 'Today' (a2) comes before 'Backlog' (a1)
+    assert.strictEqual(resolveAnchorTarget(store, '1', '/workspace/proj'), a2.id);
+    assert.strictEqual(resolveAnchorTarget(store, '02', '/workspace/proj'), a1.id);
+    assert.strictEqual(resolveAnchorTarget(store, a1.id, '/workspace/proj'), a1.id);
+    assert.strictEqual(resolveAnchorTarget(store, `#${a2.id}`, '/workspace/proj'), a2.id);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 
 
