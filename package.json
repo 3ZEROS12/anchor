@@ -1,7 +1,7 @@
 {
   "name": "pi-anchor",
-  "version": "0.3.0",
-  "description": "Compact, autonomous, persistent task memory for Pi — pin tasks across sessions (/pin), auto-wake on project/file touch, and auto-settle in real time on git commit with 0 TODO.md clutter.",
+  "version": "0.4.0",
+  "description": "A digital sticky note for Pi — stick a quick note across sessions (/pin), get a 1-line whisper when touching matching files, and auto-tear off on git commit with 0 TODO.md clutter.",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",

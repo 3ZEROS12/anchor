@@ -1,67 +1,47 @@
 /**
- * Anchor Data Contracts & Type Definitions
- * Single Global Source of Truth with Zero Workspace Contamination.
+ * Anchor Data Contracts
+ * Minimalist cross-session sticky notes stored in ~/.anchor/state.json
  */
 
-export type AnchorStatus = 'active' | 'sleeping' | 'settled' | 'graveyard';
+export type AnchorStatus = 'active' | 'sleeping' | 'settled';
 export type AnchorPriority = 'p0' | 'p1' | 'p2';
-export type AnchorDurability = 'ephemeral' | 'durable';
-
-export interface AnchorDecayPolicy {
-  /** Days before an untouched active anchor transitions to sleeping */
-  activeDays: number;
-  /** Days an anchor remains sleeping before dropping to graveyard */
-  sleepDays: number;
-  /** Total maximum days before permanent graveyard sweep (9999 = never) */
-  graveyardDays: number;
-}
 
 export interface AnchorEvidence {
   settledAt?: number;
-  settledBy?: 'one-tap-settlement' | 'manual-command' | 'verification-test';
+  settledBy?: 'commit' | 'manual' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
   commitHash?: string;
   summary?: string;
   touchedFiles?: string[];
 }
 
 export interface Anchor {
-  /** Unique sequential identifier, e.g., 'anc-1' */
+  /** Sequential identifier, e.g. 'anc-1' */
   id: string;
-  /** Short imperative title of the task */
+  /** Sticky note text */
   title: string;
-  /** Optional detailed context or notes */
+  /** Optional extra context */
   description?: string;
-  /** Task priority */
-  priority: AnchorPriority;
-  /** Current lifecycle status */
+  /** Lifecycle status: 'active' (recent) or 'sleeping' (>7d untouched, 0 prompt tokens) */
   status: AnchorStatus;
-  /** Durability tier: ephemeral (short-lived reminder, 48h TTL) or durable (long-term architecture vision) */
-  durability: AnchorDurability;
-  /** Canonical project name (e.g. 'PPT', 'X', or 'global') */
+  /** Short workspace label (e.g. 'anchor', 'College/优化', or 'global') */
   project: string;
-  /** Canonical root directory where the task was anchored (empty string for global tasks) */
+  /** Workspace directory path where the note applies */
   cwd: string;
-  /** Creation timestamp in ms */
+  /** Creation timestamp (ms) */
   createdAt: number;
-  /** Last update timestamp in ms */
+  /** Last update timestamp (ms) */
   updatedAt: number;
-  /** Last touched timestamp in ms (resets on file touch) */
+  /** Last activity timestamp (ms) */
   lastTouchedAt: number;
-  /** Associated file paths or globs, e.g. ['src/auth/*.ts'] */
+  /** Associated file paths or globs (explicit or auto-extracted from note text) */
   files: string[];
-  /** Expected completion date in format 'YYYY-MM-DD' (e.g. '2026-09-24') */
-  targetDate?: string;
-  /** Optional shell command for automated physical verification (e.g. 'npm test') */
-  verifyCommand?: string;
-  /** Topic or domain tags, e.g. ['auth', 'security'] */
+  /** Optional tags */
   tags: string[];
-  /** Optional recurrence pattern: 'daily' for recurring daily habits */
-  recurrence?: 'daily';
-  /** Last completed date string 'YYYY-MM-DD' for recurring tasks */
-  lastCompletedDate?: string;
-  /** Decay policy overrides */
-  decay: AnchorDecayPolicy;
-  /** Settlement evidence metadata upon closure */
+  /** Optional due date ('YYYY-MM-DD') */
+  targetDate?: string;
+  /** Optional priority kept for backward compatibility */
+  priority?: AnchorPriority;
+  /** Settlement metadata when archived */
   evidence?: AnchorEvidence;
 }
 
@@ -76,30 +56,9 @@ export interface TouchMatchResult {
   anchor: Anchor;
   score: number;
   matchedFiles: string[];
-  reason: 'exact-file' | 'dir-prefix' | 'tag-keyword';
+  reason: 'exact-file' | 'dir-prefix';
 }
 
-export interface SettlementProposal {
-  anchor: Anchor;
-  matchedFiles: string[];
-  reason: string;
-  recommendedAction: 'settle' | 'defer';
-}
-
-export const EPHEMERAL_DECAY_POLICY: AnchorDecayPolicy = {
-  activeDays: 7,      // 7 days active before quiet sleep
-  sleepDays: 30,
-  graveyardDays: 9999 // Never silently auto-delete unfinished tasks
-};
-
-export const DURABLE_DECAY_POLICY: AnchorDecayPolicy = {
-  activeDays: 7,      // 7 days active before quiet sleep
-  sleepDays: 30,
-  graveyardDays: 9999 // Never permanently auto-dropped; preserved indefinitely
-};
-
-export const DEFAULT_DECAY_POLICY: AnchorDecayPolicy = {
-  activeDays: 7,
-  sleepDays: 30,
-  graveyardDays: 9999
-};
+/** 7 days without activity moves a note to quiet mode (still visible in UI, 0 prompt tokens in unrelated workspaces) */
+export const QUIET_AFTER_DAYS = 7;
+export const MS_PER_DAY = 86_400_000;

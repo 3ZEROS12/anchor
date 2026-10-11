@@ -5,279 +5,66 @@ import path from 'node:path';
 import os from 'node:os';
 import { AnchorStore } from '../src/store.ts';
 import {
-  updateAnchorStatusBar,
-  openAnchorDashboard,
-  updateStartupBanner,
-  formatTargetDate,
-  formatCreationTime,
+  formatOrigin,
+  formatRelativeAge,
   getDisplayWidth,
+  openAnchorDashboard,
   padToWidth,
-  truncateToWidth
+  truncateToWidth,
+  updateAnchorStatusBar,
+  updateStartupBanner
 } from '../src/tui.ts';
 import { parseAnchorCommandInput, resolveAnchorTarget } from '../src/extension.ts';
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 function createTempDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-clean-tui-test-'));
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-tui-test-'));
 }
 
-test('AnchorTUI - status bar reflects active state cleanly with ⌖ N', () => {
+test('StickyNoteTUI - status bar badge and clean startup sticky note card', () => {
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
-    let currentStatus: string | undefined = 'initial';
-
-    const mockCtx = {
-      cwd: '/workspace/project-a',
-      hasUI: true,
-      ui: {
-        setStatus: (_key: string, text: string | undefined) => {
-          currentStatus = text;
-        }
-      }
-    } as unknown as ExtensionContext;
-
-    // 1. Zero active -> undefined (completely invisible)
-    updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, undefined);
-
-    // 2. One active anchor matching cwd -> ⌖ 1
-    store.create({ title: 'Task Alpha', cwd: '/workspace/project-a' });
-    updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '⌖ 1');
-
-    // 3. Two active anchors -> ⌖ 2
-    store.create({ title: 'Task Beta', cwd: '/workspace/project-a' });
-    updateAnchorStatusBar(mockCtx, store);
-    assert.strictEqual(currentStatus, '⌖ 2');
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('AnchorTUI - formatTargetDate and formatCreationTime render clear dual-timeline', () => {
-  const tempDir = createTempDir();
-  try {
-    const store = new AnchorStore(tempDir);
-    const now = 100_000_000_000;
-
-    const aToday = store.create({ title: '今天完成优化' });
-    const aTomorrow = store.create({ title: '明天完成优化' });
-    const aIn2d = store.create({ title: '后天完成优化' });
-    const aDaily = store.create({ title: '每天吃苹果' });
-    const aLongTerm = store.create({ title: '重构底层架构' });
-
-    assert.strictEqual(formatTargetDate(aToday, aToday.createdAt), 'Today');
-    assert.strictEqual(formatTargetDate(aTomorrow, aTomorrow.createdAt), 'Tomorrow');
-    assert.strictEqual(formatTargetDate(aIn2d, aIn2d.createdAt), 'In 2d');
-    assert.strictEqual(formatTargetDate(aDaily, aDaily.createdAt), 'Daily');
-    assert.strictEqual(formatTargetDate(aLongTerm, aLongTerm.createdAt), 'Someday');
-
-    const createdStr = formatCreationTime(now, now);
-    assert.ok(createdStr.startsWith('Today '));
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('AnchorTUI - openAnchorDashboard renders Plan 2 Neovim/Geek layout with folder metadata', async () => {
-  const tempDir = createTempDir();
-  try {
-    const store = new AnchorStore(tempDir);
-    const selectTitles: string[] = [];
-    let initialSelectOptions: string[] = [];
-    let notifyMsg = '';
-
-    const mockCtx = {
-      cwd: '/workspace/project-a',
-      hasUI: true,
-      ui: {
-        select: async (title: string, options: string[]) => {
-          selectTitles.push(title);
-          if (selectTitles.length === 1) {
-            initialSelectOptions = options;
-          }
-          for (const opt of options) {
-            assert.strictEqual(typeof opt, 'string');
-          }
-          return options[0]; // 1st call picks first anchor; 2nd call picks '✓ Settle'
-        },
-        notify: (msg: string) => {
-          notifyMsg = msg;
-        },
-        setStatus: () => {}
-      }
-    } as unknown as ExtensionContext;
-
-    // 1. Empty ledger: quiet notify, 0 popups
-    await openAnchorDashboard(mockCtx, store);
-    assert.ok(notifyMsg.includes('No active anchors'));
-
-    // 2. Ledger with active items (clean numbers, origin, relative time in English)
-    store.create({ title: 'Refactor auth', priority: 'p0', files: ['src/auth/jwt.ts'], cwd: '/workspace/project-a' });
-    store.create({ title: 'Global task', priority: 'p1' });
-
-    await openAnchorDashboard(mockCtx, store);
-    assert.ok(selectTitles.some(t => t.includes('Anchors')));
-    assert.ok(initialSelectOptions.some(o => o.includes('01') && o.includes('Refactor auth') && o.includes('project-a') && o.includes('src/auth/jwt.ts')));
-    assert.ok(initialSelectOptions.some(o => o.includes('02') && o.includes('Global task') && o.includes('global')));
-    assert.ok(notifyMsg.includes('Settled'));
-    assert.strictEqual(store.list({ cwd: '/workspace/project-a' }).length, 1);
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('AnchorTUI - getDisplayWidth and padToWidth properly align CJK full-width columns', () => {
-  const cjk = '每天吃苹果';
-  assert.strictEqual(getDisplayWidth(cjk), 10);
-  assert.strictEqual(getDisplayWidth('hello'), 5);
-
-  const paddedCjk = padToWidth(cjk, 16);
-  assert.strictEqual(getDisplayWidth(paddedCjk), 16);
-
-  const paddedAscii = padToWidth('hello', 16);
-  assert.strictEqual(getDisplayWidth(paddedAscii), 16);
-});
-
-test('AnchorTUI - updateStartupBanner renders clean widget above editor', () => {
-  const tempDir = createTempDir();
-  try {
-    const store = new AnchorStore(tempDir);
-    let widgetKey: string | undefined;
+    let currentStatus: string | undefined = 'init';
     let widgetLines: string[] | undefined;
 
     const mockCtx = {
-      cwd: '/workspace',
+      cwd: '/workspace/app',
       hasUI: true,
       ui: {
-        setWidget: (key: string, content: string[] | undefined) => {
-          widgetKey = key;
-          widgetLines = content;
-        }
+        setStatus: (_k: string, val: string | undefined) => { currentStatus = val; },
+        setWidget: (_k: string, lines: string[] | undefined) => { widgetLines = lines; }
       }
     } as unknown as ExtensionContext;
 
-    // 1. Zero items: widget cleared
+    updateAnchorStatusBar(mockCtx, store);
     updateStartupBanner(mockCtx, store);
+    assert.strictEqual(currentStatus, undefined);
     assert.strictEqual(widgetLines, undefined);
 
-    // 2. Active items: widget rendered
-    store.create({ title: '今天完成优化' });
+    store.create({ title: 'Migrate auth to cookies in src/auth.ts', cwd: '/workspace/app' });
+    updateAnchorStatusBar(mockCtx, store);
     updateStartupBanner(mockCtx, store);
-    assert.strictEqual(widgetKey, 'anchor-startup');
-    assert.ok(widgetLines);
-    assert.ok((widgetLines as string[]).some((l: string) => l.includes('active commitments')));
-    assert.ok((widgetLines as string[]).some((l: string) => l.includes('[Today]') && l.includes('今天完成优化')));
+
+    assert.strictEqual(currentStatus, '⌖ 1');
+    const lines = widgetLines as string[] | undefined;
+    assert.ok(lines && lines.some((l: string) => l.includes('⌖ 1 note')));
+    assert.ok(lines && lines.some((l: string) => l.includes('Migrate auth to cookies') && l.includes('app · auth.ts')));
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
-test('AnchorTUI - truncateToWidth properly handles ANSI escape sequences and bounds width', () => {
-  const ansiStyled = '\x1b[38;2;131;192;146m\x1b[1m⌖ anchor \x1b[22m\x1b[39m\x1b[38;2;131;192;146mpin\x1b[39m "College重构前置查阅外部架构参考库" \x1b[38;2;133;146;137m(D:/College/优化/EXTERNAL_ARCHITECTURE_INSPIRATIONS.md, D:/College/优化/CURRENT_MISSION_STATE.md)\x1b[39m';
-
-  const origWidth = getDisplayWidth(ansiStyled);
-  assert.ok(origWidth > 120);
-
-  const truncated120 = truncateToWidth(ansiStyled, 120);
-  assert.ok(getDisplayWidth(truncated120) <= 120);
-  assert.ok(truncated120.includes('…'));
-
-  const truncated80 = truncateToWidth(ansiStyled, 80);
-  assert.ok(getDisplayWidth(truncated80) <= 80);
-  assert.ok(truncated80.includes('…'));
-
-  const shortStr = 'hello world';
-  assert.strictEqual(truncateToWidth(shortStr, 50), 'hello world');
-
-  // Multi-line JSON output (e.g. from anchor list) must be flattened to single line without raw newlines
-  const multiLineJson = '✔ {\n  "active": [\n    { "id": "anc-1", "title": "Test" }\n  ]\n}';
-  const singleLineTrunc = truncateToWidth(multiLineJson, 40);
-  assert.ok(!singleLineTrunc.includes('\n'), 'truncateToWidth must strip newlines to prevent pi-tui single-line overflow');
-  assert.ok(getDisplayWidth(singleLineTrunc) <= 40);
-});
-
-test('AnchorTUI - survives stale ExtensionContext without throwing', async () => {
+test('StickyNoteTUI - openAnchorDashboard renders clean un-tacky list and supports tearing off or waking notes', async () => {
   const tempDir = createTempDir();
   try {
     const store = new AnchorStore(tempDir);
-    store.create({ title: 'Task 1', cwd: '/workspace' });
-
-    const staleCtx = {
-      cwd: '/workspace',
-      get hasUI(): boolean {
-        throw new Error('This extension ctx is stale after session replacement or reload.');
-      },
-      get ui(): any {
-        throw new Error('This extension ctx is stale after session replacement or reload.');
-      }
-    } as unknown as ExtensionContext;
-
-    assert.doesNotThrow(() => {
-      updateAnchorStatusBar(staleCtx, store);
-      updateStartupBanner(staleCtx, store);
-    });
-    await assert.doesNotReject(async () => {
-      await openAnchorDashboard(staleCtx, store);
-    });
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('AnchorCommands - parseAnchorCommandInput parses --due flags and done/rm/settle subcommands without creating phantom tasks', () => {
-  const now = new Date('2026-10-09T10:00:00Z').getTime();
-
-  const d1 = parseAnchorCommandInput('', now);
-  assert.strictEqual(d1.mode, 'dashboard');
-
-  const d2 = parseAnchorCommandInput('undo', now);
-  assert.strictEqual(d2.mode, 'undo');
-
-  const s1 = parseAnchorCommandInput('done 1', now);
-  assert.strictEqual(s1.mode, 'settle');
-  assert.strictEqual(s1.targetId, '1');
-
-  const s2 = parseAnchorCommandInput('rm #anc-4', now);
-  assert.strictEqual(s2.mode, 'settle');
-  assert.strictEqual(s2.targetId, 'anc-4');
-
-  const p1 = parseAnchorCommandInput('Migrate auth to HttpOnly cookies --due tomorrow', now);
-  assert.strictEqual(p1.mode, 'pin');
-  assert.strictEqual(p1.title, 'Migrate auth to HttpOnly cookies');
-  assert.ok(p1.targetDate && /^\d{4}-\d{2}-\d{2}$/.test(p1.targetDate));
-});
-
-test('AnchorCommands - resolveAnchorTarget maps both 1-based quadrant index and explicit anc-ID accurately', () => {
-  const tempDir = createTempDir();
-  try {
-    const store = new AnchorStore(tempDir);
-  const a1 = store.create({ title: 'Someday backlog task', priority: 'p2', cwd: '/workspace/proj' });
-    const a2 = store.create({ title: 'Today urgent task', priority: 'p0', targetDate: '2026-01-01', cwd: '/workspace/proj' });
-
-    // In priority/due order, 'Today P0' (a2) comes before 'Someday P2' (a1)
-    assert.strictEqual(resolveAnchorTarget(store, '1', '/workspace/proj'), a2.id);
-    assert.strictEqual(resolveAnchorTarget(store, '02', '/workspace/proj'), a1.id);
-    assert.strictEqual(resolveAnchorTarget(store, a1.id, '/workspace/proj'), a1.id);
-    assert.strictEqual(resolveAnchorTarget(store, `#${a2.id}`, '/workspace/proj'), a2.id);
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-  }
-});
-
-test('v0.3.0 Persistent - openAnchorDashboard keeps sleeping/quiet tasks visible and allows waking them', async () => {
-  const tempDir = createTempDir();
-  try {
-    const store = new AnchorStore(tempDir);
-    const anc = store.create({
+    const n1 = store.create({
       title: 'College重构前置查阅外部架构参考库',
-      priority: 'p0',
       project: 'D:/College/优化',
       cwd: 'D:/Workspace/X'
     });
-    // Simulate sleeping status
-    store.update(anc.id, { status: 'sleeping' });
+    store.update(n1.id, { status: 'sleeping' });
 
     let renderedOptions: string[] = [];
     const mockCtx = {
@@ -289,7 +76,6 @@ test('v0.3.0 Persistent - openAnchorDashboard keeps sleeping/quiet tasks visible
             renderedOptions = options;
             return options[0];
           }
-          // Pick '⚡ Wake up'
           return options.find(o => o.startsWith('⚡')) || options[0];
         },
         notify: () => {},
@@ -299,14 +85,41 @@ test('v0.3.0 Persistent - openAnchorDashboard keeps sleeping/quiet tasks visible
 
     await openAnchorDashboard(mockCtx, store);
     assert.strictEqual(renderedOptions.length, 1);
-    assert.ok(renderedOptions[0].includes('[Quiet]'));
     assert.ok(renderedOptions[0].includes('College重构前置查阅外部架构参考库'));
-    // After selecting '⚡ Wake up', status is restored to 'active'
-    assert.strictEqual(store.get(anc.id)?.status, 'active');
+    assert.ok(renderedOptions[0].includes('College/优化'));
+    assert.ok(renderedOptions[0].includes('quiet'));
+    // No corporate [P0] / Someday / (0 tok) clutter!
+    assert.ok(!renderedOptions[0].includes('[P0]'));
+    assert.ok(!renderedOptions[0].includes('Someday'));
+    assert.strictEqual(store.get(n1.id)?.status, 'active');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
 
+test('StickyNoteTUI - CJK width alignment, truncation, and command parsing', () => {
+  assert.strictEqual(getDisplayWidth('电子便签'), 8);
+  assert.strictEqual(getDisplayWidth(padToWidth('电子便签', 12)), 12);
+  assert.strictEqual(formatRelativeAge(100_000, 100_000 + 5000), 'just now');
+  assert.strictEqual(formatRelativeAge(100_000, 100_000 + 7200_000), '2h ago');
+  assert.strictEqual(formatOrigin('D:/Workspace/anchor'), 'anchor');
 
+  const truncated = truncateToWidth('Fix auth (unclosed bracket', 12);
+  assert.ok(getDisplayWidth(truncated) <= 12);
+  assert.ok(!truncated.includes('('));
 
+  assert.strictEqual(parseAnchorCommandInput('').mode, 'dashboard');
+  assert.strictEqual(parseAnchorCommandInput('undo').mode, 'undo');
+  assert.strictEqual(parseAnchorCommandInput('done 1').mode, 'settle');
+  assert.strictEqual(parseAnchorCommandInput('Remember to check logs').mode, 'pin');
+
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const a1 = store.create({ title: 'Note A', cwd: '/workspace/p' });
+    assert.strictEqual(resolveAnchorTarget(store, '1', '/workspace/p'), a1.id);
+    assert.strictEqual(resolveAnchorTarget(store, '#anc-1', '/workspace/p'), a1.id);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

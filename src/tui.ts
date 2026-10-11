@@ -1,115 +1,16 @@
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { AnchorStore, getTodayDateString } from './store.ts';
-import { isAnchorTargetingWorkspace } from './matcher.ts';
+import { AnchorStore, isAnchorTargetingWorkspace } from './store.ts';
 import type { Anchor } from './types.ts';
 import path from 'node:path';
 
-export type AnchorQuadrant = 'Today' | 'Upcoming' | 'Habits' | 'Backlog';
-
-export interface GroupedAnchors {
-  today: Anchor[];
-  upcoming: Anchor[];
-  habits: Anchor[];
-  backlog: Anchor[];
-}
-
-/**
- * Classify anchor into one of four cognitive quadrants:
- * - 'Today': Due today or overdue
- * - 'Upcoming': Due in the future (tomorrow, in 2d, specific dates)
- * - 'Habits': Daily recurring habits
- * - 'Backlog': Open-ended long-term vision
- */
-export function classifyAnchor(anchor: Anchor, now: number = Date.now()): AnchorQuadrant {
-  if (anchor.recurrence === 'daily') {
-    return 'Habits';
-  }
-  if (!anchor.targetDate) {
-    return 'Backlog';
-  }
-
-  const todayStr = getTodayDateString(now);
-  if (anchor.targetDate <= todayStr) {
-    return 'Today';
-  }
-
-  return 'Upcoming';
-}
-
-/**
- * Group active anchors by cognitive quadrant
- */
-export function groupAnchorsByQuadrant(anchors: Anchor[], now: number = Date.now()): GroupedAnchors {
-  const groups: GroupedAnchors = {
-    today: [],
-    upcoming: [],
-    habits: [],
-    backlog: []
-  };
-
-  for (const a of anchors) {
-    const q = classifyAnchor(a, now);
-    if (q === 'Today') groups.today.push(a);
-    else if (q === 'Upcoming') groups.upcoming.push(a);
-    else if (q === 'Habits') groups.habits.push(a);
-    else groups.backlog.push(a);
-  }
-
-  return groups;
-}
-
-const PRIORITY_RANK: Record<string, number> = { p0: 0, p1: 1, p2: 2 };
-
-/**
- * Sort unfinished anchors into a single compact, priority-driven engineering list:
- * 1. Active before Sleeping (quiet)
- * 2. Matching current workspace before other workspaces
- * 3. Due Today / Overdue before open-ended
- * 4. Priority (P0 -> P1 -> P2)
- */
-export function sortAnchorsForDisplay(anchors: Anchor[], cwd?: string, now: number = Date.now()): Anchor[] {
-  const todayStr = getTodayDateString(now);
-  return [...anchors].sort((a, b) => {
-    // 1. Active before sleeping
-    if (a.status !== b.status) {
-      return a.status === 'active' ? -1 : 1;
-    }
-    // 2. Current workspace match first
-    if (cwd) {
-      const aMatch = isAnchorTargetingWorkspace(a, cwd) ? 0 : 1;
-      const bMatch = isAnchorTargetingWorkspace(b, cwd) ? 0 : 1;
-      if (aMatch !== bMatch) return aMatch - bMatch;
-    }
-    // 3. Due today / overdue first
-    const aDue = a.targetDate && a.targetDate <= todayStr ? 0 : 1;
-    const bDue = b.targetDate && b.targetDate <= todayStr ? 0 : 1;
-    if (aDue !== bDue) return aDue - bDue;
-    // 4. Priority P0 -> P1 -> P2
-    const pA = PRIORITY_RANK[a.priority] ?? 1;
-    const pB = PRIORITY_RANK[b.priority] ?? 1;
-    if (pA !== pB) return pA - pB;
-    return a.createdAt - b.createdAt;
-  });
-}
-
 const ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 
-/**
- * Strip ANSI escape codes from string
- */
 export function stripAnsi(str: string): string {
   return str.replace(ANSI_REGEX, '');
 }
 
 /**
- * Calculate display width in terminal columns, accounting for:
- * - ANSI escape codes (width 0)
- * - CJK ideographs & fullwidth forms (width 2)
- * - Japanese Kana (width 2)
- * - Korean Hangul syllables & Jamo (width 2)
- * - Emojis & Pictographs (width 2)
- * - Zero-width characters & joiners (width 0)
- * - Standard ASCII (width 1)
+ * Calculate visual terminal column width (CJK/Kana/Hangul/Emoji = 2 cells, ASCII = 1 cell)
  */
 export function getDisplayWidth(str: string): number {
   const clean = stripAnsi(str);
@@ -117,8 +18,6 @@ export function getDisplayWidth(str: string): number {
 
   for (const char of clean) {
     const code = char.codePointAt(0) || 0;
-
-    // Zero-width characters (ZWJ, variation selectors, combining marks)
     if (
       code === 0x200d ||
       code === 0xfe0f ||
@@ -129,7 +28,6 @@ export function getDisplayWidth(str: string): number {
       continue;
     }
 
-    // Double-width characters: CJK, Hangul, Kana, Emojis
     if (
       (code >= 0x4e00 && code <= 0x9fff) ||
       (code >= 0x3400 && code <= 0x4dbf) ||
@@ -166,9 +64,6 @@ export function hasActiveUI(ctx: ExtensionContext | null | undefined): ctx is Ex
   }
 }
 
-/**
- * Truncate string to target terminal visual width with ellipsis
- */
 export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…'): string {
   if (maxWidth <= 0) return '';
   const singleLine = str.replace(/[\r\n\t]+/g, ' ');
@@ -197,23 +92,17 @@ export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…')
     const fullChar = singleLine.slice(i, i + charLen);
     const charWidth = getDisplayWidth(fullChar);
 
-    if (accumWidth + charWidth > target) {
-      break;
-    }
+    if (accumWidth + charWidth > target) break;
     accumulated += fullChar;
     accumWidth += charWidth;
     i += charLen;
   }
 
-  // Invariant 11: Guard against trailing open brackets right before ellipsis (e.g. "Fix auth (…" -> "Fix auth…")
-  accumulated = accumulated.replace(/\s*[\(\[\{（【]$/, '');
-
+  // Invariant 11: Strip any trailing unclosed parenthesis/bracket fragment right before ellipsis
+  accumulated = accumulated.replace(/\s*[\(\[\{（【][^)\]}）】]*$/, '');
   return accumulated + ellipsis + (singleLine.includes('\x1b') ? '\x1b[0m' : '');
 }
 
-/**
- * Pad and/or truncate string to exact visual column width, eliminating column tearing
- */
 export function padToWidth(str: string, targetWidth: number): string {
   const truncated = truncateToWidth(str, targetWidth);
   const current = getDisplayWidth(truncated);
@@ -222,147 +111,84 @@ export function padToWidth(str: string, targetWidth: number): string {
 }
 
 /**
- * Format expected completion date in human-intuitive terms:
- * - 'Daily' for daily recurring habits
- * - 'Today' if targetDate is today
- * - 'Tomorrow' if targetDate is tomorrow
- * - 'In 2d' / 'In 3d' for near-term dates
- * - 'MM-DD' for future dates
- * - 'Overdue' if targetDate is past
- * - 'Someday' for open-ended architecture/long-term vision
+ * Format relative sticky-note age cleanly: 'just now', '15m ago', '3h ago', '2d ago'
  */
-export function formatTargetDate(anchor: Anchor, now: number = Date.now()): string {
-  if (anchor.recurrence === 'daily') {
-    return 'Daily';
-  }
-  if (!anchor.targetDate) {
-    return 'Someday';
-  }
-
-  const todayStr = getTodayDateString(now);
-  if (anchor.targetDate === todayStr) {
-    return 'Today';
-  }
-
-  const MS_DAY = 24 * 60 * 60 * 1000;
-  const tomorrowStr = getTodayDateString(now + MS_DAY);
-  if (anchor.targetDate === tomorrowStr) {
-    return 'Tomorrow';
-  }
-
-  const in2dStr = getTodayDateString(now + 2 * MS_DAY);
-  if (anchor.targetDate === in2dStr) {
-    return 'In 2d';
-  }
-
-  const in3dStr = getTodayDateString(now + 3 * MS_DAY);
-  if (anchor.targetDate === in3dStr) {
-    return 'In 3d';
-  }
-
-  if (anchor.targetDate < todayStr) {
-    return 'Overdue';
-  }
-
-  const parts = anchor.targetDate.split('-');
-  if (parts.length === 3) {
-    return `${parts[1]}-${parts[2]}`;
-  }
-
-  return anchor.targetDate;
+export function formatRelativeAge(timestamp: number, now: number = Date.now()): string {
+  const diffSec = Math.max(0, Math.floor((now - timestamp) / 1000));
+  if (diffSec < 60) return 'just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
 }
 
 /**
- * Format creation timestamp as concise date/time:
- * - 'Today HH:MM' if created today
- * - 'Yesterday HH:MM' if created yesterday
- * - 'MM-DD HH:MM' if created this year
- * - 'YYYY-MM-DD' if older
- */
-export function formatCreationTime(timestamp: number, now: number = Date.now()): string {
-  const d = new Date(timestamp);
-  const nowD = new Date(now);
-
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
-  const todayStr = getTodayDateString(now);
-  const createdDayStr = getTodayDateString(timestamp);
-
-  if (createdDayStr === todayStr) {
-    return `Today ${timeStr}`;
-  }
-
-  const yesterdayStr = getTodayDateString(now - 24 * 60 * 60 * 1000);
-  if (createdDayStr === yesterdayStr) {
-    return `Yesterday ${timeStr}`;
-  }
-
-  const mmdd = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  if (d.getFullYear() === nowD.getFullYear()) {
-    return `${mmdd} ${timeStr}`;
-  }
-
-  return `${d.getFullYear()}-${mmdd}`;
-}
-
-/**
- * Backward compatibility alias
- */
-export function formatRelativeTime(timestamp: number, now: number = Date.now()): string {
-  return formatCreationTime(timestamp, now);
-}
-
-/**
- * Backward compatibility alias (now returns target date representation)
- */
-export function formatRemainingTtl(anchor: Anchor, now: number = Date.now()): string | undefined {
-  return formatTargetDate(anchor, now);
-}
-
-/**
- * Format origin workspace / project label concisely
+ * Format workspace & first file context concisely (e.g. 'anchor · src/auth.ts' or 'College/优化')
  */
 export function formatOrigin(anchor: Anchor | string): string {
-  if (typeof anchor === 'object') {
-    if (anchor.project && anchor.project !== 'global') {
-      const normProj = anchor.project.replace(/\\/g, '/').replace(/\/+$/, '');
-      if (normProj.includes('/')) {
-        const parts = normProj.split('/').filter(Boolean);
-        return parts.slice(-2).join('/');
-      }
-      return normProj;
-    }
-    if (!anchor.cwd) return 'global';
-    return path.basename(anchor.cwd.replace(/\\/g, '/')) || 'global';
+  if (typeof anchor === 'string') {
+    if (!anchor) return 'global';
+    return path.basename(anchor.replace(/\\/g, '/')) || 'global';
   }
-  if (!anchor) return 'global';
-  return path.basename(anchor.replace(/\\/g, '/')) || 'global';
+
+  let proj = 'global';
+  if (anchor.project && anchor.project !== 'global') {
+    const normProj = anchor.project.replace(/\\/g, '/').replace(/\/+$/, '');
+    if (normProj.includes('/')) {
+      const parts = normProj.split('/').filter(Boolean);
+      proj = parts.slice(-2).join('/');
+    } else {
+      proj = normProj;
+    }
+  } else if (anchor.cwd) {
+    proj = path.basename(anchor.cwd.replace(/\\/g, '/')) || 'global';
+  }
+
+  if (anchor.files && anchor.files.length > 0) {
+    const shortFile = path.basename(anchor.files[0].replace(/\\/g, '/'));
+    if (shortFile && !proj.endsWith(shortFile)) {
+      return `${proj} · ${shortFile}`;
+    }
+  }
+  return proj;
 }
 
 /**
- * Update footer status bar capsule: `⌖ 1`
+ * Sort sticky notes naturally:
+ * 1. Active notes before quiet (>7d untouched) notes
+ * 2. Notes belonging to current workspace first
+ * 3. Most recently touched first
+ */
+export function sortAnchorsForDisplay(anchors: Anchor[], cwd?: string): Anchor[] {
+  return [...anchors].sort((a, b) => {
+    if (a.status !== b.status) {
+      return a.status === 'active' ? -1 : 1;
+    }
+    if (cwd) {
+      const aMatch = isAnchorTargetingWorkspace(a, cwd) ? 0 : 1;
+      const bMatch = isAnchorTargetingWorkspace(b, cwd) ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+    }
+    return b.lastTouchedAt - a.lastTouchedAt;
+  });
+}
+
+/**
+ * Update status bar badge: `⌖ 2` (invisible when 0 active notes)
  */
 export function updateAnchorStatusBar(ctx: ExtensionContext, store: AnchorStore): void {
   if (!hasActiveUI(ctx)) return;
-
   try {
     const active = store.list({ status: 'active', cwd: ctx.cwd });
-    if (active.length === 0) {
-      ctx.ui.setStatus('anchor', undefined);
-      return;
-    }
-
-    ctx.ui.setStatus('anchor', `⌖ ${active.length}`);
-  } catch {
-    // Ignore stale context errors during session replacement
-  }
+    ctx.ui.setStatus('anchor', active.length > 0 ? `⌖ ${active.length}` : undefined);
+  } catch {}
 }
 
 /**
- * Render lightweight startup banner widget above the editor.
- * Features 3-4 lines with quadrant badges and target date hints.
- * Automatically cleared on agent_start (when user sends first message).
+ * Render clean sticky-note card above editor on session startup.
+ * Automatically disappears as soon as the user sends their first message.
  */
 export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): void {
   if (!hasActiveUI(ctx)) return;
@@ -374,30 +200,34 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
       return;
     }
 
-    const groups = groupAnchorsByQuadrant(active);
-    const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
+    const sorted = sortAnchorsForDisplay(active, ctx.cwd);
     const topItems = sorted.slice(0, 3);
 
     const factory = (_tui?: any, theme?: any) => ({
       render: (width: number) => {
-        const maxTitleWidth = Math.max(12, width - 36);
+        const maxTitleWidth = Math.max(14, width - 34);
         const fg = theme?.fg ? theme.fg.bind(theme) : (_c: string, text: string) => text;
+        const label = active.length === 1 ? '1 note' : `${active.length} notes`;
 
         const lines: string[] = [
-          truncateToWidth(fg('accent', `⌖ Anchor · ${active.length} active commitments:`), width)
+          truncateToWidth(fg('accent', `⌖ ${label}`), width)
         ];
 
-        for (let i = 0; i < topItems.length; i++) {
-          const a = topItems[i];
+        for (const a of topItems) {
           const num = a.id.replace(/^anc-/, '').padStart(2, '0');
-          const q = classifyAnchor(a);
-          const tgt = formatTargetDate(a);
-          const titlePadded = truncateToWidth(a.title, maxTitleWidth);
-          lines.push(truncateToWidth(`  • ${fg('muted', `[${q}]`)}  ${fg('dim', num)} ${titlePadded} ${fg('dim', `(${tgt})`)}`, width));
+          const origin = formatOrigin(a);
+          const age = formatRelativeAge(a.createdAt);
+          const titleClipped = truncateToWidth(a.title, maxTitleWidth);
+          lines.push(
+            truncateToWidth(
+              `  ${fg('dim', num)}  ${titleClipped}  ${fg('muted', `· ${origin}`)} ${fg('dim', `(${age})`)}`,
+              width
+            )
+          );
         }
 
         if (sorted.length > 3) {
-          lines.push(truncateToWidth(fg('dim', `  (+${sorted.length - 3} more · run /anchor to inspect)`), width));
+          lines.push(truncateToWidth(fg('dim', `  +${sorted.length - 3} more · /anchor`), width));
         }
 
         return lines;
@@ -405,107 +235,82 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
       invalidate: () => {}
     });
 
-    // Reactive component factory in real TUI mode, static string[] in mock tests
     const content = (ctx as any).ui?.theme ? factory : factory().render(80);
-
     ctx.ui.setWidget('anchor-startup', content as any, { placement: 'aboveEditor' });
-  } catch {
-    // Ignore stale context errors during session replacement
-  }
+  } catch {}
 }
 
 /**
- * Clean, flat priority-sorted engineering checklist (includes both active and quiet/sleeping tasks so nothing is ever lost)
+ * Interactive `/anchor` sticky-note board
  */
-export async function openAnchorDashboard(
-  ctx: ExtensionContext,
-  store: AnchorStore
-): Promise<void> {
+export async function openAnchorDashboard(ctx: ExtensionContext, store: AnchorStore): Promise<void> {
   if (!hasActiveUI(ctx)) return;
 
-  const allUnfinished = store
+  const allNotes = store
     .list({ cwd: ctx.cwd, all: true })
     .filter(a => a.status === 'active' || a.status === 'sleeping');
 
-  if (allUnfinished.length === 0) {
-    ctx.ui.notify('⌖ No active anchors. Use /pin <task> to record.', 'info');
+  if (allNotes.length === 0) {
+    ctx.ui.notify('⌖ No sticky notes. Use /pin <note> to stick one.', 'info');
     return;
   }
 
-  const sortedList = sortAnchorsForDisplay(allUnfinished, ctx.cwd);
-
+  const sorted = sortAnchorsForDisplay(allNotes, ctx.cwd);
   const optionMap = new Map<string, Anchor>();
   const displayOptions: string[] = [];
   const termCols = process.stdout?.columns || 96;
-  const isNarrow = termCols < 88;
-  const titleWidth = isNarrow ? Math.max(18, termCols - 36) : 36;
+  const isNarrow = termCols < 84;
+  const titleWidth = isNarrow ? Math.max(20, termCols - 30) : 42;
 
-  for (let i = 0; i < sortedList.length; i++) {
-    const a = sortedList[i];
+  for (const a of sorted) {
     const num = a.id.replace(/^anc-/, '').padStart(2, '0');
-    const badge = a.status === 'sleeping'
-      ? padToWidth('[Quiet]', 10)
-      : padToWidth(`[${a.priority.toUpperCase()}]`, 10);
     const origin = formatOrigin(a);
-    const target = a.status === 'sleeping' ? 'Quiet (0 tok)' : formatTargetDate(a);
-    const created = formatCreationTime(a.createdAt);
-
-    const titleWithFiles = (a.files && a.files.length > 0)
-      ? `${a.title} [${a.files.slice(0, 1).join(', ')}]`
-      : a.title;
+    const age = a.status === 'sleeping'
+      ? `${formatRelativeAge(a.createdAt)} · quiet`
+      : formatRelativeAge(a.createdAt);
 
     const colNum = `${num}  `;
-    const colTitle = padToWidth(titleWithFiles, titleWidth);
-    const colOrigin = padToWidth(origin, 12);
-    const colTarget = padToWidth(target, 14);
-    const colCreated = created;
+    const colTitle = padToWidth(a.title, titleWidth);
+    const colOrigin = padToWidth(origin, 22);
 
     const label = isNarrow
-      ? `${colNum}${badge}${colTitle}  ${colTarget}`.trimEnd()
-      : `${colNum}${badge}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
+      ? `${colNum}${colTitle}  ${age}`.trimEnd()
+      : `${colNum}${colTitle}  ${colOrigin}  ${age}`.trimEnd();
 
     optionMap.set(label, a);
     displayOptions.push(label);
   }
 
-  const selected = await ctx.ui.select('⌖ Anchors (select to settle, wake, or inspect):', displayOptions);
+  const selected = await ctx.ui.select('⌖ Notes (select a note):', displayOptions);
   if (!selected) return;
 
   const anchor = optionMap.get(selected);
   if (!anchor) return;
 
   const actions = [
-    '✓ Settle (Mark completed and archive)',
-    ...(anchor.status === 'sleeping' ? ['⚡ Wake up (Activate for current session)'] : []),
-    'ℹ View details & associated files',
-    '↩ Cancel'
+    '✓ Done (tear off note)',
+    ...(anchor.status === 'sleeping' ? ['⚡ Wake up (mark active)'] : []),
+    'ℹ Read full note',
+    '↩ Back'
   ];
 
-  const action = await ctx.ui.select(
-    `⌖ Anchor #${anchor.id}: "${anchor.title}"`,
-    actions
-  );
+  const action = await ctx.ui.select(`⌖ #${anchor.id.replace(/^anc-/, '')}: "${anchor.title}"`, actions);
   if (!action || action.startsWith('↩')) return;
 
   if (action.startsWith('✓')) {
-    store.settle(anchor.id, { settledBy: 'manual-command' });
-    const successMsg = anchor.recurrence === 'daily'
-      ? `⌖ Completed for today: "${anchor.title}" (resets tomorrow)`
-      : `⌖ Settled #${anchor.id}: "${anchor.title}" (/anchor undo to revert)`;
-    ctx.ui.notify(successMsg, 'info');
+    store.settle(anchor.id, { settledBy: 'manual' });
+    ctx.ui.notify(`⌖ Torn off #${anchor.id.replace(/^anc-/, '')}: "${anchor.title}" (/anchor undo to put back)`, 'info');
     updateAnchorStatusBar(ctx, store);
   } else if (action.startsWith('⚡')) {
     store.touch(anchor.id);
-    ctx.ui.notify(`⌖ Woke up #${anchor.id}: "${anchor.title}"`, 'info');
+    ctx.ui.notify(`⌖ Woke up #${anchor.id.replace(/^anc-/, '')}: "${anchor.title}"`, 'info');
     updateAnchorStatusBar(ctx, store);
   } else if (action.startsWith('ℹ')) {
     const details = [
-      `#${anchor.id} [${anchor.priority.toUpperCase()} · ${anchor.status.toUpperCase()}] ${anchor.title}`,
-      anchor.description ? `Description: ${anchor.description}` : null,
-      anchor.targetDate ? `Target Date: ${anchor.targetDate} (${formatTargetDate(anchor)})` : null,
-      anchor.files && anchor.files.length > 0 ? `Files: ${anchor.files.join(', ')}` : null,
-      anchor.verifyCommand ? `Verify Command: ${anchor.verifyCommand}` : null,
-      `Created: ${formatCreationTime(anchor.createdAt)} (in ${anchor.project || 'global'})`
+      `⌖ Note #${anchor.id.replace(/^anc-/, '')}: ${anchor.title}`,
+      anchor.description ? `Details: ${anchor.description}` : null,
+      anchor.files.length > 0 ? `Files: ${anchor.files.join(', ')}` : null,
+      `Workspace: ${anchor.project || 'global'} · Pinned ${formatRelativeAge(anchor.createdAt)}`
     ].filter(Boolean).join('\n');
     ctx.ui.notify(details, 'info');
   }

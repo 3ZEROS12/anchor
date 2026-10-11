@@ -30,89 +30,49 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/index.ts
 var index_exports = {};
 __export(index_exports, {
-  AnchorProtocol: () => AnchorProtocol,
   AnchorStore: () => AnchorStore,
   COMMENT_FORMATS: () => COMMENT_FORMATS,
-  DEFAULT_DECAY_POLICY: () => DEFAULT_DECAY_POLICY,
-  DURABLE_DECAY_POLICY: () => DURABLE_DECAY_POLICY,
-  EPHEMERAL_DECAY_POLICY: () => EPHEMERAL_DECAY_POLICY,
-  SessionTouchObserver: () => SessionTouchObserver,
+  MS_PER_DAY: () => MS_PER_DAY,
+  QUIET_AFTER_DAYS: () => QUIET_AFTER_DAYS,
   acquireSyncLock: () => acquireSyncLock,
   atomicRenameWithRetry: () => atomicRenameWithRetry,
-  classifyAnchor: () => classifyAnchor,
-  detectDurability: () => detectDurability,
-  detectRecurrence: () => detectRecurrence,
-  detectTargetDate: () => detectTargetDate,
-  evaluateAnchorDecay: () => evaluateAnchorDecay,
   extractPathsFromText: () => extractPathsFromText,
   findMatchedAnchors: () => findMatchedAnchors,
-  formatCreationTime: () => formatCreationTime,
   formatOrigin: () => formatOrigin,
-  formatRelativeTime: () => formatRelativeTime,
-  formatRemainingTtl: () => formatRemainingTtl,
-  formatSettlementCard: () => formatSettlementCard,
-  formatTargetDate: () => formatTargetDate,
-  generateSettlementProposals: () => generateSettlementProposals,
+  formatRelativeAge: () => formatRelativeAge,
   getDefaultStorageDir: () => getDefaultStorageDir,
   getDisplayWidth: () => getDisplayWidth,
-  getEphemeralDecayPolicy: () => getEphemeralDecayPolicy,
-  getTodayDateString: () => getTodayDateString,
   globToRegExp: () => globToRegExp,
-  groupAnchorsByQuadrant: () => groupAnchorsByQuadrant,
   hasActiveUI: () => hasActiveUI,
   isAnchorTargetingWorkspace: () => isAnchorTargetingWorkspace,
   isSameOrSubPath: () => isSameOrSubPath,
   makeSafeTaskAnnotation: () => makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles: () => matchAnchorAgainstTouchedFiles,
+  matchesCommitMessage: () => matchesCommitMessage,
   normalizePath: () => normalizePath,
   openAnchorDashboard: () => openAnchorDashboard,
   padToWidth: () => padToWidth,
+  parseAnchorCommandInput: () => parseAnchorCommandInput,
   renderActiveAnchorsContext: () => renderActiveAnchorsContext,
   renderColdStartAnchorsContext: () => renderColdStartAnchorsContext,
-  runPhysicalVerification: () => runPhysicalVerification,
+  resolveAnchorTarget: () => resolveAnchorTarget,
   sortAnchorsForDisplay: () => sortAnchorsForDisplay,
   stripAnsi: () => stripAnsi,
-  sweepStore: () => sweepStore,
+  sweepQuietNotes: () => sweepQuietNotes,
   truncateToWidth: () => truncateToWidth,
-  tryRealtimeAutoSettle: () => tryRealtimeAutoSettle,
   updateAnchorStatusBar: () => updateAnchorStatusBar,
   updateStartupBanner: () => updateStartupBanner
 });
 module.exports = __toCommonJS(index_exports);
 
 // src/types.ts
-var EPHEMERAL_DECAY_POLICY = {
-  activeDays: 7,
-  // 7 days active before quiet sleep
-  sleepDays: 30,
-  graveyardDays: 9999
-  // Never silently auto-delete unfinished tasks
-};
-var DURABLE_DECAY_POLICY = {
-  activeDays: 7,
-  // 7 days active before quiet sleep
-  sleepDays: 30,
-  graveyardDays: 9999
-  // Never permanently auto-dropped; preserved indefinitely
-};
-var DEFAULT_DECAY_POLICY = {
-  activeDays: 7,
-  sleepDays: 30,
-  graveyardDays: 9999
-};
+var QUIET_AFTER_DAYS = 7;
+var MS_PER_DAY = 864e5;
 
 // src/store.ts
 var import_node_fs = __toESM(require("fs"), 1);
-var import_node_path2 = __toESM(require("path"), 1);
-var import_node_os = __toESM(require("os"), 1);
-
-// src/matcher.ts
 var import_node_path = __toESM(require("path"), 1);
-function globToRegExp(pattern) {
-  const collapsed = pattern.slice(0, 512).replace(/\/+(\*\*\/+)+/g, "/**/").replace(/\*{3,}/g, "**");
-  const escaped = collapsed.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\/\*\*\//g, "___GLOB_DIR_SLASH___").replace(/\*\*/g, "___GLOB_STAR_STAR___").replace(/\*/g, "[^/]*").replace(/___GLOB_DIR_SLASH___/g, "(?:/|/(?:[^/]+/)+)").replace(/___GLOB_STAR_STAR___/g, ".*");
-  return new RegExp(`^${escaped}$`);
-}
+var import_node_os = __toESM(require("os"), 1);
 function normalizePath(filePath, baseCwd) {
   if (typeof filePath !== "string") return "";
   let norm = filePath.trim().replace(/\\/g, "/").replace(/^\.\//, "");
@@ -128,14 +88,19 @@ function normalizePath(filePath, baseCwd) {
   }
   return norm;
 }
-function isSameOrSubPath(anchorCwd, targetCwd) {
-  if (!anchorCwd || !targetCwd) return false;
-  const normA = anchorCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  const normT = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  const isWinStyle = process.platform === "win32" || /^[a-zA-Z]:\//.test(normA) || /^[a-zA-Z]:\//.test(normT);
-  const cmpA = isWinStyle ? normA.toLowerCase() : normA;
-  const cmpT = isWinStyle ? normT.toLowerCase() : normT;
-  return cmpA === cmpT || cmpT.startsWith(cmpA + "/") || cmpA.startsWith(cmpT + "/");
+function isSameOrSubPath(dirA, dirB) {
+  if (!dirA || !dirB) return false;
+  const normA = dirA.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const normB = dirB.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const isWin = process.platform === "win32" || /^[a-zA-Z]:\//.test(normA) || /^[a-zA-Z]:\//.test(normB);
+  const a = isWin ? normA.toLowerCase() : normA;
+  const b = isWin ? normB.toLowerCase() : normB;
+  return a === b || b.startsWith(a + "/") || a.startsWith(b + "/");
+}
+function globToRegExp(pattern) {
+  const collapsed = pattern.slice(0, 512).replace(/\/+(\*\*\/+)+/g, "/**/").replace(/\*{3,}/g, "**");
+  const escaped = collapsed.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\/\*\*\//g, "___GLOB_DIR_SLASH___").replace(/\*\*/g, "___GLOB_STAR_STAR___").replace(/\*/g, "[^/]*").replace(/___GLOB_DIR_SLASH___/g, "(?:/|/(?:[^/]+/)+)").replace(/___GLOB_STAR_STAR___/g, ".*");
+  return new RegExp(`^${escaped}$`);
 }
 function extractPathsFromText(text) {
   if (!text) return [];
@@ -157,8 +122,7 @@ function isAnchorTargetingWorkspace(anchor, targetCwd) {
   if (anchor.project && anchor.project !== "global") {
     const normProj = anchor.project.trim().replace(/\\/g, "/").replace(/\/+$/, "");
     if (isSameOrSubPath(normProj, normTarget)) return true;
-    const projBase = import_node_path.default.basename(normProj).toLowerCase();
-    if (projBase && projBase === targetBase) return true;
+    if (import_node_path.default.basename(normProj).toLowerCase() === targetBase) return true;
   }
   if (anchor.files && anchor.files.length > 0) {
     for (const f of anchor.files) {
@@ -183,12 +147,9 @@ function matchAnchorAgainstTouchedFiles(anchor, touchedFiles) {
         matchedExact.push(touched);
         break;
       }
-      if (normPattern.includes("*")) {
-        const regex = globToRegExp(normPattern);
-        if (regex.test(touched)) {
-          matchedExact.push(touched);
-          break;
-        }
+      if (normPattern.includes("*") && globToRegExp(normPattern).test(touched)) {
+        matchedExact.push(touched);
+        break;
       }
       const dirPrefix = normPattern.endsWith("/") ? normPattern : normPattern + "/";
       if (touched.startsWith(dirPrefix)) {
@@ -198,193 +159,137 @@ function matchAnchorAgainstTouchedFiles(anchor, touchedFiles) {
     }
   }
   if (matchedExact.length > 0) {
-    return {
-      anchor,
-      score: 1,
-      matchedFiles: Array.from(new Set(matchedExact)),
-      reason: "exact-file"
-    };
+    return { anchor, score: 1, matchedFiles: Array.from(new Set(matchedExact)), reason: "exact-file" };
   }
   if (matchedPrefix.length > 0) {
-    return {
-      anchor,
-      score: 0.85,
-      matchedFiles: Array.from(new Set(matchedPrefix)),
-      reason: "dir-prefix"
-    };
+    return { anchor, score: 0.85, matchedFiles: Array.from(new Set(matchedPrefix)), reason: "dir-prefix" };
   }
   return null;
 }
 function findMatchedAnchors(anchors, touchedFiles) {
-  const priorityWeight = { p0: 3, p1: 2, p2: 1 };
   const results = [];
   for (const anchor of anchors) {
-    const match = matchAnchorAgainstTouchedFiles(anchor, touchedFiles);
-    if (match) {
-      results.push(match);
+    const m = matchAnchorAgainstTouchedFiles(anchor, touchedFiles);
+    if (m) results.push(m);
+  }
+  return results.sort((a, b) => b.score - a.score);
+}
+var COMMENT_FORMATS = {
+  ".ts": (m) => `// ${m}`,
+  ".tsx": (m) => `// ${m}`,
+  ".js": (m) => `// ${m}`,
+  ".jsx": (m) => `// ${m}`,
+  ".mjs": (m) => `// ${m}`,
+  ".cjs": (m) => `// ${m}`,
+  ".go": (m) => `// ${m}`,
+  ".rs": (m) => `// ${m}`,
+  ".c": (m) => `// ${m}`,
+  ".cpp": (m) => `// ${m}`,
+  ".h": (m) => `// ${m}`,
+  ".cs": (m) => `// ${m}`,
+  ".java": (m) => `// ${m}`,
+  ".kt": (m) => `// ${m}`,
+  ".swift": (m) => `// ${m}`,
+  ".dart": (m) => `// ${m}`,
+  ".py": (m) => `# ${m}`,
+  ".rb": (m) => `# ${m}`,
+  ".sh": (m) => `# ${m}`,
+  ".bash": (m) => `# ${m}`,
+  ".yaml": (m) => `# ${m}`,
+  ".yml": (m) => `# ${m}`,
+  ".toml": (m) => `# ${m}`,
+  ".ps1": (m) => `# ${m}`,
+  ".html": (m) => `<!-- ${m} -->`,
+  ".xml": (m) => `<!-- ${m} -->`,
+  ".svg": (m) => `<!-- ${m} -->`,
+  ".vue": (m) => `<!-- ${m} -->`,
+  ".svelte": (m) => `<!-- ${m} -->`,
+  ".css": (m) => `/* ${m} */`,
+  ".scss": (m) => `/* ${m} */`,
+  ".sql": (m) => `-- ${m}`,
+  ".lua": (m) => `-- ${m}`
+};
+function makeSafeTaskAnnotation(filePath, anchor) {
+  const ext = import_node_path.default.extname(filePath).toLowerCase();
+  const fmt = COMMENT_FORMATS[ext];
+  if (!fmt) return null;
+  const num = anchor.id.replace(/^anc-/, "");
+  return "\n\n" + fmt(`\u2316 Note #${num}: ${anchor.title}`);
+}
+function matchesCommitMessage(anchor, commitMessages) {
+  const idLower = anchor.id.toLowerCase();
+  const numId = `#${anchor.id.replace(/^anc-/, "")}`;
+  const title = anchor.title.toLowerCase();
+  let titleTokens = [];
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    try {
+      const seg = new Intl.Segmenter("und", { granularity: "word" });
+      titleTokens = Array.from(seg.segment(title)).filter((s) => s.isWordLike).map((s) => s.segment.trim().toLowerCase()).filter((t) => t.length >= 2);
+    } catch {
+      titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2);
+    }
+  } else {
+    titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2);
+  }
+  for (const msg of commitMessages) {
+    const msgLower = msg.toLowerCase();
+    if (msgLower.includes(idLower) || msgLower.includes(numId)) {
+      return { matched: true, message: msg };
+    }
+    if (titleTokens.length > 0) {
+      const hits = titleTokens.filter((tok) => msgLower.includes(tok)).length;
+      if (hits >= Math.min(2, titleTokens.length)) {
+        return { matched: true, message: msg };
+      }
     }
   }
-  return results.sort((a, b) => {
-    if (b.score !== a.score) {
-      return b.score - a.score;
+  return { matched: false };
+}
+function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
+  let cwd;
+  let now = Date.now();
+  if (typeof cwdOrNow === "number") now = cwdOrNow;
+  else if (typeof cwdOrNow === "string") cwd = cwdOrNow;
+  if (typeof nowArg === "number") now = nowArg;
+  sweepQuietNotes(store, now);
+  const activeNotes = store.list({ status: "active", cwd });
+  if (activeNotes.length === 0) return "";
+  const lines = activeNotes.map((a) => {
+    const num = a.id.replace(/^anc-/, "");
+    const files = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(", ")})` : "";
+    const desc = a.description ? ` \u2014 ${a.description}` : "";
+    return `\u2022 #${num} [${a.project}] ${a.title}${files}${desc}`;
+  });
+  return [
+    `<sticky-notes count="${activeNotes.length}">`,
+    `Pinned notes from previous sessions:`,
+    lines.join("\n"),
+    `When a note is completed, call anchor(action="settle", id="...") to tear it off.`,
+    `</sticky-notes>`
+  ].join("\n");
+}
+var renderActiveAnchorsContext = renderColdStartAnchorsContext;
+function sweepQuietNotes(store, now = Date.now()) {
+  return store.withLock(() => {
+    const state = store.loadState();
+    const quieted = [];
+    for (const a of state.anchors) {
+      if (a.status === "active" && now - a.lastTouchedAt > QUIET_AFTER_DAYS * MS_PER_DAY) {
+        a.status = "sleeping";
+        a.updatedAt = now;
+        quieted.push(a.id);
+      }
     }
-    const weightA = priorityWeight[a.anchor.priority] || 0;
-    const weightB = priorityWeight[b.anchor.priority] || 0;
-    if (weightB !== weightA) {
-      return weightB - weightA;
+    if (quieted.length > 0) {
+      state.lastSweepAt = now;
+      store.saveState(state);
     }
-    return b.anchor.lastTouchedAt - a.anchor.lastTouchedAt;
+    return { quieted };
   });
 }
-
-// src/store.ts
-function detectDurability(title) {
-  const temporalKeywords = [
-    "\u4ECA\u5929",
-    "\u4ECA\u65E5",
-    "\u665A\u4E0A",
-    "\u4ECA\u665A",
-    "\u660E\u5929",
-    "\u540E\u5929",
-    "\u5927\u540E\u5929",
-    "\u7A0D\u540E",
-    "\u5F85\u4F1A",
-    "\u4E0B\u5348",
-    "\u4E0A\u5348",
-    "\u4E34\u65F6",
-    "\u4E00\u4F1A\u513F",
-    "\u7B49\u7B49",
-    "today",
-    "tonight",
-    "tomorrow",
-    "later",
-    "temp",
-    "soon"
-  ];
-  const lower = title.toLowerCase();
-  for (const kw of temporalKeywords) {
-    if (lower.includes(kw)) {
-      return "ephemeral";
-    }
-  }
-  return "durable";
-}
-function getEphemeralDecayPolicy(title) {
-  const lower = title.toLowerCase();
-  if (lower.includes("\u5927\u540E\u5929")) {
-    return { activeDays: 7, sleepDays: 30, graveyardDays: 9999 };
-  }
-  if (lower.includes("\u540E\u5929")) {
-    return { activeDays: 7, sleepDays: 30, graveyardDays: 9999 };
-  }
-  return { ...EPHEMERAL_DECAY_POLICY };
-}
-function detectTargetDate(titleOrDate, now = Date.now()) {
-  const lower = titleOrDate.toLowerCase().trim();
-  const MS_DAY = 24 * 60 * 60 * 1e3;
-  if (lower.includes("\u4ECA\u5929") || lower.includes("\u4ECA\u65E5") || lower.includes("\u4ECA\u665A") || lower === "today" || lower === "tonight") {
-    return getTodayDateString(now);
-  }
-  if (lower.includes("\u660E\u5929") || lower === "tomorrow") {
-    return getTodayDateString(now + MS_DAY);
-  }
-  if (lower.includes("\u540E\u5929")) {
-    return getTodayDateString(now + 2 * MS_DAY);
-  }
-  if (lower.includes("\u5927\u540E\u5929")) {
-    return getTodayDateString(now + 3 * MS_DAY);
-  }
-  const weekdayMap = {
-    "\u5468\u65E5": 0,
-    "\u661F\u671F\u65E5": 0,
-    "sunday": 0,
-    "sun": 0,
-    "\u5468\u4E00": 1,
-    "\u661F\u671F\u4E00": 1,
-    "monday": 1,
-    "mon": 1,
-    "\u5468\u4E8C": 2,
-    "\u661F\u671F\u4E8C": 2,
-    "tuesday": 2,
-    "tue": 2,
-    "\u5468\u4E09": 3,
-    "\u661F\u671F\u4E09": 3,
-    "wednesday": 3,
-    "wed": 3,
-    "\u5468\u56DB": 4,
-    "\u661F\u671F\u56DB": 4,
-    "thursday": 4,
-    "thu": 4,
-    "\u5468\u4E94": 5,
-    "\u661F\u671F\u4E94": 5,
-    "friday": 5,
-    "fri": 5,
-    "\u5468\u516D": 6,
-    "\u661F\u671F\u516D": 6,
-    "saturday": 6,
-    "sat": 6
-  };
-  const isNextWeek = lower.includes("\u4E0B\u5468") || lower.includes("next");
-  for (const [name, targetDay] of Object.entries(weekdayMap)) {
-    if (lower.includes(name)) {
-      const curDay = new Date(now).getDay();
-      let diff = targetDay - curDay;
-      if (diff <= 0 || isNextWeek) {
-        diff += 7;
-      }
-      return getTodayDateString(now + diff * MS_DAY);
-    }
-  }
-  const fullDateMatch = titleOrDate.match(/\b(20\d\d)-(\d{1,2})-(\d{1,2})\b/);
-  if (fullDateMatch) {
-    const y = fullDateMatch[1];
-    const m = fullDateMatch[2].padStart(2, "0");
-    const d = fullDateMatch[3].padStart(2, "0");
-    return `${y}-${m}-${d}`;
-  }
-  const mmddMatch = titleOrDate.match(/\b(\d{1,2})-(\d{1,2})\b/);
-  if (mmddMatch) {
-    const curYear = new Date(now).getFullYear();
-    const m = mmddMatch[1].padStart(2, "0");
-    const d = mmddMatch[2].padStart(2, "0");
-    return `${curYear}-${m}-${d}`;
-  }
-  return void 0;
-}
-function detectRecurrence(title) {
-  const lower = title.toLowerCase();
-  if (lower.includes("\u6BCF\u5929") || lower.includes("\u6BCF\u65E5") || lower.includes("daily") || lower.includes("every day")) {
-    return "daily";
-  }
-  return void 0;
-}
-function getTodayDateString(timestamp = Date.now()) {
-  const d = new Date(timestamp);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
 function getDefaultStorageDir() {
-  if (process.env.ANCHOR_DIR) {
-    return import_node_path2.default.resolve(process.env.ANCHOR_DIR);
-  }
-  const primaryDir = import_node_path2.default.join(import_node_os.default.homedir(), ".anchor");
-  const legacyPiDir = import_node_path2.default.join(import_node_os.default.homedir(), ".pi", "agent", "anchors");
-  if (!import_node_fs.default.existsSync(primaryDir) && import_node_fs.default.existsSync(legacyPiDir)) {
-    try {
-      import_node_fs.default.mkdirSync(primaryDir, { recursive: true });
-      for (const file of ["state.json", "archive.jsonl", "graveyard.jsonl"]) {
-        const src = import_node_path2.default.join(legacyPiDir, file);
-        const dest = import_node_path2.default.join(primaryDir, file);
-        if (import_node_fs.default.existsSync(src) && !import_node_fs.default.existsSync(dest)) {
-          import_node_fs.default.copyFileSync(src, dest);
-        }
-      }
-    } catch {
-    }
-  }
-  return primaryDir;
+  if (process.env.ANCHOR_DIR) return import_node_path.default.resolve(process.env.ANCHOR_DIR);
+  return import_node_path.default.join(import_node_os.default.homedir(), ".anchor");
 }
 function sleepSync(ms) {
   const end = Date.now() + ms;
@@ -406,22 +311,18 @@ function acquireSyncLock(lockPath, maxWaitMs = 1500, staleTimeoutMs = 5e3) {
     attempt++;
     try {
       const fd = import_node_fs.default.openSync(lockPath, "wx");
-      const meta = { pid: process.pid, createdAt: Date.now() };
-      import_node_fs.default.writeFileSync(fd, JSON.stringify(meta), "utf-8");
+      import_node_fs.default.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), "utf-8");
       import_node_fs.default.closeSync(fd);
       return () => {
         try {
-          if (import_node_fs.default.existsSync(lockPath)) {
-            import_node_fs.default.unlinkSync(lockPath);
-          }
+          if (import_node_fs.default.existsSync(lockPath)) import_node_fs.default.unlinkSync(lockPath);
         } catch {
         }
       };
     } catch (err) {
       if (err.code === "EEXIST") {
         try {
-          const content = import_node_fs.default.readFileSync(lockPath, "utf-8");
-          const meta = JSON.parse(content);
+          const meta = JSON.parse(import_node_fs.default.readFileSync(lockPath, "utf-8"));
           const isStale = Date.now() - meta.createdAt > staleTimeoutMs;
           const isDead = meta.pid && !isProcessAlive(meta.pid);
           if (isStale || isDead) {
@@ -433,8 +334,7 @@ function acquireSyncLock(lockPath, maxWaitMs = 1500, staleTimeoutMs = 5e3) {
           }
         } catch {
         }
-        const delay = Math.min(40, Math.floor(attempt * 4 + Math.random() * 8));
-        sleepSync(delay);
+        sleepSync(Math.min(40, Math.floor(attempt * 4 + Math.random() * 8)));
         continue;
       }
       break;
@@ -443,50 +343,46 @@ function acquireSyncLock(lockPath, maxWaitMs = 1500, staleTimeoutMs = 5e3) {
   return () => {
   };
 }
-function atomicRenameWithRetry(tempPath, targetPath, maxAttempts = 6) {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+function atomicRenameWithRetry(tempPath, targetPath, maxRetries = 5) {
+  let lastErr;
+  for (let i = 0; i < maxRetries; i++) {
     try {
       import_node_fs.default.renameSync(tempPath, targetPath);
       return;
     } catch (err) {
-      const code = err?.code;
-      if ((code === "EBUSY" || code === "EPERM" || code === "EACCES") && attempt < maxAttempts) {
-        const delay = Math.floor(attempt * 20 + Math.random() * 15);
-        sleepSync(delay);
+      lastErr = err;
+      if (err.code === "EPERM" || err.code === "EACCES" || err.code === "EBUSY") {
+        sleepSync(15 * (i + 1));
         continue;
       }
-      const crashDump = `${tempPath}.failed`;
-      try {
-        if (import_node_fs.default.existsSync(tempPath)) import_node_fs.default.renameSync(tempPath, crashDump);
-      } catch {
-      }
-      throw err;
+      break;
     }
+  }
+  try {
+    import_node_fs.default.copyFileSync(tempPath, targetPath);
+    import_node_fs.default.unlinkSync(tempPath);
+  } catch {
+    throw lastErr;
   }
 }
 var AnchorStore = class {
   storageDir;
   statePath;
+  lockPath;
   archivePath;
-  graveyardPath;
-  constructor(customStorageDir) {
-    if (customStorageDir) {
-      this.storageDir = import_node_path2.default.resolve(customStorageDir);
-    } else {
-      this.storageDir = getDefaultStorageDir();
+  constructor(storageDir) {
+    this.storageDir = storageDir ? import_node_path.default.resolve(storageDir) : getDefaultStorageDir();
+    this.statePath = import_node_path.default.join(this.storageDir, "state.json");
+    this.lockPath = import_node_path.default.join(this.storageDir, "state.lock");
+    this.archivePath = import_node_path.default.join(this.storageDir, "archive.jsonl");
+  }
+  ensureDirs() {
+    if (!import_node_fs.default.existsSync(this.storageDir)) {
+      import_node_fs.default.mkdirSync(this.storageDir, { recursive: true });
     }
-    this.statePath = import_node_path2.default.join(this.storageDir, "state.json");
-    this.archivePath = import_node_path2.default.join(this.storageDir, "archive.jsonl");
-    this.graveyardPath = import_node_path2.default.join(this.storageDir, "graveyard.jsonl");
-    this.ensureDirs();
   }
-  get lockPath() {
-    return import_node_path2.default.join(this.storageDir, "state.lock");
-  }
-  /**
-   * Execute mutation within a cross-process exclusive lock
-   */
   withLock(fn) {
+    this.ensureDirs();
     const release = acquireSyncLock(this.lockPath);
     try {
       return fn();
@@ -494,84 +390,35 @@ var AnchorStore = class {
       release();
     }
   }
-  ensureDirs() {
-    if (!import_node_fs.default.existsSync(this.storageDir)) {
-      try {
-        import_node_fs.default.mkdirSync(this.storageDir, { recursive: true });
-      } catch {
-      }
-    }
-  }
-  /**
-   * Load store state. If corrupt or missing, returns safe default.
-   */
   loadState() {
     this.ensureDirs();
     if (!import_node_fs.default.existsSync(this.statePath)) {
-      return {
-        version: 1,
-        anchors: [],
-        lastSweepAt: Date.now()
-      };
-    }
-    let raw = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        raw = import_node_fs.default.readFileSync(this.statePath, "utf-8");
-        break;
-      } catch (err) {
-        if ((err?.code === "EBUSY" || err?.code === "EPERM") && attempt < 3) {
-          sleepSync(15);
-          continue;
-        }
-      }
-    }
-    if (raw === null) {
-      return { version: 1, anchors: [], lastSweepAt: Date.now() };
+      return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
     }
     try {
-      const data = JSON.parse(raw);
-      if (!data || typeof data !== "object" || !Array.isArray(data.anchors)) {
-        throw new Error("Invalid state: anchors must be array");
+      const parsed = JSON.parse(import_node_fs.default.readFileSync(this.statePath, "utf-8"));
+      if (!parsed || !Array.isArray(parsed.anchors)) {
+        return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
       }
-      data.anchors = data.anchors.filter((a) => a && typeof a === "object" && typeof a.id === "string" && typeof a.title === "string").map((a) => ({
-        ...a,
-        files: Array.isArray(a.files) ? a.files.filter((f) => typeof f === "string") : [],
-        tags: Array.isArray(a.tags) ? a.tags.filter((t) => typeof t === "string") : [],
-        decay: {
-          activeDays: Number.isFinite(a.decay?.activeDays) && a.decay.activeDays > 0 ? a.decay.activeDays : DURABLE_DECAY_POLICY.activeDays,
-          sleepDays: Number.isFinite(a.decay?.sleepDays) && a.decay.sleepDays > 0 ? a.decay.sleepDays : DURABLE_DECAY_POLICY.sleepDays,
-          graveyardDays: Number.isFinite(a.decay?.graveyardDays) && a.decay.graveyardDays > 0 ? a.decay.graveyardDays : DURABLE_DECAY_POLICY.graveyardDays
-        }
-      }));
-      return data;
+      return parsed;
     } catch {
-      const backupPath = import_node_path2.default.join(this.storageDir, `state.corrupt.${Date.now()}.json`);
       try {
-        import_node_fs.default.renameSync(this.statePath, backupPath);
+        import_node_fs.default.copyFileSync(this.statePath, import_node_path.default.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
       } catch {
       }
-      return {
-        version: 1,
-        anchors: [],
-        lastSweepAt: Date.now()
-      };
+      return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
     }
   }
-  /**
-   * Atomically save store state via temp file + atomic rename with Windows NTFS spin-retry
-   */
   saveState(state) {
     this.ensureDirs();
-    const rand = Math.random().toString(36).slice(2, 7);
-    const tempPath = import_node_path2.default.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}.${rand}`);
+    const tempPath = `${this.statePath}.${process.pid}.${Date.now()}.tmp`;
     import_node_fs.default.writeFileSync(tempPath, JSON.stringify(state, null, 2), "utf-8");
     atomicRenameWithRetry(tempPath, this.statePath);
   }
   generateId(state) {
     const numbers = state.anchors.map((a) => {
-      const match = a.id.match(/^anc-(\d+)$/);
-      return match ? parseInt(match[1], 10) : 0;
+      const m = a.id.match(/^anc-(\d+)$/);
+      return m ? parseInt(m[1], 10) : 0;
     }).filter((n) => n > 0);
     const maxExisting = numbers.length > 0 ? Math.max(...numbers) : 0;
     const nextNum = Math.max(maxExisting + 1, state.nextId || 1);
@@ -579,7 +426,7 @@ var AnchorStore = class {
     return `anc-${nextNum}`;
   }
   /**
-   * Create a new Anchor with automatic project and cwd tagging
+   * Pin a new sticky note
    */
   create(input) {
     return this.withLock(() => {
@@ -592,34 +439,23 @@ var AnchorStore = class {
       if (input.project && (/^[a-zA-Z]:[\\/]/.test(input.project.trim()) || input.project.trim().startsWith("/"))) {
         cwd = normalizePath(input.project.trim());
       } else if (inferredFiles.length > 0 && (/^[a-zA-Z]:\//.test(inferredFiles[0]) || inferredFiles[0].startsWith("/"))) {
-        const firstDir = import_node_path2.default.dirname(inferredFiles[0]);
-        if (firstDir && firstDir !== ".") {
-          cwd = normalizePath(firstDir);
-        }
+        const firstDir = import_node_path.default.dirname(inferredFiles[0]);
+        if (firstDir && firstDir !== ".") cwd = normalizePath(firstDir);
       }
-      const projectName = input.project ? input.project.trim() : cwd ? import_node_path2.default.basename(cwd) : "global";
-      const recurrence = input.recurrence || detectRecurrence(input.title);
-      const targetDate = input.targetDate || detectTargetDate(input.title, now);
-      const durability = recurrence ? "durable" : input.durability || detectDurability(input.title);
-      const decayPolicy = durability === "ephemeral" ? getEphemeralDecayPolicy(input.title) : DURABLE_DECAY_POLICY;
+      const projectName = input.project ? input.project.trim() : cwd ? import_node_path.default.basename(cwd) : "global";
       const anchor = {
         id,
         title: input.title.trim(),
         description: input.description?.trim(),
         priority: input.priority || "p1",
         status: "active",
-        durability,
-        recurrence,
-        targetDate,
         project: projectName,
         cwd,
         createdAt: now,
         updatedAt: now,
         lastTouchedAt: now,
         files: inferredFiles,
-        tags: (input.tags || []).map((t) => t.trim()).filter(Boolean),
-        verifyCommand: input.verifyCommand?.trim() || void 0,
-        decay: input.decay ? { ...input.decay } : { ...decayPolicy }
+        tags: (input.tags || []).map((t) => t.trim()).filter(Boolean)
       };
       state.anchors.push(anchor);
       this.saveState(state);
@@ -629,31 +465,19 @@ var AnchorStore = class {
   findAnchorIndex(anchors, id) {
     const clean = id.trim().replace(/^#/, "");
     return anchors.findIndex(
-      (a) => a.id === clean || a.id === `anc-${clean}` || (clean.match(/^\d+$/) ? a.id === `anc-${parseInt(clean, 10)}` : false)
+      (a) => a.id === clean || a.id === `anc-${clean}` || (/^\d+$/.test(clean) ? a.id === `anc-${parseInt(clean, 10)}` : false)
     );
   }
-  /**
-   * Get an anchor by ID (supports 'anc-1', '#anc-1', '1', '01')
-   */
   get(id) {
     const state = this.loadState();
     const idx = this.findAnchorIndex(state.anchors, id);
     return idx === -1 ? void 0 : state.anchors[idx];
   }
-  /**
-   * List anchors. By default, if cwd is provided, only returns anchors
-   * belonging to this cwd or marked as global (''). Pass all: true for global view.
-   */
   list(filter) {
     const state = this.loadState();
     const targetCwd = filter?.cwd ? normalizePath(filter.cwd) : null;
-    const today = getTodayDateString(filter?.now);
     return state.anchors.filter((a) => {
-      if (!filter?.all && filter?.status === "active" && a.recurrence === "daily" && a.lastCompletedDate === today) {
-        return false;
-      }
       if (filter?.status && a.status !== filter.status) return false;
-      if (filter?.priority && a.priority !== filter.priority) return false;
       if (!filter?.all && targetCwd) {
         if (a.files.length > 0 && (a.cwd || a.project) && !isAnchorTargetingWorkspace(a, targetCwd)) {
           return false;
@@ -662,19 +486,13 @@ var AnchorStore = class {
       return true;
     });
   }
-  /**
-   * Update an existing anchor
-   */
   update(id, patch) {
     return this.withLock(() => {
       const state = this.loadState();
       const idx = this.findAnchorIndex(state.anchors, id);
-      if (idx === -1) {
-        throw new Error(`Anchor not found: ${id}`);
-      }
-      const current = state.anchors[idx];
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
       const updated = {
-        ...current,
+        ...state.anchors[idx],
         ...patch,
         updatedAt: Date.now()
       };
@@ -686,16 +504,11 @@ var AnchorStore = class {
       return updated;
     });
   }
-  /**
-   * Touch an anchor to refresh its decay window and reactivate sleeping state
-   */
   touch(id, timestamp = Date.now()) {
     return this.withLock(() => {
       const state = this.loadState();
       const idx = this.findAnchorIndex(state.anchors, id);
-      if (idx === -1) {
-        throw new Error(`Anchor not found: ${id}`);
-      }
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
       const current = state.anchors[idx];
       current.lastTouchedAt = timestamp;
       current.updatedAt = timestamp;
@@ -708,38 +521,20 @@ var AnchorStore = class {
     });
   }
   /**
-   * Settle an anchor (recurring daily habits complete for today and wake up tomorrow)
+   * Tear off (settle) a completed sticky note and archive it to archive.jsonl
    */
   settle(id, evidence = {}, now = Date.now()) {
     return this.withLock(() => {
       const state = this.loadState();
       const idx = this.findAnchorIndex(state.anchors, id);
-      if (idx === -1) {
-        throw new Error(`Anchor not found: ${id}`);
-      }
-      const anchor = state.anchors[idx];
-      const today = getTodayDateString(now);
-      if (anchor.recurrence === "daily") {
-        anchor.lastCompletedDate = today;
-        anchor.lastTouchedAt = now;
-        anchor.updatedAt = now;
-        anchor.evidence = {
-          ...evidence,
-          settledAt: now,
-          settledBy: evidence.settledBy || "manual-command"
-        };
-        this.ensureDirs();
-        import_node_fs.default.appendFileSync(this.archivePath, JSON.stringify({ ...anchor, settledForDate: today }) + "\n", "utf-8");
-        this.saveState(state);
-        return anchor;
-      }
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
       const [settled] = state.anchors.splice(idx, 1);
       settled.status = "settled";
       settled.updatedAt = now;
       settled.evidence = {
         ...evidence,
         settledAt: now,
-        settledBy: evidence.settledBy || "manual-command"
+        settledBy: evidence.settledBy || "manual"
       };
       this.ensureDirs();
       import_node_fs.default.appendFileSync(this.archivePath, JSON.stringify(settled) + "\n", "utf-8");
@@ -748,12 +543,12 @@ var AnchorStore = class {
     });
   }
   /**
-   * Reverse/undo the last settled anchor, popping it from archive.jsonl back into state.json
+   * Put back (undo) the last torn-off sticky note
    */
   undoSettle() {
     return this.withLock(() => {
       if (!import_node_fs.default.existsSync(this.archivePath)) {
-        throw new Error("No archived anchors to undo");
+        throw new Error("No archived notes to restore");
       }
       const raw = import_node_fs.default.readFileSync(this.archivePath, "utf-8");
       const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
@@ -762,23 +557,18 @@ var AnchorStore = class {
         const candidate = lines.pop();
         try {
           const parsed = JSON.parse(candidate);
-          if (parsed && typeof parsed === "object" && typeof parsed.id === "string" && typeof parsed.title === "string") {
+          if (parsed && typeof parsed.id === "string" && typeof parsed.title === "string") {
             anchor = parsed;
           }
         } catch {
         }
       }
-      if (!anchor) {
-        throw new Error("Archive is empty, nothing to undo");
-      }
+      if (!anchor) throw new Error("Archive is empty, nothing to undo");
       import_node_fs.default.writeFileSync(this.archivePath, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
       anchor.status = "active";
       anchor.updatedAt = Date.now();
+      anchor.lastTouchedAt = Date.now();
       delete anchor.evidence;
-      delete anchor.settledForDate;
-      if (anchor.recurrence === "daily") {
-        delete anchor.lastCompletedDate;
-      }
       const state = this.loadState();
       const existingIdx = state.anchors.findIndex((a) => a.id === anchor.id);
       if (existingIdx !== -1) {
@@ -789,320 +579,18 @@ var AnchorStore = class {
           state.anchors.push(anchor);
         }
       } else {
-        const match = anchor.id.match(/^anc-(\d+)$/);
-        if (match) {
-          const restoredNum = parseInt(match[1], 10);
-          state.nextId = Math.max(state.nextId || 1, restoredNum + 1);
-        }
+        const m = anchor.id.match(/^anc-(\d+)$/);
+        if (m) state.nextId = Math.max(state.nextId || 1, parseInt(m[1], 10) + 1);
         state.anchors.push(anchor);
       }
       this.saveState(state);
       return anchor;
     });
   }
-  /**
-   * Evict anchor to graveyard.jsonl upon total decay expiry
-   */
-  dropToGraveyard(id, reason) {
-    return this.withLock(() => {
-      const state = this.loadState();
-      const idx = state.anchors.findIndex((a) => a.id === id);
-      if (idx === -1) {
-        throw new Error(`Anchor not found: ${id}`);
-      }
-      const [anchor] = state.anchors.splice(idx, 1);
-      anchor.status = "graveyard";
-      anchor.updatedAt = Date.now();
-      anchor.evidence = {
-        summary: reason,
-        settledAt: Date.now()
-      };
-      this.ensureDirs();
-      import_node_fs.default.appendFileSync(this.graveyardPath, JSON.stringify(anchor) + "\n", "utf-8");
-      this.saveState(state);
-      return anchor;
-    });
-  }
-  getArchive(filter) {
-    if (!import_node_fs.default.existsSync(this.archivePath)) return [];
-    try {
-      const raw = import_node_fs.default.readFileSync(this.archivePath, "utf-8");
-      const all = [];
-      for (const l of raw.split(/\r?\n/)) {
-        const trimmed = l.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed && typeof parsed === "object" && typeof parsed.id === "string") all.push(parsed);
-        } catch {
-        }
-      }
-      if (filter?.all || !filter?.cwd) return all;
-      const targetCwd = normalizePath(filter.cwd);
-      return all.filter((a) => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
-    } catch {
-      return [];
-    }
-  }
-  getGraveyard(filter) {
-    if (!import_node_fs.default.existsSync(this.graveyardPath)) return [];
-    try {
-      const raw = import_node_fs.default.readFileSync(this.graveyardPath, "utf-8");
-      const all = [];
-      for (const l of raw.split(/\r?\n/)) {
-        const trimmed = l.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed && typeof parsed === "object" && typeof parsed.id === "string") all.push(parsed);
-        } catch {
-        }
-      }
-      if (filter?.all || !filter?.cwd) return all;
-      const targetCwd = normalizePath(filter.cwd);
-      return all.filter((a) => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
-    } catch {
-      return [];
-    }
-  }
 };
 
-// src/decay.ts
-var import_node_fs2 = __toESM(require("fs"), 1);
-var MS_PER_DAY = 864e5;
-function evaluateAnchorDecay(anchor, now = Date.now()) {
-  if (anchor.status === "settled" || anchor.status === "graveyard") {
-    return {
-      currentStatus: anchor.status,
-      nextStatus: anchor.status,
-      daysUntouched: 0,
-      remainingActiveDays: 0,
-      remainingSleepDays: 0
-    };
-  }
-  const elapsedMs = Math.max(0, now - anchor.lastTouchedAt);
-  const daysUntouched = elapsedMs / MS_PER_DAY;
-  const activeDays = anchor.decay.activeDays;
-  const graveyardDays = anchor.decay.graveyardDays;
-  let nextStatus = anchor.status;
-  if (daysUntouched <= activeDays) {
-    nextStatus = "active";
-  } else if (daysUntouched <= graveyardDays) {
-    nextStatus = "sleeping";
-  } else {
-    nextStatus = "graveyard";
-  }
-  return {
-    currentStatus: anchor.status,
-    nextStatus,
-    daysUntouched: Math.round(daysUntouched * 10) / 10,
-    remainingActiveDays: Math.max(0, Math.round((activeDays - daysUntouched) * 10) / 10),
-    remainingSleepDays: Math.max(0, Math.round((graveyardDays - daysUntouched) * 10) / 10)
-  };
-}
-function sweepStore(store, now = Date.now()) {
-  return store.withLock(() => {
-    const state = store.loadState();
-    const result = {
-      transitionedToSleeping: [],
-      wokenToActive: [],
-      evictedToGraveyard: []
-    };
-    const toEvict = [];
-    let stateModified = false;
-    for (const anchor of state.anchors) {
-      const evalResult = evaluateAnchorDecay(anchor, now);
-      if (evalResult.nextStatus === "graveyard") {
-        toEvict.push(anchor);
-      } else if (evalResult.nextStatus !== anchor.status) {
-        if (evalResult.nextStatus === "sleeping" && anchor.status === "active") {
-          anchor.status = "sleeping";
-          anchor.updatedAt = now;
-          result.transitionedToSleeping.push(anchor.id);
-          stateModified = true;
-        } else if (evalResult.nextStatus === "active" && anchor.status === "sleeping") {
-          anchor.status = "active";
-          anchor.updatedAt = now;
-          result.wokenToActive.push(anchor.id);
-          stateModified = true;
-        }
-      }
-    }
-    if (toEvict.length > 0) {
-      const evictIds = new Set(toEvict.map((e) => e.id));
-      state.anchors = state.anchors.filter((a) => !evictIds.has(a.id));
-      stateModified = true;
-      const graveyardLines = toEvict.map((exp) => {
-        const rec = {
-          ...exp,
-          status: "graveyard",
-          updatedAt: now,
-          evictedAt: now,
-          evictionReason: `Exceeded decay threshold (${exp.decay.graveyardDays} days untouched)`
-        };
-        return JSON.stringify(rec);
-      }).join("\n") + "\n";
-      import_node_fs2.default.appendFileSync(store.graveyardPath, graveyardLines, "utf-8");
-      for (const exp of toEvict) {
-        result.evictedToGraveyard.push(exp.id);
-      }
-    }
-    state.lastSweepAt = now;
-    if (stateModified) {
-      store.saveState(state);
-    }
-    return result;
-  });
-}
-
-// src/settlement.ts
-var import_node_child_process = require("child_process");
-function runPhysicalVerification(anchor, cwd) {
-  if (!anchor.verifyCommand?.trim()) {
-    return { success: false, output: "No verification command specified" };
-  }
-  const targetCwd = anchor.cwd || cwd;
-  try {
-    const stdout = (0, import_node_child_process.execSync)(anchor.verifyCommand, {
-      cwd: targetCwd,
-      encoding: "utf-8",
-      timeout: 8e3,
-      maxBuffer: 4 * 1024 * 1024,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    return { success: true, output: stdout.trim() };
-  } catch (err) {
-    return { success: false, output: String(err.stderr || err.stdout || err.message).trim() };
-  }
-}
-function tryRealtimeAutoSettle(store, observer, cwd, executedCommand) {
-  const candidates = store.list({ cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
-  if (candidates.length === 0) return [];
-  const settledList = [];
-  const cmdTrimmed = (executedCommand || "").trim();
-  for (const a of candidates) {
-    if (observer.hasCommitted()) {
-      const commitMatch = observer.matchesCommit(a);
-      if (commitMatch.matched && (!cwd || isAnchorTargetingWorkspace(a, cwd))) {
-        const settled = store.settle(a.id, {
-          settledBy: "verification-test",
-          summary: `Auto-settled via Git commit: ${commitMatch.message}`,
-          touchedFiles: observer.getModifiedFiles()
-        });
-        settledList.push({ anchor: settled, reason: `git commit ("${commitMatch.message}")` });
-        continue;
-      }
-    }
-    if (a.verifyCommand && cmdTrimmed && cmdTrimmed.includes(a.verifyCommand.trim())) {
-      const settled = store.settle(a.id, {
-        settledBy: "verification-test",
-        summary: `Auto-settled via passing command: ${a.verifyCommand}`,
-        touchedFiles: observer.getModifiedFiles()
-      });
-      settledList.push({ anchor: settled, reason: `verifyCommand (${a.verifyCommand})` });
-    }
-  }
-  return settledList;
-}
-function generateSettlementProposals(store, touchedFiles, cwd, observer) {
-  const activeAndSleeping = store.list({ cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
-  const matches = findMatchedAnchors(activeAndSleeping, touchedFiles);
-  const seenIds = /* @__PURE__ */ new Set();
-  const proposals = [];
-  for (const match of matches) {
-    seenIds.add(match.anchor.id);
-    const fileList = match.matchedFiles.slice(0, 3).join(", ");
-    const moreSuffix = match.matchedFiles.length > 3 ? ` (+${match.matchedFiles.length - 3} more)` : "";
-    proposals.push({
-      anchor: match.anchor,
-      matchedFiles: match.matchedFiles,
-      reason: `Modified ${fileList}${moreSuffix}`,
-      recommendedAction: match.score >= 0.85 ? "settle" : "defer"
-    });
-  }
-  if (observer && observer.hasCommitted()) {
-    for (const a of activeAndSleeping) {
-      if (seenIds.has(a.id)) continue;
-      const cm = observer.matchesCommit(a);
-      if (cm.matched) {
-        seenIds.add(a.id);
-        proposals.push({
-          anchor: a,
-          matchedFiles: touchedFiles.slice(0, 3),
-          reason: `Matched git commit: "${cm.message}"`,
-          recommendedAction: "settle"
-        });
-      }
-    }
-  }
-  return proposals;
-}
-function formatSettlementCard(proposal) {
-  const a = proposal.anchor;
-  const tagStr = a.tags.length > 0 ? ` [${a.tags.join(", ")}]` : "";
-  const fileStr = proposal.matchedFiles.slice(0, 2).join(", ");
-  return [
-    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`,
-    `\u2693 \u5173\u95E8\u7ED3\u6848\u63D0\u8BAE | Anchor Settlement`,
-    `   \u4EFB\u52A1 #${a.id}: ${a.title}${tagStr} (${a.priority.toUpperCase()})`,
-    `   \u8BC1\u636E\u89E6\u53D1: \u4FEE\u6539\u4E86 ${fileStr}`,
-    `   [Enter \u786E\u8BA4\u7ED3\u6848\u5E76\u5F52\u6863]  /  [Tab \u6682\u672A\u5B8C\u6210\uFF0C\u7EE7\u7EED\u6302\u8D77]`,
-    `\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`
-  ].join("\n");
-}
-
 // src/tui.ts
-var import_node_path3 = __toESM(require("path"), 1);
-function classifyAnchor(anchor, now = Date.now()) {
-  if (anchor.recurrence === "daily") {
-    return "Habits";
-  }
-  if (!anchor.targetDate) {
-    return "Backlog";
-  }
-  const todayStr = getTodayDateString(now);
-  if (anchor.targetDate <= todayStr) {
-    return "Today";
-  }
-  return "Upcoming";
-}
-function groupAnchorsByQuadrant(anchors, now = Date.now()) {
-  const groups = {
-    today: [],
-    upcoming: [],
-    habits: [],
-    backlog: []
-  };
-  for (const a of anchors) {
-    const q = classifyAnchor(a, now);
-    if (q === "Today") groups.today.push(a);
-    else if (q === "Upcoming") groups.upcoming.push(a);
-    else if (q === "Habits") groups.habits.push(a);
-    else groups.backlog.push(a);
-  }
-  return groups;
-}
-var PRIORITY_RANK = { p0: 0, p1: 1, p2: 2 };
-function sortAnchorsForDisplay(anchors, cwd, now = Date.now()) {
-  const todayStr = getTodayDateString(now);
-  return [...anchors].sort((a, b) => {
-    if (a.status !== b.status) {
-      return a.status === "active" ? -1 : 1;
-    }
-    if (cwd) {
-      const aMatch = isAnchorTargetingWorkspace(a, cwd) ? 0 : 1;
-      const bMatch = isAnchorTargetingWorkspace(b, cwd) ? 0 : 1;
-      if (aMatch !== bMatch) return aMatch - bMatch;
-    }
-    const aDue = a.targetDate && a.targetDate <= todayStr ? 0 : 1;
-    const bDue = b.targetDate && b.targetDate <= todayStr ? 0 : 1;
-    if (aDue !== bDue) return aDue - bDue;
-    const pA = PRIORITY_RANK[a.priority] ?? 1;
-    const pB = PRIORITY_RANK[b.priority] ?? 1;
-    if (pA !== pB) return pA - pB;
-    return a.createdAt - b.createdAt;
-  });
-}
+var import_node_path2 = __toESM(require("path"), 1);
 var ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 function stripAnsi(str) {
   return str.replace(ANSI_REGEX, "");
@@ -1154,14 +642,12 @@ function truncateToWidth(str, maxWidth, ellipsis = "\u2026") {
     const charLen = codePoint > 65535 ? 2 : 1;
     const fullChar = singleLine.slice(i, i + charLen);
     const charWidth = getDisplayWidth(fullChar);
-    if (accumWidth + charWidth > target) {
-      break;
-    }
+    if (accumWidth + charWidth > target) break;
     accumulated += fullChar;
     accumWidth += charWidth;
     i += charLen;
   }
-  accumulated = accumulated.replace(/\s*[\(\[\{（【]$/, "");
+  accumulated = accumulated.replace(/\s*[\(\[\{（【][^)\]}）】]*$/, "");
   return accumulated + ellipsis + (singleLine.includes("\x1B") ? "\x1B[0m" : "");
 }
 function padToWidth(str, targetWidth) {
@@ -1170,90 +656,59 @@ function padToWidth(str, targetWidth) {
   if (current >= targetWidth) return truncated;
   return truncated + " ".repeat(targetWidth - current);
 }
-function formatTargetDate(anchor, now = Date.now()) {
-  if (anchor.recurrence === "daily") {
-    return "Daily";
-  }
-  if (!anchor.targetDate) {
-    return "Someday";
-  }
-  const todayStr = getTodayDateString(now);
-  if (anchor.targetDate === todayStr) {
-    return "Today";
-  }
-  const MS_DAY = 24 * 60 * 60 * 1e3;
-  const tomorrowStr = getTodayDateString(now + MS_DAY);
-  if (anchor.targetDate === tomorrowStr) {
-    return "Tomorrow";
-  }
-  const in2dStr = getTodayDateString(now + 2 * MS_DAY);
-  if (anchor.targetDate === in2dStr) {
-    return "In 2d";
-  }
-  const in3dStr = getTodayDateString(now + 3 * MS_DAY);
-  if (anchor.targetDate === in3dStr) {
-    return "In 3d";
-  }
-  if (anchor.targetDate < todayStr) {
-    return "Overdue";
-  }
-  const parts = anchor.targetDate.split("-");
-  if (parts.length === 3) {
-    return `${parts[1]}-${parts[2]}`;
-  }
-  return anchor.targetDate;
-}
-function formatCreationTime(timestamp, now = Date.now()) {
-  const d = new Date(timestamp);
-  const nowD = new Date(now);
-  const pad = (n) => String(n).padStart(2, "0");
-  const timeStr = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  const todayStr = getTodayDateString(now);
-  const createdDayStr = getTodayDateString(timestamp);
-  if (createdDayStr === todayStr) {
-    return `Today ${timeStr}`;
-  }
-  const yesterdayStr = getTodayDateString(now - 24 * 60 * 60 * 1e3);
-  if (createdDayStr === yesterdayStr) {
-    return `Yesterday ${timeStr}`;
-  }
-  const mmdd = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-  if (d.getFullYear() === nowD.getFullYear()) {
-    return `${mmdd} ${timeStr}`;
-  }
-  return `${d.getFullYear()}-${mmdd}`;
-}
-function formatRelativeTime(timestamp, now = Date.now()) {
-  return formatCreationTime(timestamp, now);
-}
-function formatRemainingTtl(anchor, now = Date.now()) {
-  return formatTargetDate(anchor, now);
+function formatRelativeAge(timestamp, now = Date.now()) {
+  const diffSec = Math.max(0, Math.floor((now - timestamp) / 1e3));
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  return `${diffDays}d ago`;
 }
 function formatOrigin(anchor) {
-  if (typeof anchor === "object") {
-    if (anchor.project && anchor.project !== "global") {
-      const normProj = anchor.project.replace(/\\/g, "/").replace(/\/+$/, "");
-      if (normProj.includes("/")) {
-        const parts = normProj.split("/").filter(Boolean);
-        return parts.slice(-2).join("/");
-      }
-      return normProj;
-    }
-    if (!anchor.cwd) return "global";
-    return import_node_path3.default.basename(anchor.cwd.replace(/\\/g, "/")) || "global";
+  if (typeof anchor === "string") {
+    if (!anchor) return "global";
+    return import_node_path2.default.basename(anchor.replace(/\\/g, "/")) || "global";
   }
-  if (!anchor) return "global";
-  return import_node_path3.default.basename(anchor.replace(/\\/g, "/")) || "global";
+  let proj = "global";
+  if (anchor.project && anchor.project !== "global") {
+    const normProj = anchor.project.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (normProj.includes("/")) {
+      const parts = normProj.split("/").filter(Boolean);
+      proj = parts.slice(-2).join("/");
+    } else {
+      proj = normProj;
+    }
+  } else if (anchor.cwd) {
+    proj = import_node_path2.default.basename(anchor.cwd.replace(/\\/g, "/")) || "global";
+  }
+  if (anchor.files && anchor.files.length > 0) {
+    const shortFile = import_node_path2.default.basename(anchor.files[0].replace(/\\/g, "/"));
+    if (shortFile && !proj.endsWith(shortFile)) {
+      return `${proj} \xB7 ${shortFile}`;
+    }
+  }
+  return proj;
+}
+function sortAnchorsForDisplay(anchors, cwd) {
+  return [...anchors].sort((a, b) => {
+    if (a.status !== b.status) {
+      return a.status === "active" ? -1 : 1;
+    }
+    if (cwd) {
+      const aMatch = isAnchorTargetingWorkspace(a, cwd) ? 0 : 1;
+      const bMatch = isAnchorTargetingWorkspace(b, cwd) ? 0 : 1;
+      if (aMatch !== bMatch) return aMatch - bMatch;
+    }
+    return b.lastTouchedAt - a.lastTouchedAt;
+  });
 }
 function updateAnchorStatusBar(ctx, store) {
   if (!hasActiveUI(ctx)) return;
   try {
     const active = store.list({ status: "active", cwd: ctx.cwd });
-    if (active.length === 0) {
-      ctx.ui.setStatus("anchor", void 0);
-      return;
-    }
-    ctx.ui.setStatus("anchor", `\u2316 ${active.length}`);
+    ctx.ui.setStatus("anchor", active.length > 0 ? `\u2316 ${active.length}` : void 0);
   } catch {
   }
 }
@@ -1265,26 +720,30 @@ function updateStartupBanner(ctx, store) {
       ctx.ui.setWidget("anchor-startup", void 0);
       return;
     }
-    const groups = groupAnchorsByQuadrant(active);
-    const sorted = [...groups.today, ...groups.upcoming, ...groups.habits, ...groups.backlog];
+    const sorted = sortAnchorsForDisplay(active, ctx.cwd);
     const topItems = sorted.slice(0, 3);
     const factory = (_tui, theme) => ({
       render: (width) => {
-        const maxTitleWidth = Math.max(12, width - 36);
+        const maxTitleWidth = Math.max(14, width - 34);
         const fg = theme?.fg ? theme.fg.bind(theme) : (_c, text) => text;
+        const label = active.length === 1 ? "1 note" : `${active.length} notes`;
         const lines = [
-          truncateToWidth(fg("accent", `\u2316 Anchor \xB7 ${active.length} active commitments:`), width)
+          truncateToWidth(fg("accent", `\u2316 ${label}`), width)
         ];
-        for (let i = 0; i < topItems.length; i++) {
-          const a = topItems[i];
+        for (const a of topItems) {
           const num = a.id.replace(/^anc-/, "").padStart(2, "0");
-          const q = classifyAnchor(a);
-          const tgt = formatTargetDate(a);
-          const titlePadded = truncateToWidth(a.title, maxTitleWidth);
-          lines.push(truncateToWidth(`  \u2022 ${fg("muted", `[${q}]`)}  ${fg("dim", num)} ${titlePadded} ${fg("dim", `(${tgt})`)}`, width));
+          const origin = formatOrigin(a);
+          const age = formatRelativeAge(a.createdAt);
+          const titleClipped = truncateToWidth(a.title, maxTitleWidth);
+          lines.push(
+            truncateToWidth(
+              `  ${fg("dim", num)}  ${titleClipped}  ${fg("muted", `\xB7 ${origin}`)} ${fg("dim", `(${age})`)}`,
+              width
+            )
+          );
         }
         if (sorted.length > 3) {
-          lines.push(truncateToWidth(fg("dim", `  (+${sorted.length - 3} more \xB7 run /anchor to inspect)`), width));
+          lines.push(truncateToWidth(fg("dim", `  +${sorted.length - 3} more \xB7 /anchor`), width));
         }
         return lines;
       },
@@ -1298,410 +757,125 @@ function updateStartupBanner(ctx, store) {
 }
 async function openAnchorDashboard(ctx, store) {
   if (!hasActiveUI(ctx)) return;
-  const allUnfinished = store.list({ cwd: ctx.cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping");
-  if (allUnfinished.length === 0) {
-    ctx.ui.notify("\u2316 No active anchors. Use /pin <task> to record.", "info");
+  const allNotes = store.list({ cwd: ctx.cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping");
+  if (allNotes.length === 0) {
+    ctx.ui.notify("\u2316 No sticky notes. Use /pin <note> to stick one.", "info");
     return;
   }
-  const sortedList = sortAnchorsForDisplay(allUnfinished, ctx.cwd);
+  const sorted = sortAnchorsForDisplay(allNotes, ctx.cwd);
   const optionMap = /* @__PURE__ */ new Map();
   const displayOptions = [];
   const termCols = process.stdout?.columns || 96;
-  const isNarrow = termCols < 88;
-  const titleWidth = isNarrow ? Math.max(18, termCols - 36) : 36;
-  for (let i = 0; i < sortedList.length; i++) {
-    const a = sortedList[i];
+  const isNarrow = termCols < 84;
+  const titleWidth = isNarrow ? Math.max(20, termCols - 30) : 42;
+  for (const a of sorted) {
     const num = a.id.replace(/^anc-/, "").padStart(2, "0");
-    const badge = a.status === "sleeping" ? padToWidth("[Quiet]", 10) : padToWidth(`[${a.priority.toUpperCase()}]`, 10);
     const origin = formatOrigin(a);
-    const target = a.status === "sleeping" ? "Quiet (0 tok)" : formatTargetDate(a);
-    const created = formatCreationTime(a.createdAt);
-    const titleWithFiles = a.files && a.files.length > 0 ? `${a.title} [${a.files.slice(0, 1).join(", ")}]` : a.title;
+    const age = a.status === "sleeping" ? `${formatRelativeAge(a.createdAt)} \xB7 quiet` : formatRelativeAge(a.createdAt);
     const colNum = `${num}  `;
-    const colTitle = padToWidth(titleWithFiles, titleWidth);
-    const colOrigin = padToWidth(origin, 12);
-    const colTarget = padToWidth(target, 14);
-    const colCreated = created;
-    const label = isNarrow ? `${colNum}${badge}${colTitle}  ${colTarget}`.trimEnd() : `${colNum}${badge}${colTitle}  ${colOrigin}  ${colTarget}  ${colCreated}`.trimEnd();
+    const colTitle = padToWidth(a.title, titleWidth);
+    const colOrigin = padToWidth(origin, 22);
+    const label = isNarrow ? `${colNum}${colTitle}  ${age}`.trimEnd() : `${colNum}${colTitle}  ${colOrigin}  ${age}`.trimEnd();
     optionMap.set(label, a);
     displayOptions.push(label);
   }
-  const selected = await ctx.ui.select("\u2316 Anchors (select to settle, wake, or inspect):", displayOptions);
+  const selected = await ctx.ui.select("\u2316 Notes (select a note):", displayOptions);
   if (!selected) return;
   const anchor = optionMap.get(selected);
   if (!anchor) return;
   const actions = [
-    "\u2713 Settle (Mark completed and archive)",
-    ...anchor.status === "sleeping" ? ["\u26A1 Wake up (Activate for current session)"] : [],
-    "\u2139 View details & associated files",
-    "\u21A9 Cancel"
+    "\u2713 Done (tear off note)",
+    ...anchor.status === "sleeping" ? ["\u26A1 Wake up (mark active)"] : [],
+    "\u2139 Read full note",
+    "\u21A9 Back"
   ];
-  const action = await ctx.ui.select(
-    `\u2316 Anchor #${anchor.id}: "${anchor.title}"`,
-    actions
-  );
+  const action = await ctx.ui.select(`\u2316 #${anchor.id.replace(/^anc-/, "")}: "${anchor.title}"`, actions);
   if (!action || action.startsWith("\u21A9")) return;
   if (action.startsWith("\u2713")) {
-    store.settle(anchor.id, { settledBy: "manual-command" });
-    const successMsg = anchor.recurrence === "daily" ? `\u2316 Completed for today: "${anchor.title}" (resets tomorrow)` : `\u2316 Settled #${anchor.id}: "${anchor.title}" (/anchor undo to revert)`;
-    ctx.ui.notify(successMsg, "info");
+    store.settle(anchor.id, { settledBy: "manual" });
+    ctx.ui.notify(`\u2316 Torn off #${anchor.id.replace(/^anc-/, "")}: "${anchor.title}" (/anchor undo to put back)`, "info");
     updateAnchorStatusBar(ctx, store);
   } else if (action.startsWith("\u26A1")) {
     store.touch(anchor.id);
-    ctx.ui.notify(`\u2316 Woke up #${anchor.id}: "${anchor.title}"`, "info");
+    ctx.ui.notify(`\u2316 Woke up #${anchor.id.replace(/^anc-/, "")}: "${anchor.title}"`, "info");
     updateAnchorStatusBar(ctx, store);
   } else if (action.startsWith("\u2139")) {
     const details = [
-      `#${anchor.id} [${anchor.priority.toUpperCase()} \xB7 ${anchor.status.toUpperCase()}] ${anchor.title}`,
-      anchor.description ? `Description: ${anchor.description}` : null,
-      anchor.targetDate ? `Target Date: ${anchor.targetDate} (${formatTargetDate(anchor)})` : null,
-      anchor.files && anchor.files.length > 0 ? `Files: ${anchor.files.join(", ")}` : null,
-      anchor.verifyCommand ? `Verify Command: ${anchor.verifyCommand}` : null,
-      `Created: ${formatCreationTime(anchor.createdAt)} (in ${anchor.project || "global"})`
+      `\u2316 Note #${anchor.id.replace(/^anc-/, "")}: ${anchor.title}`,
+      anchor.description ? `Details: ${anchor.description}` : null,
+      anchor.files.length > 0 ? `Files: ${anchor.files.join(", ")}` : null,
+      `Workspace: ${anchor.project || "global"} \xB7 Pinned ${formatRelativeAge(anchor.createdAt)}`
     ].filter(Boolean).join("\n");
     ctx.ui.notify(details, "info");
   }
 }
 
-// src/observer.ts
-var MUTATION_TOOLS = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
-var SessionTouchObserver = class {
-  touchedFiles = /* @__PURE__ */ new Set();
-  modifiedFiles = /* @__PURE__ */ new Set();
-  inspectedFiles = /* @__PURE__ */ new Set();
-  committed = false;
-  commitMessages = [];
-  clear() {
-    this.touchedFiles.clear();
-    this.modifiedFiles.clear();
-    this.inspectedFiles.clear();
-    this.committed = false;
-    this.commitMessages = [];
+// src/extension.ts
+var import_typebox = require("@sinclair/typebox");
+function parseAnchorCommandInput(raw) {
+  const trimmed = (raw || "").trim();
+  if (!trimmed || trimmed === "list" || trimmed === "ls") {
+    return { mode: "dashboard" };
   }
-  /**
-   * Observe and record a tool call invocation, separating inspection from mutation
-   */
-  recordToolCall(toolName, input) {
-    if (!input || typeof input !== "object") return;
-    const lowerTool = (toolName || "").toLowerCase();
-    const isMutation = MUTATION_TOOLS.has(lowerTool);
-    const paths = [];
-    const pathField = input.path || input.filePath || input.file;
-    if (typeof pathField === "string") {
-      paths.push(normalizePath(pathField));
-    }
-    if (Array.isArray(input.paths)) {
-      for (const p of input.paths) {
-        if (typeof p === "string") {
-          paths.push(normalizePath(p));
-        }
-      }
-    }
-    for (const p of paths) {
-      this.touchedFiles.add(p);
-      if (isMutation) {
-        this.modifiedFiles.add(p);
-      } else {
-        this.inspectedFiles.add(p);
-      }
-    }
-    if (lowerTool === "bash" || lowerTool === "powershell") {
-      const cmd = String(input.command || "");
-      if (cmd.includes("git commit")) {
-        this.committed = true;
-        const msgMatch = cmd.match(/-m\s+["']([^"']+)["']/);
-        if (msgMatch && msgMatch[1]) {
-          this.commitMessages.push(msgMatch[1]);
-        }
-      }
-    }
+  if (trimmed === "undo") {
+    return { mode: "undo" };
   }
-  /**
-   * Add a file path manually (e.g. from git status diff)
-   */
-  addTouchedFile(filePath, isModified = true) {
-    if (filePath) {
-      const norm = normalizePath(filePath);
-      this.touchedFiles.add(norm);
-      if (isModified) {
-        this.modifiedFiles.add(norm);
-      } else {
-        this.inspectedFiles.add(norm);
-      }
-    }
+  const settleMatch = trimmed.match(/^(?:done|rm|close|settle)\s+(.+)$/i);
+  if (settleMatch) {
+    return {
+      mode: "settle",
+      targetId: settleMatch[1].trim().replace(/^#/, "")
+    };
   }
-  getModifiedFiles() {
-    return Array.from(this.modifiedFiles);
-  }
-  getInspectedFiles() {
-    return Array.from(this.inspectedFiles);
-  }
-  getTouchedFiles() {
-    return Array.from(this.touchedFiles);
-  }
-  hasCommitted() {
-    return this.committed;
-  }
-  getCommitMessages() {
-    return [...this.commitMessages];
-  }
-  /**
-   * Check if any commit message explicitly references or resolves an anchor
-   */
-  matchesCommit(anchor) {
-    const idLower = anchor.id.toLowerCase();
-    const title = anchor.title.toLowerCase();
-    let titleTokens = [];
-    if (typeof Intl !== "undefined" && Intl.Segmenter) {
-      try {
-        const segmenter = new Intl.Segmenter("und", { granularity: "word" });
-        titleTokens = Array.from(segmenter.segment(title)).filter((s) => s.isWordLike).map((s) => s.segment.trim().toLowerCase()).filter((t) => t.length >= 2);
-      } catch {
-        titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2);
-      }
-    } else {
-      titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2);
-    }
-    for (const msg of this.commitMessages) {
-      const msgLower = msg.toLowerCase();
-      if (msgLower.includes(idLower)) {
-        return { matched: true, message: msg };
-      }
-      if (titleTokens.length > 0) {
-        const matchingCount = titleTokens.filter((tok) => msgLower.includes(tok)).length;
-        if (matchingCount >= Math.min(2, titleTokens.length)) {
-          return { matched: true, message: msg };
-        }
-      }
-    }
-    return { matched: false };
-  }
-};
-
-// src/context_injector.ts
-var import_node_path4 = __toESM(require("path"), 1);
-var COMMENT_FORMATS = {
-  // Double slash //
-  ".ts": (m) => `// ${m}`,
-  ".tsx": (m) => `// ${m}`,
-  ".js": (m) => `// ${m}`,
-  ".jsx": (m) => `// ${m}`,
-  ".mjs": (m) => `// ${m}`,
-  ".cjs": (m) => `// ${m}`,
-  ".java": (m) => `// ${m}`,
-  ".kt": (m) => `// ${m}`,
-  ".swift": (m) => `// ${m}`,
-  ".go": (m) => `// ${m}`,
-  ".rs": (m) => `// ${m}`,
-  ".c": (m) => `// ${m}`,
-  ".cpp": (m) => `// ${m}`,
-  ".h": (m) => `// ${m}`,
-  ".hpp": (m) => `// ${m}`,
-  ".cs": (m) => `// ${m}`,
-  ".dart": (m) => `// ${m}`,
-  ".scala": (m) => `// ${m}`,
-  ".zig": (m) => `// ${m}`,
-  ".proto": (m) => `// ${m}`,
-  // Hash #
-  ".py": (m) => `# ${m}`,
-  ".rb": (m) => `# ${m}`,
-  ".sh": (m) => `# ${m}`,
-  ".bash": (m) => `# ${m}`,
-  ".zsh": (m) => `# ${m}`,
-  ".yaml": (m) => `# ${m}`,
-  ".yml": (m) => `# ${m}`,
-  ".toml": (m) => `# ${m}`,
-  ".conf": (m) => `# ${m}`,
-  ".dockerfile": (m) => `# ${m}`,
-  ".ps1": (m) => `# ${m}`,
-  ".r": (m) => `# ${m}`,
-  // HTML / XML <!-- -->
-  ".html": (m) => `<!-- ${m} -->`,
-  ".xml": (m) => `<!-- ${m} -->`,
-  ".svg": (m) => `<!-- ${m} -->`,
-  ".vue": (m) => `<!-- ${m} -->`,
-  ".svelte": (m) => `<!-- ${m} -->`,
-  // Block comment /* */
-  ".css": (m) => `/* ${m} */`,
-  ".scss": (m) => `/* ${m} */`,
-  ".less": (m) => `/* ${m} */`,
-  // SQL / Lua / Haskell --
-  ".sql": (m) => `-- ${m}`,
-  ".lua": (m) => `-- ${m}`,
-  ".hs": (m) => `-- ${m}`,
-  // Batch REM
-  ".bat": (m) => `REM ${m}`,
-  ".cmd": (m) => `REM ${m}`
-};
-function makeSafeTaskAnnotation(filePath, anchor) {
-  const ext = import_node_path4.default.extname(filePath).toLowerCase();
-  const formatter = COMMENT_FORMATS[ext];
-  if (!formatter) {
-    return null;
-  }
-  return "\n\n" + formatter(`\u2316 anchor context: #${anchor.id} ${anchor.title} (${anchor.priority.toUpperCase()})`);
+  return {
+    mode: "pin",
+    title: trimmed
+  };
 }
-function renderColdStartAnchorsContext(store, cwdOrNow, nowArg, preflightFailures) {
-  let cwd;
-  let now = Date.now();
-  if (typeof cwdOrNow === "number") {
-    now = cwdOrNow;
-  } else if (typeof cwdOrNow === "string") {
-    cwd = cwdOrNow;
-  }
-  if (typeof nowArg === "number") {
-    now = nowArg;
-  }
-  sweepStore(store, now);
-  const activeAnchors = store.list({ status: "active", cwd });
-  if (activeAnchors.length === 0) {
-    return "";
-  }
-  const lines = activeAnchors.map((a) => {
-    const fileHint = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(", ")})` : "";
-    const tagHint = a.tags.length > 0 ? ` [${a.tags.join(", ")}]` : "";
-    const projHint = a.cwd ? `[${a.project}]` : "[global]";
-    let targetHint = "";
-    if (a.recurrence === "daily") {
-      targetHint = " [\u4ECA\u65E5\u5FAA\u73AF\xB7Daily]";
-    } else if (a.targetDate) {
-      const todayStr = getTodayDateString(now);
-      if (a.targetDate === todayStr) {
-        targetHint = " [\u4ECA\u65E5\u805A\u7126\xB7Due Today]";
-      } else if (a.targetDate < todayStr) {
-        targetHint = " [\u5DF2\u903E\u671F\xB7Overdue]";
-      } else {
-        targetHint = ` [\u6392\u671F:${a.targetDate}]`;
-      }
-    } else {
-      targetHint = " [\u957F\u671F\u613F\u666F\xB7Someday]";
+function resolveAnchorTarget(store, idOrIndex, cwd) {
+  const clean = idOrIndex.trim().replace(/^#/, "");
+  if (/^\d+$/.test(clean)) {
+    const seqIndex = parseInt(clean, 10);
+    const visible = store.list({ cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping");
+    const sorted = sortAnchorsForDisplay(visible, cwd);
+    if (seqIndex >= 1 && seqIndex <= sorted.length) {
+      return sorted[seqIndex - 1].id;
     }
-    const ageDays = Math.floor((now - a.createdAt) / (24 * 60 * 60 * 1e3));
-    const ageHint = ageDays > 0 ? ` (${ageDays}d old)` : "";
-    const failureSnippet = preflightFailures?.get(a.id);
-    const verifyHint = failureSnippet ? ` [\u26A1 \u7269\u7406\u9A8C\u8BC1\u5931\u8D25: ${failureSnippet.replace(/\s+/g, " ").slice(-100)}]` : a.verifyCommand ? ` [verify: ${a.verifyCommand}]` : "";
-    return `\u2022 #${a.id} ${projHint}${targetHint} [${a.priority.toUpperCase()}] ${a.title}${verifyHint}${ageHint}${tagHint}${fileHint}`;
-  });
-  return [
-    `<active-anchors count="${activeAnchors.length}">`,
-    `Unfinished cross-session commitments from previous sessions:`,
-    lines.join("\n"),
-    ``,
-    `CONVERSATIONAL PROTOCOL (HUMAN PARTNER TONE):`,
-    `- If the user opens the session with a casual greeting or continuation ("hi", "\u5728\u5417", "\u7EE7\u7EED", "\u65E9\u4E0A\u597D"), naturally prioritize items tagged [\u4ECA\u65E5\u805A\u7126\xB7Due Today] in a friendly assistant tone (e.g. "\u55E8\uFF01\u4ECA\u5929\u89C4\u5212\u7684\u3010...\u3011\u73B0\u5728\u5904\u7406\u8FD8\u662F\u770B\u522B\u7684\uFF1F").`,
-    `- If an anchor has [\u26A1 \u7269\u7406\u9A8C\u8BC1\u5931\u8D25], its verifyCommand failed on session start. Target the failing assertion directly.`,
-    `- If the user issues a direct, concrete new instruction (e.g. "\u5E2E\u6211\u67E5\u4E0B\u8FD9\u4E2A\u62A5\u9519"), DO NOT interrupt their flow. Focus directly on their instruction.`,
-    `- When a commitment is satisfied during work, automatically call anchor(action="settle", id=...) to clear it.`,
-    `</active-anchors>`
-  ].join("\n");
+  }
+  return store.get(clean)?.id;
 }
-var renderActiveAnchorsContext = renderColdStartAnchorsContext;
-
-// src/protocol.ts
-var AnchorProtocol = class {
-  store;
-  observer;
-  annotatedThisSession = /* @__PURE__ */ new Set();
-  constructor(store) {
-    this.store = store;
-    this.observer = new SessionTouchObserver();
-  }
-  /**
-   * Run session initialization lifecycle: sweeps stale anchors and resets session state
-   */
-  handleSessionStart(now = Date.now()) {
-    this.observer.clear();
-    this.annotatedThisSession.clear();
-    const sweep = sweepStore(this.store, now);
-    return { sleepingCount: sweep.transitionedToSleeping.length };
-  }
-  /**
-   * Handle turn lifecycle: injects cold-start prompt on turn 1, returns null (0 tokens) on turn 2+
-   */
-  handleBeforeTurn(turnCount, cwd, now = Date.now()) {
-    if (turnCount <= 1) {
-      return renderColdStartAnchorsContext(this.store, cwd, now) || null;
-    }
-    return null;
-  }
-  /**
-   * Handle tool execution result: detects touched paths, refreshes mutation touch timers,
-   * and returns safe language-specific JIT annotation (or null if syntax incompatible/already annotated).
-   */
-  handleToolResult(input) {
-    if (!input.isError) {
-      this.observer.recordToolCall(input.toolName, input.filePath ? { path: input.filePath } : {});
-    }
-    if (!input.filePath) {
-      return { annotation: null, matchedAnchors: [] };
-    }
-    const touchedPath = normalizePath(input.filePath);
-    const anchors = this.store.list({ cwd: input.cwd }).filter((a2) => a2.status === "active" || a2.status === "sleeping");
-    const matches = findMatchedAnchors(anchors, [touchedPath]);
-    if (matches.length === 0) {
-      return { annotation: null, matchedAnchors: [] };
-    }
-    if (input.isMutation && !input.isError) {
-      for (const m of matches) {
-        this.store.touch(m.anchor.id);
-      }
-    }
-    const a = matches[0].anchor;
-    if (!this.annotatedThisSession.has(a.id)) {
-      this.annotatedThisSession.add(a.id);
-      const annotation = makeSafeTaskAnnotation(touchedPath, a);
-      return { annotation, matchedAnchors: matches.map((m) => m.anchor) };
-    }
-    return { annotation: null, matchedAnchors: matches.map((m) => m.anchor) };
-  }
-};
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
-  AnchorProtocol,
   AnchorStore,
   COMMENT_FORMATS,
-  DEFAULT_DECAY_POLICY,
-  DURABLE_DECAY_POLICY,
-  EPHEMERAL_DECAY_POLICY,
-  SessionTouchObserver,
+  MS_PER_DAY,
+  QUIET_AFTER_DAYS,
   acquireSyncLock,
   atomicRenameWithRetry,
-  classifyAnchor,
-  detectDurability,
-  detectRecurrence,
-  detectTargetDate,
-  evaluateAnchorDecay,
   extractPathsFromText,
   findMatchedAnchors,
-  formatCreationTime,
   formatOrigin,
-  formatRelativeTime,
-  formatRemainingTtl,
-  formatSettlementCard,
-  formatTargetDate,
-  generateSettlementProposals,
+  formatRelativeAge,
   getDefaultStorageDir,
   getDisplayWidth,
-  getEphemeralDecayPolicy,
-  getTodayDateString,
   globToRegExp,
-  groupAnchorsByQuadrant,
   hasActiveUI,
   isAnchorTargetingWorkspace,
   isSameOrSubPath,
   makeSafeTaskAnnotation,
   matchAnchorAgainstTouchedFiles,
+  matchesCommitMessage,
   normalizePath,
   openAnchorDashboard,
   padToWidth,
+  parseAnchorCommandInput,
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
-  runPhysicalVerification,
+  resolveAnchorTarget,
   sortAnchorsForDisplay,
   stripAnsi,
-  sweepStore,
+  sweepQuietNotes,
   truncateToWidth,
-  tryRealtimeAutoSettle,
   updateAnchorStatusBar,
   updateStartupBanner
 });

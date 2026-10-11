@@ -1,198 +1,303 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import type {
-  Anchor,
-  AnchorDecayPolicy,
-  AnchorDurability,
-  AnchorEvidence,
-  AnchorPriority,
-  AnchorStatus,
-  AnchorStoreState
+import {
+  type Anchor,
+  type AnchorEvidence,
+  type AnchorPriority,
+  type AnchorStatus,
+  type AnchorStoreState,
+  type TouchMatchResult,
+  QUIET_AFTER_DAYS,
+  MS_PER_DAY
 } from './types.ts';
-import { DEFAULT_DECAY_POLICY, DURABLE_DECAY_POLICY, EPHEMERAL_DECAY_POLICY } from './types.ts';
-import { normalizePath, isSameOrSubPath, extractPathsFromText, isAnchorTargetingWorkspace } from './matcher.ts';
 
 /**
- * Detect whether a task is a short-term ephemeral reminder or a long-term architectural vision
+ * Normalize path separators to forward slashes and strip baseCwd prefix when inside baseCwd
  */
-export function detectDurability(title: string): AnchorDurability {
-  const temporalKeywords = [
-    '今天', '今日', '晚上', '今晚', '明天', '后天', '大后天', '稍后', '待会', '下午', '上午', '临时', '一会儿', '等等',
-    'today', 'tonight', 'tomorrow', 'later', 'temp', 'soon'
-  ];
-  const lower = title.toLowerCase();
-  for (const kw of temporalKeywords) {
-    if (lower.includes(kw)) {
-      return 'ephemeral';
+export function normalizePath(filePath: string, baseCwd?: string): string {
+  if (typeof filePath !== 'string') return '';
+  let norm = filePath.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+  if (baseCwd && (path.isAbsolute(filePath) || norm.startsWith('/') || /^[a-zA-Z]:\//.test(norm))) {
+    const normBase = baseCwd.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    const lowerNorm = norm.toLowerCase();
+    const lowerBase = normBase.toLowerCase();
+    if (lowerNorm === lowerBase) {
+      norm = '';
+    } else if (lowerNorm.startsWith(lowerBase + '/')) {
+      norm = norm.slice(normBase.length + 1).replace(/^\/+/, '');
     }
   }
-  return 'durable';
+  return norm;
 }
 
 /**
- * Get custom ephemeral decay policy based on temporal span.
- * Note: graveyardDays is always 9999 so unfinished tasks are NEVER silently deleted.
+ * Safe boundary-aware directory comparison (case-insensitive on Windows)
  */
-export function getEphemeralDecayPolicy(title: string): AnchorDecayPolicy {
-  const lower = title.toLowerCase();
-  if (lower.includes('大后天')) {
-    return { activeDays: 7, sleepDays: 30, graveyardDays: 9999 };
-  }
-  if (lower.includes('后天')) {
-    return { activeDays: 7, sleepDays: 30, graveyardDays: 9999 };
-  }
-  return { ...EPHEMERAL_DECAY_POLICY };
+export function isSameOrSubPath(dirA?: string, dirB?: string): boolean {
+  if (!dirA || !dirB) return false;
+  const normA = dirA.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const normB = dirB.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const isWin = process.platform === 'win32' || /^[a-zA-Z]:\//.test(normA) || /^[a-zA-Z]:\//.test(normB);
+  const a = isWin ? normA.toLowerCase() : normA;
+  const b = isWin ? normB.toLowerCase() : normB;
+  return a === b || b.startsWith(a + '/') || a.startsWith(b + '/');
 }
 
 /**
- * Detect expected completion date from title keywords or explicit date string, returning 'YYYY-MM-DD'
+ * Convert simple glob pattern (*.ts, src/**\/*.ts) to safe RegExp
  */
-export function detectTargetDate(titleOrDate: string, now: number = Date.now()): string | undefined {
-  const lower = titleOrDate.toLowerCase().trim();
-  const MS_DAY = 24 * 60 * 60 * 1000;
+export function globToRegExp(pattern: string): RegExp {
+  const collapsed = pattern
+    .slice(0, 512)
+    .replace(/\/+(\*\*\/+)+/g, '/**/')
+    .replace(/\*{3,}/g, '**');
+  const escaped = collapsed
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\/\*\*\//g, '___GLOB_DIR_SLASH___')
+    .replace(/\*\*/g, '___GLOB_STAR_STAR___')
+    .replace(/\*/g, '[^/]*')
+    .replace(/___GLOB_DIR_SLASH___/g, '(?:/|/(?:[^/]+/)+)')
+    .replace(/___GLOB_STAR_STAR___/g, '.*');
+  return new RegExp(`^${escaped}$`);
+}
 
-  if (lower.includes('今天') || lower.includes('今日') || lower.includes('今晚') || lower === 'today' || lower === 'tonight') {
-    return getTodayDateString(now);
+/**
+ * Clever Touch 1: Automatically spot file or directory paths mentioned inside a sticky note
+ * (e.g. "src/auth.ts", "D:/College/优化/notes.md") so the user never has to fill out forms.
+ */
+export function extractPathsFromText(text?: string): string[] {
+  if (!text) return [];
+  const results = new Set<string>();
+  const regex = /(?:[a-zA-Z]:[\\/][^\s"'`，。；！？、,;)>\]]+|(?:\b(?:src|lib|dist|tests|test|docs|scripts|packages|extensions|bin|assets)[\\/][^\s"'`，。；！？、,;)>\]]+)|(?:\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|c|cpp|h|cs|md|json|yaml|yml|toml|html|css|sql|sh)\b))/g;
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(text)) !== null) {
+    const cleaned = normalizePath(match[0].replace(/[.:;,'")\]}>]+$/, ''));
+    if (cleaned && cleaned.length >= 3) {
+      results.add(cleaned);
+    }
   }
-  if (lower.includes('明天') || lower === 'tomorrow') {
-    return getTodayDateString(now + MS_DAY);
-  }
-  if (lower.includes('后天')) {
-    return getTodayDateString(now + 2 * MS_DAY);
-  }
-  if (lower.includes('大后天')) {
-    return getTodayDateString(now + 3 * MS_DAY);
+  return Array.from(results);
+}
+
+/**
+ * Check if a sticky note belongs to or targets the given workspace directory
+ */
+export function isAnchorTargetingWorkspace(anchor: Anchor, targetCwd?: string): boolean {
+  if (!targetCwd) return true;
+  const normTarget = targetCwd.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+  const targetBase = path.basename(normTarget).toLowerCase();
+
+  if (anchor.project && anchor.project !== 'global') {
+    const normProj = anchor.project.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+    if (isSameOrSubPath(normProj, normTarget)) return true;
+    if (path.basename(normProj).toLowerCase() === targetBase) return true;
   }
 
-  // Weekdays (e.g. 周五, 星期五, 下周一, friday)
-  const weekdayMap: Record<string, number> = {
-    '周日': 0, '星期日': 0, 'sunday': 0, 'sun': 0,
-    '周一': 1, '星期一': 1, 'monday': 1, 'mon': 1,
-    '周二': 2, '星期二': 2, 'tuesday': 2, 'tue': 2,
-    '周三': 3, '星期三': 3, 'wednesday': 3, 'wed': 3,
-    '周四': 4, '星期四': 4, 'thursday': 4, 'thu': 4,
-    '周五': 5, '星期五': 5, 'friday': 5, 'fri': 5,
-    '周六': 6, '星期六': 6, 'saturday': 6, 'sat': 6,
-  };
+  if (anchor.files && anchor.files.length > 0) {
+    for (const f of anchor.files) {
+      if (isSameOrSubPath(f, normTarget)) return true;
+    }
+  }
 
-  const isNextWeek = lower.includes('下周') || lower.includes('next');
-  for (const [name, targetDay] of Object.entries(weekdayMap)) {
-    if (lower.includes(name)) {
-      const curDay = new Date(now).getDay();
-      let diff = targetDay - curDay;
-      if (diff <= 0 || isNextWeek) {
-        diff += 7;
+  if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Match touched files against an anchor's file patterns
+ */
+export function matchAnchorAgainstTouchedFiles(anchor: Anchor, touchedFiles: string[]): TouchMatchResult | null {
+  if (!anchor.files || anchor.files.length === 0) return null;
+  const normTouched = touchedFiles.map(f => normalizePath(f, anchor.cwd)).filter(Boolean);
+  if (normTouched.length === 0) return null;
+
+  const matchedExact: string[] = [];
+  const matchedPrefix: string[] = [];
+
+  for (const touched of normTouched) {
+    for (const pattern of anchor.files) {
+      const normPattern = normalizePath(pattern, anchor.cwd);
+      if (normPattern === touched) {
+        matchedExact.push(touched);
+        break;
       }
-      return getTodayDateString(now + diff * MS_DAY);
+      if (normPattern.includes('*') && globToRegExp(normPattern).test(touched)) {
+        matchedExact.push(touched);
+        break;
+      }
+      const dirPrefix = normPattern.endsWith('/') ? normPattern : normPattern + '/';
+      if (touched.startsWith(dirPrefix)) {
+        matchedPrefix.push(touched);
+        break;
+      }
     }
   }
 
-  const fullDateMatch = titleOrDate.match(/\b(20\d\d)-(\d{1,2})-(\d{1,2})\b/);
-  if (fullDateMatch) {
-    const y = fullDateMatch[1];
-    const m = fullDateMatch[2].padStart(2, '0');
-    const d = fullDateMatch[3].padStart(2, '0');
-    return `${y}-${m}-${d}`;
+  if (matchedExact.length > 0) {
+    return { anchor, score: 1.0, matchedFiles: Array.from(new Set(matchedExact)), reason: 'exact-file' };
   }
-
-  const mmddMatch = titleOrDate.match(/\b(\d{1,2})-(\d{1,2})\b/);
-  if (mmddMatch) {
-    const curYear = new Date(now).getFullYear();
-    const m = mmddMatch[1].padStart(2, '0');
-    const d = mmddMatch[2].padStart(2, '0');
-    return `${curYear}-${m}-${d}`;
+  if (matchedPrefix.length > 0) {
+    return { anchor, score: 0.85, matchedFiles: Array.from(new Set(matchedPrefix)), reason: 'dir-prefix' };
   }
+  return null;
+}
 
-  return undefined;
+export function findMatchedAnchors(anchors: Anchor[], touchedFiles: string[]): TouchMatchResult[] {
+  const results: TouchMatchResult[] = [];
+  for (const anchor of anchors) {
+    const m = matchAnchorAgainstTouchedFiles(anchor, touchedFiles);
+    if (m) results.push(m);
+  }
+  return results.sort((a, b) => b.score - a.score);
 }
 
 /**
- * Detect recurring patterns, e.g. daily habits
+ * Clever Touch 2: Syntax-safe 1-line comment whisper when the AI reads/edits a matching file.
+ * Strictly skips JSON, ENV, lockfiles, and binaries so parsers are never broken.
  */
-export function detectRecurrence(title: string): 'daily' | undefined {
-  const lower = title.toLowerCase();
-  if (lower.includes('每天') || lower.includes('每日') || lower.includes('daily') || lower.includes('every day')) {
-    return 'daily';
-  }
-  return undefined;
+export const COMMENT_FORMATS: Record<string, (msg: string) => string> = {
+  '.ts': m => `// ${m}`, '.tsx': m => `// ${m}`, '.js': m => `// ${m}`, '.jsx': m => `// ${m}`,
+  '.mjs': m => `// ${m}`, '.cjs': m => `// ${m}`, '.go': m => `// ${m}`, '.rs': m => `// ${m}`,
+  '.c': m => `// ${m}`, '.cpp': m => `// ${m}`, '.h': m => `// ${m}`, '.cs': m => `// ${m}`,
+  '.java': m => `// ${m}`, '.kt': m => `// ${m}`, '.swift': m => `// ${m}`, '.dart': m => `// ${m}`,
+  '.py': m => `# ${m}`, '.rb': m => `# ${m}`, '.sh': m => `# ${m}`, '.bash': m => `# ${m}`,
+  '.yaml': m => `# ${m}`, '.yml': m => `# ${m}`, '.toml': m => `# ${m}`, '.ps1': m => `# ${m}`,
+  '.html': m => `<!-- ${m} -->`, '.xml': m => `<!-- ${m} -->`, '.svg': m => `<!-- ${m} -->`,
+  '.vue': m => `<!-- ${m} -->`, '.svelte': m => `<!-- ${m} -->`,
+  '.css': m => `/* ${m} */`, '.scss': m => `/* ${m} */`,
+  '.sql': m => `-- ${m}`, '.lua': m => `-- ${m}`
+};
+
+export function makeSafeTaskAnnotation(filePath: string, anchor: Anchor): string | null {
+  const ext = path.extname(filePath).toLowerCase();
+  const fmt = COMMENT_FORMATS[ext];
+  if (!fmt) return null;
+  const num = anchor.id.replace(/^anc-/, '');
+  return '\n\n' + fmt(`⌖ Note #${num}: ${anchor.title}`);
 }
 
 /**
- * Get current date string 'YYYY-MM-DD' in local timezone
+ * Clever Touch 3: Match a `git commit -m "..."` message against a sticky note (supports CJK & English)
  */
-export function getTodayDateString(timestamp: number = Date.now()): string {
-  const d = new Date(timestamp);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
+export function matchesCommitMessage(anchor: Anchor, commitMessages: string[]): { matched: boolean; message?: string } {
+  const idLower = anchor.id.toLowerCase();
+  const numId = `#${anchor.id.replace(/^anc-/, '')}`;
+  const title = anchor.title.toLowerCase();
 
-/**
- * Resolve the default storage directory for Anchor (~/.anchor).
- * Hierarchy:
- * 1. Process environment: ANCHOR_DIR
- * 2. Canonical user-global store: ~/.anchor/
- * 3. Legacy Pi harness fallback: ~/.pi/agent/anchors/ (migrates automatically if present)
- */
-export function getDefaultStorageDir(): string {
-  if (process.env.ANCHOR_DIR) {
-    return path.resolve(process.env.ANCHOR_DIR);
-  }
-
-  const primaryDir = path.join(os.homedir(), '.anchor');
-  const legacyPiDir = path.join(os.homedir(), '.pi', 'agent', 'anchors');
-
-  // Automatic seamless migration from legacy Pi directory if present
-  if (!fs.existsSync(primaryDir) && fs.existsSync(legacyPiDir)) {
+  let titleTokens: string[] = [];
+  if (typeof Intl !== 'undefined' && (Intl as any).Segmenter) {
     try {
-      fs.mkdirSync(primaryDir, { recursive: true });
-      for (const file of ['state.json', 'archive.jsonl', 'graveyard.jsonl']) {
-        const src = path.join(legacyPiDir, file);
-        const dest = path.join(primaryDir, file);
-        if (fs.existsSync(src) && !fs.existsSync(dest)) {
-          fs.copyFileSync(src, dest);
-        }
-      }
-    } catch {}
+      const seg = new (Intl as any).Segmenter('und', { granularity: 'word' });
+      titleTokens = Array.from(seg.segment(title))
+        .filter((s: any) => s.isWordLike)
+        .map((s: any) => s.segment.trim().toLowerCase())
+        .filter((t: string) => t.length >= 2);
+    } catch {
+      titleTokens = title.split(/[\s,._\-\/]+/).filter(t => t.length >= 2);
+    }
+  } else {
+    titleTokens = title.split(/[\s,._\-\/]+/).filter(t => t.length >= 2);
   }
 
-  return primaryDir;
+  for (const msg of commitMessages) {
+    const msgLower = msg.toLowerCase();
+    if (msgLower.includes(idLower) || msgLower.includes(numId)) {
+      return { matched: true, message: msg };
+    }
+    if (titleTokens.length > 0) {
+      const hits = titleTokens.filter(tok => msgLower.includes(tok)).length;
+      if (hits >= Math.min(2, titleTokens.length)) {
+        return { matched: true, message: msg };
+      }
+    }
+  }
+  return { matched: false };
 }
 
 /**
- * Synchronous sleep for spin-retry delay
+ * Render ultra-compact Turn-1 sticky note context for the AI.
+ * Turn 2+ consumes 0 tokens.
  */
+export function renderColdStartAnchorsContext(
+  store: AnchorStore,
+  cwdOrNow?: string | number,
+  nowArg?: number
+): string {
+  let cwd: string | undefined;
+  let now = Date.now();
+  if (typeof cwdOrNow === 'number') now = cwdOrNow;
+  else if (typeof cwdOrNow === 'string') cwd = cwdOrNow;
+  if (typeof nowArg === 'number') now = nowArg;
+
+  sweepQuietNotes(store, now);
+
+  const activeNotes = store.list({ status: 'active', cwd });
+  if (activeNotes.length === 0) return '';
+
+  const lines = activeNotes.map(a => {
+    const num = a.id.replace(/^anc-/, '');
+    const files = a.files.length > 0 ? ` (${a.files.slice(0, 2).join(', ')})` : '';
+    const desc = a.description ? ` — ${a.description}` : '';
+    return `• #${num} [${a.project}] ${a.title}${files}${desc}`;
+  });
+
+  return [
+    `<sticky-notes count="${activeNotes.length}">`,
+    `Pinned notes from previous sessions:`,
+    lines.join('\n'),
+    `When a note is completed, call anchor(action="settle", id="...") to tear it off.`,
+    `</sticky-notes>`
+  ].join('\n');
+}
+
+export const renderActiveAnchorsContext = renderColdStartAnchorsContext;
+
+/**
+ * Transition notes untouched for >7 days to 'sleeping' (quiet mode) so they don't burn Turn-1 tokens
+ * in unrelated sessions, while NEVER deleting them.
+ */
+export function sweepQuietNotes(store: AnchorStore, now: number = Date.now()): { quieted: string[] } {
+  return store.withLock(() => {
+    const state = store.loadState();
+    const quieted: string[] = [];
+    for (const a of state.anchors) {
+      if (a.status === 'active' && (now - a.lastTouchedAt) > QUIET_AFTER_DAYS * MS_PER_DAY) {
+        a.status = 'sleeping';
+        a.updatedAt = now;
+        quieted.push(a.id);
+      }
+    }
+    if (quieted.length > 0) {
+      state.lastSweepAt = now;
+      store.saveState(state);
+    }
+    return { quieted };
+  });
+}
+
+export function getDefaultStorageDir(): string {
+  if (process.env.ANCHOR_DIR) return path.resolve(process.env.ANCHOR_DIR);
+  return path.join(os.homedir(), '.anchor');
+}
+
 function sleepSync(ms: number): void {
   const end = Date.now() + ms;
   while (Date.now() < end) {}
 }
 
-interface LockMetadata {
-  pid: number;
-  createdAt: number;
-}
-
-/**
- * Check if a process is still alive on Windows/POSIX
- */
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch (err: any) {
-    return err.code === 'EPERM'; // Alive but permission denied
+    return err.code === 'EPERM';
   }
 }
 
-/**
- * Acquire exclusive lockfile using atomic 'wx' file creation (zero external dependencies).
- * Features:
- * - 0 async infection (100% synchronous)
- * - Automatic stale lock eviction (>5000ms or dead PID)
- * - Exponential backoff with jitter
- */
 export function acquireSyncLock(lockPath: string, maxWaitMs = 1500, staleTimeoutMs = 5000): () => void {
   const start = Date.now();
   let attempt = 0;
@@ -201,98 +306,76 @@ export function acquireSyncLock(lockPath: string, maxWaitMs = 1500, staleTimeout
     attempt++;
     try {
       const fd = fs.openSync(lockPath, 'wx');
-      const meta: LockMetadata = { pid: process.pid, createdAt: Date.now() };
-      fs.writeFileSync(fd, JSON.stringify(meta), 'utf-8');
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf-8');
       fs.closeSync(fd);
-
       return () => {
         try {
-          if (fs.existsSync(lockPath)) {
-            fs.unlinkSync(lockPath);
-          }
+          if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
         } catch {}
       };
     } catch (err: any) {
       if (err.code === 'EEXIST') {
         try {
-          const content = fs.readFileSync(lockPath, 'utf-8');
-          const meta: LockMetadata = JSON.parse(content);
+          const meta = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
           const isStale = (Date.now() - meta.createdAt) > staleTimeoutMs;
           const isDead = meta.pid && !isProcessAlive(meta.pid);
-
           if (isStale || isDead) {
-            try {
-              fs.unlinkSync(lockPath);
-              continue;
-            } catch {}
+            try { fs.unlinkSync(lockPath); continue; } catch {}
           }
-        } catch {
-          // If corrupt or in-flight write, wait for next attempt
-        }
-
-        const delay = Math.min(40, Math.floor(attempt * 4 + Math.random() * 8));
-        sleepSync(delay);
+        } catch {}
+        sleepSync(Math.min(40, Math.floor(attempt * 4 + Math.random() * 8)));
         continue;
       }
       break;
     }
   }
-
-  // Fallback release if lock acquisition timed out
   return () => {};
 }
 
-/**
- * Windows-tolerant atomic rename with exponential spin-retry to combat NTFS EBUSY/EPERM file locks
- */
-export function atomicRenameWithRetry(tempPath: string, targetPath: string, maxAttempts = 6): void {
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+export function atomicRenameWithRetry(tempPath: string, targetPath: string, maxRetries = 5): void {
+  let lastErr: any;
+  for (let i = 0; i < maxRetries; i++) {
     try {
       fs.renameSync(tempPath, targetPath);
       return;
     } catch (err: any) {
-      const code = err?.code;
-      if ((code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') && attempt < maxAttempts) {
-        const delay = Math.floor(attempt * 20 + Math.random() * 15);
-        sleepSync(delay);
+      lastErr = err;
+      if (err.code === 'EPERM' || err.code === 'EACCES' || err.code === 'EBUSY') {
+        sleepSync(15 * (i + 1));
         continue;
       }
-      // On exhaustion, preserve crash dump rather than wiping uncommitted state
-      const crashDump = `${tempPath}.failed`;
-      try {
-        if (fs.existsSync(tempPath)) fs.renameSync(tempPath, crashDump);
-      } catch {}
-      throw err;
+      break;
     }
+  }
+  try {
+    fs.copyFileSync(tempPath, targetPath);
+    fs.unlinkSync(tempPath);
+  } catch {
+    throw lastErr;
   }
 }
 
 export class AnchorStore {
   public readonly storageDir: string;
   public readonly statePath: string;
+  public readonly lockPath: string;
   public readonly archivePath: string;
-  public readonly graveyardPath: string;
 
-  constructor(customStorageDir?: string) {
-    if (customStorageDir) {
-      this.storageDir = path.resolve(customStorageDir);
-    } else {
-      this.storageDir = getDefaultStorageDir();
-    }
+  constructor(storageDir?: string) {
+    this.storageDir = storageDir ? path.resolve(storageDir) : getDefaultStorageDir();
     this.statePath = path.join(this.storageDir, 'state.json');
+    this.lockPath = path.join(this.storageDir, 'state.lock');
     this.archivePath = path.join(this.storageDir, 'archive.jsonl');
-    this.graveyardPath = path.join(this.storageDir, 'graveyard.jsonl');
-    this.ensureDirs();
   }
 
-  public get lockPath(): string {
-    return path.join(this.storageDir, 'state.lock');
+  private ensureDirs(): void {
+    if (!fs.existsSync(this.storageDir)) {
+      fs.mkdirSync(this.storageDir, { recursive: true });
+    }
   }
 
-  /**
-   * Execute mutation within a cross-process exclusive lock
-   */
   public withLock<T>(fn: () => T): T {
+    this.ensureDirs();
     const release = acquireSyncLock(this.lockPath);
     try {
       return fn();
@@ -301,82 +384,28 @@ export class AnchorStore {
     }
   }
 
-  private ensureDirs(): void {
-    if (!fs.existsSync(this.storageDir)) {
-      try {
-        fs.mkdirSync(this.storageDir, { recursive: true });
-      } catch {}
-    }
-  }
-
-  /**
-   * Load store state. If corrupt or missing, returns safe default.
-   */
   public loadState(): AnchorStoreState {
     this.ensureDirs();
     if (!fs.existsSync(this.statePath)) {
-      return {
-        version: 1,
-        anchors: [],
-        lastSweepAt: Date.now()
-      };
+      return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
     }
-
-    let raw: string | null = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        raw = fs.readFileSync(this.statePath, 'utf-8');
-        break;
-      } catch (err: any) {
-        if ((err?.code === 'EBUSY' || err?.code === 'EPERM') && attempt < 3) {
-          sleepSync(15);
-          continue;
-        }
-      }
-    }
-
-    if (raw === null) {
-      return { version: 1, anchors: [], lastSweepAt: Date.now() };
-    }
-
     try {
-      const data = JSON.parse(raw);
-      if (!data || typeof data !== 'object' || !Array.isArray(data.anchors)) {
-        throw new Error('Invalid state: anchors must be array');
+      const parsed = JSON.parse(fs.readFileSync(this.statePath, 'utf-8'));
+      if (!parsed || !Array.isArray(parsed.anchors)) {
+        return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
       }
-      data.anchors = data.anchors
-        .filter((a: any) => a && typeof a === 'object' && typeof a.id === 'string' && typeof a.title === 'string')
-        .map((a: any) => ({
-          ...a,
-          files: Array.isArray(a.files) ? a.files.filter((f: unknown) => typeof f === 'string') : [],
-          tags: Array.isArray(a.tags) ? a.tags.filter((t: unknown) => typeof t === 'string') : [],
-          decay: {
-            activeDays: Number.isFinite(a.decay?.activeDays) && a.decay.activeDays > 0 ? a.decay.activeDays : DURABLE_DECAY_POLICY.activeDays,
-            sleepDays: Number.isFinite(a.decay?.sleepDays) && a.decay.sleepDays > 0 ? a.decay.sleepDays : DURABLE_DECAY_POLICY.sleepDays,
-            graveyardDays: Number.isFinite(a.decay?.graveyardDays) && a.decay.graveyardDays > 0 ? a.decay.graveyardDays : DURABLE_DECAY_POLICY.graveyardDays,
-          },
-        }));
-      return data as AnchorStoreState;
+      return parsed;
     } catch {
-      const backupPath = path.join(this.storageDir, `state.corrupt.${Date.now()}.json`);
       try {
-        fs.renameSync(this.statePath, backupPath);
+        fs.copyFileSync(this.statePath, path.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
       } catch {}
-      return {
-        version: 1,
-        anchors: [],
-        lastSweepAt: Date.now()
-      };
+      return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
     }
   }
 
-  /**
-   * Atomically save store state via temp file + atomic rename with Windows NTFS spin-retry
-   */
   public saveState(state: AnchorStoreState): void {
     this.ensureDirs();
-    const rand = Math.random().toString(36).slice(2, 7);
-    const tempPath = path.join(this.storageDir, `state.tmp.${process.pid}.${Date.now()}.${rand}`);
+    const tempPath = `${this.statePath}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(tempPath, JSON.stringify(state, null, 2), 'utf-8');
     atomicRenameWithRetry(tempPath, this.statePath);
   }
@@ -384,8 +413,8 @@ export class AnchorStore {
   private generateId(state: AnchorStoreState): string {
     const numbers = state.anchors
       .map(a => {
-        const match = a.id.match(/^anc-(\d+)$/);
-        return match ? parseInt(match[1], 10) : 0;
+        const m = a.id.match(/^anc-(\d+)$/);
+        return m ? parseInt(m[1], 10) : 0;
       })
       .filter(n => n > 0);
     const maxExisting = numbers.length > 0 ? Math.max(...numbers) : 0;
@@ -395,21 +424,16 @@ export class AnchorStore {
   }
 
   /**
-   * Create a new Anchor with automatic project and cwd tagging
+   * Pin a new sticky note
    */
   public create(input: {
     title: string;
     description?: string;
     priority?: AnchorPriority;
-    durability?: AnchorDurability;
-    recurrence?: 'daily';
     cwd?: string;
     project?: string;
-    targetDate?: string;
     files?: string[];
     tags?: string[];
-    verifyCommand?: string;
-    decay?: AnchorDecayPolicy;
   }): Anchor {
     return this.withLock(() => {
       const state = this.loadState();
@@ -422,27 +446,16 @@ export class AnchorStore {
         : extractPathsFromText(`${input.title} ${input.description || ''}`);
 
       let cwd = input.cwd ? normalizePath(input.cwd) : '';
-      // If project is an explicit absolute path (e.g. "D:/College/优化"), align cwd to it so workspace matching is never split
       if (input.project && (/^[a-zA-Z]:[\\/]/.test(input.project.trim()) || input.project.trim().startsWith('/'))) {
         cwd = normalizePath(input.project.trim());
       } else if (inferredFiles.length > 0 && (/^[a-zA-Z]:\//.test(inferredFiles[0]) || inferredFiles[0].startsWith('/'))) {
         const firstDir = path.dirname(inferredFiles[0]);
-        if (firstDir && firstDir !== '.') {
-          cwd = normalizePath(firstDir);
-        }
+        if (firstDir && firstDir !== '.') cwd = normalizePath(firstDir);
       }
 
       const projectName = input.project
         ? input.project.trim()
         : (cwd ? path.basename(cwd) : 'global');
-
-      const recurrence = input.recurrence || detectRecurrence(input.title);
-      const targetDate = input.targetDate || detectTargetDate(input.title, now);
-      // Recurring tasks are always durable
-      const durability = recurrence ? 'durable' : (input.durability || detectDurability(input.title));
-      const decayPolicy = durability === 'ephemeral'
-        ? getEphemeralDecayPolicy(input.title)
-        : DURABLE_DECAY_POLICY;
 
       const anchor: Anchor = {
         id,
@@ -450,18 +463,13 @@ export class AnchorStore {
         description: input.description?.trim(),
         priority: input.priority || 'p1',
         status: 'active',
-        durability,
-        recurrence,
-        targetDate,
         project: projectName,
         cwd,
         createdAt: now,
         updatedAt: now,
         lastTouchedAt: now,
         files: inferredFiles,
-        tags: (input.tags || []).map(t => t.trim()).filter(Boolean),
-        verifyCommand: input.verifyCommand?.trim() || undefined,
-        decay: input.decay ? { ...input.decay } : { ...decayPolicy }
+        tags: (input.tags || []).map(t => t.trim()).filter(Boolean)
       };
 
       state.anchors.push(anchor);
@@ -475,94 +483,60 @@ export class AnchorStore {
     return anchors.findIndex(a =>
       a.id === clean ||
       a.id === `anc-${clean}` ||
-      (clean.match(/^\d+$/) ? a.id === `anc-${parseInt(clean, 10)}` : false)
+      (/^\d+$/.test(clean) ? a.id === `anc-${parseInt(clean, 10)}` : false)
     );
   }
 
-  /**
-   * Get an anchor by ID (supports 'anc-1', '#anc-1', '1', '01')
-   */
   public get(id: string): Anchor | undefined {
     const state = this.loadState();
     const idx = this.findAnchorIndex(state.anchors, id);
     return idx === -1 ? undefined : state.anchors[idx];
   }
 
-  /**
-   * List anchors. By default, if cwd is provided, only returns anchors
-   * belonging to this cwd or marked as global (''). Pass all: true for global view.
-   */
   public list(filter?: {
     status?: AnchorStatus;
-    priority?: AnchorPriority;
     cwd?: string;
     all?: boolean;
-    now?: number;
   }): Anchor[] {
     const state = this.loadState();
     const targetCwd = filter?.cwd ? normalizePath(filter.cwd) : null;
-    const today = getTodayDateString(filter?.now);
 
     return state.anchors.filter(a => {
-      // Recurring task completed today is hidden from active list
-      if (!filter?.all && filter?.status === 'active' && a.recurrence === 'daily' && a.lastCompletedDate === today) {
-        return false;
-      }
-
       if (filter?.status && a.status !== filter.status) return false;
-      if (filter?.priority && a.priority !== filter.priority) return false;
-
-      // Project context filtering:
-      // If an anchor has specific code files attached, match against cwd, project path/name, or file paths.
-      // If an anchor has NO code files attached (general tasks, memos), it is universal and visible everywhere!
       if (!filter?.all && targetCwd) {
         if (a.files.length > 0 && (a.cwd || a.project) && !isAnchorTargetingWorkspace(a, targetCwd)) {
           return false;
         }
       }
-
       return true;
     });
   }
 
-  /**
-   * Update an existing anchor
-   */
   public update(id: string, patch: Partial<Omit<Anchor, 'id' | 'createdAt'>>): Anchor {
     return this.withLock(() => {
       const state = this.loadState();
       const idx = this.findAnchorIndex(state.anchors, id);
-      if (idx === -1) {
-        throw new Error(`Anchor not found: ${id}`);
-      }
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
 
-      const current = state.anchors[idx];
       const updated: Anchor = {
-        ...current,
+        ...state.anchors[idx],
         ...patch,
         updatedAt: Date.now()
       };
-
       if (patch.files) {
         updated.files = patch.files.map(f => normalizePath(f)).filter(Boolean);
       }
-
       state.anchors[idx] = updated;
       this.saveState(state);
       return updated;
     });
   }
 
-  /**
-   * Touch an anchor to refresh its decay window and reactivate sleeping state
-   */
   public touch(id: string, timestamp: number = Date.now()): Anchor {
     return this.withLock(() => {
       const state = this.loadState();
       const idx = this.findAnchorIndex(state.anchors, id);
-      if (idx === -1) {
-        throw new Error(`Anchor not found: ${id}`);
-      }
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
 
       const current = state.anchors[idx];
       current.lastTouchedAt = timestamp;
@@ -570,7 +544,6 @@ export class AnchorStore {
       if (current.status === 'sleeping') {
         current.status = 'active';
       }
-
       state.anchors[idx] = current;
       this.saveState(state);
       return current;
@@ -578,44 +551,21 @@ export class AnchorStore {
   }
 
   /**
-   * Settle an anchor (recurring daily habits complete for today and wake up tomorrow)
+   * Tear off (settle) a completed sticky note and archive it to archive.jsonl
    */
   public settle(id: string, evidence: AnchorEvidence = {}, now: number = Date.now()): Anchor {
     return this.withLock(() => {
       const state = this.loadState();
       const idx = this.findAnchorIndex(state.anchors, id);
-      if (idx === -1) {
-        throw new Error(`Anchor not found: ${id}`);
-      }
+      if (idx === -1) throw new Error(`Note not found: ${id}`);
 
-      const anchor = state.anchors[idx];
-      const today = getTodayDateString(now);
-
-      // If it's a recurring daily habit:
-      if (anchor.recurrence === 'daily') {
-        anchor.lastCompletedDate = today;
-        anchor.lastTouchedAt = now;
-        anchor.updatedAt = now;
-        anchor.evidence = {
-          ...evidence,
-          settledAt: now,
-          settledBy: evidence.settledBy || 'manual-command'
-        };
-
-        this.ensureDirs();
-        fs.appendFileSync(this.archivePath, JSON.stringify({ ...anchor, settledForDate: today }) + '\n', 'utf-8');
-        this.saveState(state);
-        return anchor;
-      }
-
-      // Normal one-off task: remove from state and archive
       const [settled] = state.anchors.splice(idx, 1);
       settled.status = 'settled';
       settled.updatedAt = now;
       settled.evidence = {
         ...evidence,
         settledAt: now,
-        settledBy: evidence.settledBy || 'manual-command'
+        settledBy: evidence.settledBy || 'manual'
       };
 
       this.ensureDirs();
@@ -626,14 +576,13 @@ export class AnchorStore {
   }
 
   /**
-   * Reverse/undo the last settled anchor, popping it from archive.jsonl back into state.json
+   * Put back (undo) the last torn-off sticky note
    */
   public undoSettle(): Anchor {
     return this.withLock(() => {
       if (!fs.existsSync(this.archivePath)) {
-        throw new Error('No archived anchors to undo');
+        throw new Error('No archived notes to restore');
       }
-
       const raw = fs.readFileSync(this.archivePath, 'utf-8');
       const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       let anchor: Anchor | null = null;
@@ -641,29 +590,22 @@ export class AnchorStore {
         const candidate = lines.pop()!;
         try {
           const parsed = JSON.parse(candidate);
-          if (parsed && typeof parsed === 'object' && typeof parsed.id === 'string' && typeof parsed.title === 'string') {
+          if (parsed && typeof parsed.id === 'string' && typeof parsed.title === 'string') {
             anchor = parsed;
           }
         } catch {}
       }
-      if (!anchor) {
-        throw new Error('Archive is empty, nothing to undo');
-      }
+      if (!anchor) throw new Error('Archive is empty, nothing to undo');
 
-      // 1. Re-write archive without the last line
       fs.writeFileSync(this.archivePath, lines.length > 0 ? lines.join('\n') + '\n' : '', 'utf-8');
 
-      // 2. Restore to active state
       anchor.status = 'active';
       anchor.updatedAt = Date.now();
+      anchor.lastTouchedAt = Date.now();
       delete anchor.evidence;
-      delete (anchor as any).settledForDate;
-      if (anchor.recurrence === 'daily') {
-        delete anchor.lastCompletedDate;
-      }
 
       const state = this.loadState();
-      const existingIdx = state.anchors.findIndex(a => a.id === anchor.id);
+      const existingIdx = state.anchors.findIndex(a => a.id === anchor!.id);
       if (existingIdx !== -1) {
         if (state.anchors[existingIdx].title === anchor.title) {
           state.anchors[existingIdx] = anchor;
@@ -672,84 +614,12 @@ export class AnchorStore {
           state.anchors.push(anchor);
         }
       } else {
-        const match = anchor.id.match(/^anc-(\d+)$/);
-        if (match) {
-          const restoredNum = parseInt(match[1], 10);
-          state.nextId = Math.max(state.nextId || 1, restoredNum + 1);
-        }
+        const m = anchor.id.match(/^anc-(\d+)$/);
+        if (m) state.nextId = Math.max(state.nextId || 1, parseInt(m[1], 10) + 1);
         state.anchors.push(anchor);
       }
       this.saveState(state);
-
       return anchor;
     });
-  }
-
-  /**
-   * Evict anchor to graveyard.jsonl upon total decay expiry
-   */
-  public dropToGraveyard(id: string, reason: string): Anchor {
-    return this.withLock(() => {
-      const state = this.loadState();
-      const idx = state.anchors.findIndex(a => a.id === id);
-      if (idx === -1) {
-        throw new Error(`Anchor not found: ${id}`);
-      }
-
-      const [anchor] = state.anchors.splice(idx, 1);
-      anchor.status = 'graveyard';
-      anchor.updatedAt = Date.now();
-      anchor.evidence = {
-        summary: reason,
-        settledAt: Date.now()
-      };
-
-      this.ensureDirs();
-      fs.appendFileSync(this.graveyardPath, JSON.stringify(anchor) + '\n', 'utf-8');
-      this.saveState(state);
-      return anchor;
-    });
-  }
-
-  public getArchive(filter?: { cwd?: string; all?: boolean }): Anchor[] {
-    if (!fs.existsSync(this.archivePath)) return [];
-    try {
-      const raw = fs.readFileSync(this.archivePath, 'utf-8');
-      const all: Anchor[] = [];
-      for (const l of raw.split(/\r?\n/)) {
-        const trimmed = l.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed && typeof parsed === 'object' && typeof parsed.id === 'string') all.push(parsed);
-        } catch {}
-      }
-      if (filter?.all || !filter?.cwd) return all;
-      const targetCwd = normalizePath(filter.cwd);
-      return all.filter(a => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
-    } catch {
-      return [];
-    }
-  }
-
-  public getGraveyard(filter?: { cwd?: string; all?: boolean }): Anchor[] {
-    if (!fs.existsSync(this.graveyardPath)) return [];
-    try {
-      const raw = fs.readFileSync(this.graveyardPath, 'utf-8');
-      const all: Anchor[] = [];
-      for (const l of raw.split(/\r?\n/)) {
-        const trimmed = l.trim();
-        if (!trimmed) continue;
-        try {
-          const parsed = JSON.parse(trimmed);
-          if (parsed && typeof parsed === 'object' && typeof parsed.id === 'string') all.push(parsed);
-        } catch {}
-      }
-      if (filter?.all || !filter?.cwd) return all;
-      const targetCwd = normalizePath(filter.cwd);
-      return all.filter(a => !a.cwd || isSameOrSubPath(a.cwd, targetCwd));
-    } catch {
-      return [];
-    }
   }
 }
