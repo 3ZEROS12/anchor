@@ -1,7 +1,7 @@
 {
   "name": "pi-anchor",
-  "version": "0.2.2",
-  "description": "Zero-pollution, 0-idle-token task memory for AI coding agents",
+  "version": "0.2.3",
+  "description": "Cross-session task memory for Pi — pin tasks and reminders across terminal restarts with 0 git repo pollution, 0 idle tokens, and automatic completion on code changes.",
   "type": "module",
   "main": "dist/index.js",
   "module": "dist/index.js",
@@ -21,7 +21,7 @@
     "extensions": [
       "dist/extension.js"
     ],
-    "image": "https://raw.githubusercontent.com/3ZEROS12/anchor/main/assets/hero.svg"
+    "image": "https://raw.githubusercontent.com/3ZEROS12/anchor/main/assets/hero-en.svg"
   },
   "scripts": {
     "build": "tsup src/index.ts src/extension.ts --format esm,cjs --dts --clean",
