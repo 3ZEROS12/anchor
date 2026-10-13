@@ -102,7 +102,8 @@ export function truncateToWidth(str: string, maxWidth: number, ellipsis = '…')
   }
 
   // Invariant 11: Strip any trailing unclosed parenthesis/bracket fragment right before ellipsis
-  accumulated = accumulated.replace(/\s*[\(\[\{（【][^)\]}）】]*$/, '');
+  // Guard against matching '[' inside ANSI CSI escape sequences (\x1b[...m)
+  accumulated = accumulated.replace(/\s*(?!\x1b\[)(?<!\x1b)[\(\[\{（【](?:(?!\x1b\[)[^)\]}）】])*$/, '');
   return accumulated + ellipsis + (singleLine.includes('\x1b') ? '\x1b[0m' : '');
 }
 

@@ -1380,7 +1380,7 @@ function truncateToWidth(str, maxWidth, ellipsis = "\u2026") {
     accumWidth += charWidth;
     i += charLen;
   }
-  accumulated = accumulated.replace(/\s*[\(\[\{（【][^)\]}）】]*$/, "");
+  accumulated = accumulated.replace(/\s*(?!\x1b\[)(?<!\x1b)[\(\[\{（【](?:(?!\x1b\[)[^)\]}）】])*$/, "");
   return accumulated + ellipsis + (singleLine.includes("\x1B") ? "\x1B[0m" : "");
 }
 function padToWidth(str, targetWidth) {

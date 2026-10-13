@@ -114,6 +114,11 @@ test('StickyNoteTUI - CJK width alignment, truncation, and command parsing', () 
   assert.ok(getDisplayWidth(truncated) <= 12);
   assert.ok(!truncated.includes('('));
 
+  // Ensure ANSI CSI '[' escape sequences are never mistaken for unclosed brackets
+  const ansiTruncated = truncateToWidth('\x1b[32mGreen status text that overflows width\x1b[0m', 12);
+  assert.ok(ansiTruncated.includes('Green'));
+  assert.ok(getDisplayWidth(ansiTruncated) <= 12);
+
   assert.strictEqual(parseAnchorCommandInput('').mode, 'dashboard');
   assert.strictEqual(parseAnchorCommandInput('undo').mode, 'undo');
   assert.strictEqual(parseAnchorCommandInput('done 1').mode, 'settle');
