@@ -1,6 +1,6 @@
 import { materializeSteps, selectDockStepLayout } from './graph.ts';
 import type { Anchor, AnchorStep, StepStatus } from './types.ts';
-import { formatOrigin, formatProgressBar, getDisplayWidth, sortAnchorsForDisplay, truncateToWidth } from './tui.ts';
+import { formatMicroGauge, formatOrigin, formatProgressBar, getDisplayWidth, sortAnchorsForDisplay, truncateToWidth } from './tui.ts';
 
 export const STATUS_GLYPH: Record<StepStatus, string> = {
   pending: '○',

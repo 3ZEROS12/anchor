@@ -1465,6 +1465,21 @@ function formatProgressBar(progress, cells = 4) {
   const bar = "\u25A0".repeat(finalFilled) + "\u25A1".repeat(Math.max(0, cells - finalFilled));
   return `[${bar} ${done}/${progress.total}]`;
 }
+function formatMicroGauge2(progress, cells = 6) {
+  if (!progress || !progress.total || progress.total < 1) return "";
+  const done = Math.max(0, Math.min(progress.total, progress.done || 0));
+  if (done >= progress.total) {
+    return "\u2501".repeat(cells) + ` ${done}/${progress.total}`;
+  }
+  if (done === 0) {
+    return "\u2500".repeat(cells) + ` 0/${progress.total}`;
+  }
+  const filledCount = Math.max(1, Math.round(done / progress.total * cells));
+  const solid = "\u2501".repeat(Math.max(0, filledCount - 1));
+  const head = "\u2578";
+  const remaining = "\u2500".repeat(Math.max(0, cells - filledCount));
+  return `${solid}${head}${remaining} ${done}/${progress.total}`;
+}
 function formatRelativeAge(timestamp, now = Date.now()) {
   const diffSec = Math.max(0, Math.floor((now - timestamp) / 1e3));
   if (diffSec < 60) return "just now";
@@ -1657,6 +1672,13 @@ function parseAnchorCommandInput(raw) {
   }
   if (trimmed === "now" || trimmed === "what" || trimmed === "status" || trimmed === "hey") {
     return { mode: "now" };
+  }
+  const checkMatch = trimmed.match(/^(?:check|mark)\s+(.+)$/i);
+  if (checkMatch) {
+    return {
+      mode: "check",
+      targetId: checkMatch[1].trim().replace(/^#/, "")
+    };
   }
   const steerMatch = trimmed.match(/^steer\s+(.+)$/i);
   if (steerMatch) {
@@ -2133,6 +2155,27 @@ function extension_default(pi) {
         ctx.ui.notify(`\u2316 Anchor Dock ${collapsed ? "folded to 1-line strip" : "expanded to tree view"} (Alt+A)`, "info");
         return;
       }
+      if (parsed.mode === "check" && parsed.targetId) {
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warn");
+          return;
+        }
+        const p = activeHere[0];
+        const stepNum = parseInt(parsed.targetId, 10);
+        if (isNaN(stepNum)) {
+          ctx.ui.notify("Usage: /anchor check <stepNumber> (e.g. /check 2)", "warn");
+          return;
+        }
+        try {
+          store.updateStep(p.id, stepNum, { status: "completed" });
+          ctx.ui.notify(`\u2316 Checked step #${stepNum} on "${p.title}"`, "info");
+          updateStartupBanner(ctx, store);
+        } catch (err) {
+          ctx.ui.notify(`Check step failed: ${err.message}`, "error");
+        }
+        return;
+      }
       if (parsed.mode === "step" && parsed.targetId) {
         const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
         if (!resolvedId) {
@@ -2243,6 +2286,40 @@ function extension_default(pi) {
         ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
       }
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.registerCommand("check", {
+    description: "Mark a step completed on the active anchor/todo dock (e.g. /check 2)",
+    handler: async (args, ctx) => {
+      const target = (args || "").trim().replace(/^#/, "");
+      if (!target) {
+        ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warn");
+        return;
+      }
+      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+      if (activeHere.length === 0) {
+        ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warn");
+        return;
+      }
+      const p = activeHere[0];
+      const stepNum = parseInt(target, 10);
+      if (isNaN(stepNum)) {
+        ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warn");
+        return;
+      }
+      try {
+        store.updateStep(p.id, stepNum, { status: "completed" });
+        ctx.ui.notify(`\u2316 Checked step #${stepNum} on "${p.title}"`, "info");
+        updateStartupBanner(ctx, store);
+      } catch (err) {
+        ctx.ui.notify(`Check step failed: ${err.message}`, "error");
+      }
+    }
+  });
+  pi.registerCommand("todo", {
+    description: "View or manage unified active tasks on the Anchor dock (/todo)",
+    handler: async (_args, ctx) => {
+      await openAnchorDashboard(ctx, store);
     }
   });
   pi.registerCommand("steer", {
@@ -2363,6 +2440,7 @@ export {
   truncateToWidth,
   padToWidth,
   formatProgressBar,
+  formatMicroGauge2 as formatMicroGauge,
   formatRelativeAge,
   formatOrigin,
   sortAnchorsForDisplay,

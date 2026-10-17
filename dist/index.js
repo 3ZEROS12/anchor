@@ -16,6 +16,7 @@ import {
   extractProgressFromText,
   findMatchedAnchors,
   formatDockStepRow,
+  formatMicroGauge,
   formatOrigin,
   formatProgressBar,
   formatRelativeAge,
@@ -52,7 +53,7 @@ import {
   updateStartupBanner,
   validateAnchorDependencies,
   validateStepDependencies
-} from "./chunk-YIJS5EZX.js";
+} from "./chunk-SOGI5R6I.js";
 export {
   AnchorDockController,
   AnchorStore,
@@ -71,6 +72,7 @@ export {
   extractProgressFromText,
   findMatchedAnchors,
   formatDockStepRow,
+  formatMicroGauge,
   formatOrigin,
   formatProgressBar,
   formatRelativeAge,

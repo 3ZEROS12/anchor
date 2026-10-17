@@ -276,7 +276,7 @@ declare class AnchorStore {
 }
 
 declare function parseAnchorCommandInput(raw: string): {
-    mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer';
+    mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer' | 'check';
     targetId?: string;
     delta?: number;
     title?: string;

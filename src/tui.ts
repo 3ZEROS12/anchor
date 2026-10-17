@@ -127,6 +127,25 @@ export function formatProgressBar(progress?: AnchorProgress, cells = 4): string 
 }
 
 /**
+ * Render a sleek Linear-grade micro gauge: e.g. `━━╸─── 2/5` or `━━━━━━ 4/4`
+ */
+export function formatMicroGauge(progress?: AnchorProgress, cells = 6): string {
+  if (!progress || !progress.total || progress.total < 1) return '';
+  const done = Math.max(0, Math.min(progress.total, progress.done || 0));
+  if (done >= progress.total) {
+    return '━'.repeat(cells) + ` ${done}/${progress.total}`;
+  }
+  if (done === 0) {
+    return '─'.repeat(cells) + ` 0/${progress.total}`;
+  }
+  const filledCount = Math.max(1, Math.round((done / progress.total) * cells));
+  const solid = '━'.repeat(Math.max(0, filledCount - 1));
+  const head = '╸';
+  const remaining = '─'.repeat(Math.max(0, cells - filledCount));
+  return `${solid}${head}${remaining} ${done}/${progress.total}`;
+}
+
+/**
  * Format relative sticky-note age cleanly: 'just now', '15m ago', '3h ago', '2d ago'
  */
 export function formatRelativeAge(timestamp: number, now: number = Date.now()): string {

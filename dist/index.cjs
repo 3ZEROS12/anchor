@@ -47,6 +47,7 @@ __export(index_exports, {
   extractProgressFromText: () => extractProgressFromText,
   findMatchedAnchors: () => findMatchedAnchors,
   formatDockStepRow: () => formatDockStepRow,
+  formatMicroGauge: () => formatMicroGauge,
   formatOrigin: () => formatOrigin,
   formatProgressBar: () => formatProgressBar,
   formatRelativeAge: () => formatRelativeAge,
@@ -1308,6 +1309,21 @@ function formatProgressBar(progress, cells = 4) {
   const bar = "\u25A0".repeat(finalFilled) + "\u25A1".repeat(Math.max(0, cells - finalFilled));
   return `[${bar} ${done}/${progress.total}]`;
 }
+function formatMicroGauge(progress, cells = 6) {
+  if (!progress || !progress.total || progress.total < 1) return "";
+  const done = Math.max(0, Math.min(progress.total, progress.done || 0));
+  if (done >= progress.total) {
+    return "\u2501".repeat(cells) + ` ${done}/${progress.total}`;
+  }
+  if (done === 0) {
+    return "\u2500".repeat(cells) + ` 0/${progress.total}`;
+  }
+  const filledCount = Math.max(1, Math.round(done / progress.total * cells));
+  const solid = "\u2501".repeat(Math.max(0, filledCount - 1));
+  const head = "\u2578";
+  const remaining = "\u2500".repeat(Math.max(0, cells - filledCount));
+  return `${solid}${head}${remaining} ${done}/${progress.total}`;
+}
 function formatRelativeAge(timestamp, now = Date.now()) {
   const diffSec = Math.max(0, Math.floor((now - timestamp) / 1e3));
   if (diffSec < 60) return "just now";
@@ -1741,6 +1757,13 @@ function parseAnchorCommandInput(raw) {
   if (trimmed === "now" || trimmed === "what" || trimmed === "status" || trimmed === "hey") {
     return { mode: "now" };
   }
+  const checkMatch = trimmed.match(/^(?:check|mark)\s+(.+)$/i);
+  if (checkMatch) {
+    return {
+      mode: "check",
+      targetId: checkMatch[1].trim().replace(/^#/, "")
+    };
+  }
   const steerMatch = trimmed.match(/^steer\s+(.+)$/i);
   if (steerMatch) {
     return {
@@ -1819,6 +1842,7 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   extractProgressFromText,
   findMatchedAnchors,
   formatDockStepRow,
+  formatMicroGauge,
   formatOrigin,
   formatProgressBar,
   formatRelativeAge,

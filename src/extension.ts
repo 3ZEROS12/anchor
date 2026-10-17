@@ -29,7 +29,7 @@ import { inferLiveActivityLabel, replayTodoSnapshotFromBranch } from './bridge.t
 const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
 
 export function parseAnchorCommandInput(raw: string): {
-  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer';
+  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer' | 'check';
   targetId?: string;
   delta?: number;
   title?: string;
@@ -40,6 +40,13 @@ export function parseAnchorCommandInput(raw: string): {
   }
   if (trimmed === 'now' || trimmed === 'what' || trimmed === 'status' || trimmed === 'hey') {
     return { mode: 'now' };
+  }
+  const checkMatch = trimmed.match(/^(?:check|mark)\s+(.+)$/i);
+  if (checkMatch) {
+    return {
+      mode: 'check',
+      targetId: checkMatch[1].trim().replace(/^#/, '')
+    };
   }
   const steerMatch = trimmed.match(/^steer\s+(.+)$/i);
   if (steerMatch) {
@@ -594,6 +601,28 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (parsed.mode === 'check' && parsed.targetId) {
+        const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('⌖ No active anchor to check steps. Type "pin: <goal>" first!', 'warn');
+          return;
+        }
+        const p = activeHere[0];
+        const stepNum = parseInt(parsed.targetId, 10);
+        if (isNaN(stepNum)) {
+          ctx.ui.notify('Usage: /anchor check <stepNumber> (e.g. /check 2)', 'warn');
+          return;
+        }
+        try {
+          store.updateStep(p.id, stepNum, { status: 'completed' });
+          ctx.ui.notify(`⌖ Checked step #${stepNum} on "${p.title}"`, 'info');
+          updateStartupBanner(ctx, store);
+        } catch (err: any) {
+          ctx.ui.notify(`Check step failed: ${err.message}`, 'error');
+        }
+        return;
+      }
+
       if (parsed.mode === 'step' && parsed.targetId) {
         const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
         if (!resolvedId) {
@@ -711,6 +740,42 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
       }
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+
+  pi.registerCommand('check', {
+    description: 'Mark a step completed on the active anchor/todo dock (e.g. /check 2)',
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const target = (args || '').trim().replace(/^#/, '');
+      if (!target) {
+        ctx.ui.notify('Usage: /check <stepNumber> (e.g. /check 2)', 'warn');
+        return;
+      }
+      const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+      if (activeHere.length === 0) {
+        ctx.ui.notify('⌖ No active anchor to check steps. Type "pin: <goal>" first!', 'warn');
+        return;
+      }
+      const p = activeHere[0];
+      const stepNum = parseInt(target, 10);
+      if (isNaN(stepNum)) {
+        ctx.ui.notify('Usage: /check <stepNumber> (e.g. /check 2)', 'warn');
+        return;
+      }
+      try {
+        store.updateStep(p.id, stepNum, { status: 'completed' });
+        ctx.ui.notify(`⌖ Checked step #${stepNum} on "${p.title}"`, 'info');
+        updateStartupBanner(ctx, store);
+      } catch (err: any) {
+        ctx.ui.notify(`Check step failed: ${err.message}`, 'error');
+      }
+    }
+  });
+
+  pi.registerCommand('todo', {
+    description: 'View or manage unified active tasks on the Anchor dock (/todo)',
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      await openAnchorDashboard(ctx, store);
     }
   });
 
