@@ -175,7 +175,7 @@ declare function sweepQuietNotes(store: AnchorStore, now?: number): {
     quieted: string[];
 };
 declare function getDefaultStorageDir(): string;
-declare function acquireSyncLock(lockPath: string, maxWaitMs?: number, staleTimeoutMs?: number): () => void;
+declare function acquireSyncLock(lockPath: string, maxWaitMs?: number, staleTimeoutMs?: number): (() => void) | null;
 declare function atomicRenameWithRetry(tempPath: string, targetPath: string, maxRetries?: number): void;
 declare class AnchorStore {
     readonly storageDir: string;

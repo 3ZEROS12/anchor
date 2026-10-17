@@ -100,7 +100,8 @@ export function extractProgressFromText(rawTitle: string): { cleanTitle: string;
   if (!rawTitle) return { cleanTitle: '' };
 
   // 1. Check numbered inline steps: "重构登录: 1. 抽出接口 2. 替换Cookie 3. 补单测"
-  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*([^\d]+?)(?=\s+\d+\.\s|$)/g));
+  // Use non-greedy match bounded by the next `\d+\.` delimiter, allowing digits inside step text (e.g. OAuth2, Node22)
+  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*(.+?)(?=\s+\d+\.\s*|$)/g));
   if (stepParts.length >= 2) {
     const steps = stepParts.map(m => m[2].trim().replace(/[;；,，]+$/, '')).filter(Boolean);
     const items: AnchorStep[] = steps.map((subject, idx) => ({
@@ -142,12 +143,11 @@ export function extractProgressFromText(rawTitle: string): { cleanTitle: string;
 export function isAnchorTargetingWorkspace(anchor: Anchor, targetCwd?: string): boolean {
   if (!targetCwd) return true;
   const normTarget = targetCwd.trim().replace(/\\/g, '/').replace(/\/+$/, '');
-  const targetBase = path.basename(normTarget).toLowerCase();
 
   if (anchor.project && anchor.project !== 'global') {
     const normProj = anchor.project.trim().replace(/\\/g, '/').replace(/\/+$/, '');
     if (isSameOrSubPath(normProj, normTarget)) return true;
-    if (path.basename(normProj).toLowerCase() === targetBase) return true;
+    if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) return true;
   }
 
   if (anchor.files && anchor.files.length > 0) {
@@ -371,29 +371,47 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-export function acquireSyncLock(lockPath: string, maxWaitMs = 1500, staleTimeoutMs = 5000): () => void {
+export function acquireSyncLock(lockPath: string, maxWaitMs = 1500, staleTimeoutMs = 5000): (() => void) | null {
   const start = Date.now();
   let attempt = 0;
+  const lockToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   while (Date.now() - start < maxWaitMs) {
     attempt++;
     try {
       const fd = fs.openSync(lockPath, 'wx');
-      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), 'utf-8');
+      fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: lockToken }), 'utf-8');
       fs.closeSync(fd);
       return () => {
         try {
-          if (fs.existsSync(lockPath)) fs.unlinkSync(lockPath);
+          if (fs.existsSync(lockPath)) {
+            const raw = fs.readFileSync(lockPath, 'utf-8');
+            if (raw) {
+              const meta = JSON.parse(raw);
+              if (meta.token === lockToken) {
+                fs.unlinkSync(lockPath);
+              }
+            } else {
+              fs.unlinkSync(lockPath);
+            }
+          }
         } catch {}
       };
     } catch (err: any) {
       if (err.code === 'EEXIST') {
         try {
-          const meta = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
-          const isStale = (Date.now() - meta.createdAt) > staleTimeoutMs;
-          const isDead = meta.pid && !isProcessAlive(meta.pid);
-          if (isStale || isDead) {
+          const stat = fs.statSync(lockPath);
+          if (stat.size === 0 && (Date.now() - stat.mtimeMs) > staleTimeoutMs) {
             try { fs.unlinkSync(lockPath); continue; } catch {}
+          }
+          const raw = fs.readFileSync(lockPath, 'utf-8');
+          if (raw) {
+            const meta = JSON.parse(raw);
+            const isStale = (Date.now() - meta.createdAt) > staleTimeoutMs;
+            const isDead = meta.pid && !isProcessAlive(meta.pid);
+            if (isStale || isDead) {
+              try { fs.unlinkSync(lockPath); continue; } catch {}
+            }
           }
         } catch {}
         sleepSync(Math.min(40, Math.floor(attempt * 4 + Math.random() * 8)));
@@ -402,7 +420,7 @@ export function acquireSyncLock(lockPath: string, maxWaitMs = 1500, staleTimeout
       break;
     }
   }
-  return () => {};
+  return null;
 }
 
 export function atomicRenameWithRetry(tempPath: string, targetPath: string, maxRetries = 5): void {
@@ -450,6 +468,9 @@ export class AnchorStore {
   public withLock<T>(fn: () => T): T {
     this.ensureDirs();
     const release = acquireSyncLock(this.lockPath);
+    if (!release) {
+      throw new Error('AnchorStore: Unable to acquire state.lock within timeout');
+    }
     try {
       return fn();
     } finally {

@@ -421,7 +421,7 @@ function extractPathsFromText(text) {
 }
 function extractProgressFromText(rawTitle) {
   if (!rawTitle) return { cleanTitle: "" };
-  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*([^\d]+?)(?=\s+\d+\.\s|$)/g));
+  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*(.+?)(?=\s+\d+\.\s*|$)/g));
   if (stepParts.length >= 2) {
     const steps = stepParts.map((m) => m[2].trim().replace(/[;；,，]+$/, "")).filter(Boolean);
     const items = steps.map((subject, idx) => ({
@@ -453,11 +453,10 @@ function extractProgressFromText(rawTitle) {
 function isAnchorTargetingWorkspace(anchor, targetCwd) {
   if (!targetCwd) return true;
   const normTarget = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  const targetBase = import_node_path2.default.basename(normTarget).toLowerCase();
   if (anchor.project && anchor.project !== "global") {
     const normProj = anchor.project.trim().replace(/\\/g, "/").replace(/\/+$/, "");
     if (isSameOrSubPath(normProj, normTarget)) return true;
-    if (import_node_path2.default.basename(normProj).toLowerCase() === targetBase) return true;
+    if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) return true;
   }
   if (anchor.files && anchor.files.length > 0) {
     for (const f of anchor.files) {
@@ -682,29 +681,51 @@ function isProcessAlive(pid) {
 function acquireSyncLock(lockPath, maxWaitMs = 1500, staleTimeoutMs = 5e3) {
   const start = Date.now();
   let attempt = 0;
+  const lockToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
   while (Date.now() - start < maxWaitMs) {
     attempt++;
     try {
       const fd = import_node_fs.default.openSync(lockPath, "wx");
-      import_node_fs.default.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), "utf-8");
+      import_node_fs.default.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: lockToken }), "utf-8");
       import_node_fs.default.closeSync(fd);
       return () => {
         try {
-          if (import_node_fs.default.existsSync(lockPath)) import_node_fs.default.unlinkSync(lockPath);
+          if (import_node_fs.default.existsSync(lockPath)) {
+            const raw = import_node_fs.default.readFileSync(lockPath, "utf-8");
+            if (raw) {
+              const meta = JSON.parse(raw);
+              if (meta.token === lockToken) {
+                import_node_fs.default.unlinkSync(lockPath);
+              }
+            } else {
+              import_node_fs.default.unlinkSync(lockPath);
+            }
+          }
         } catch {
         }
       };
     } catch (err) {
       if (err.code === "EEXIST") {
         try {
-          const meta = JSON.parse(import_node_fs.default.readFileSync(lockPath, "utf-8"));
-          const isStale = Date.now() - meta.createdAt > staleTimeoutMs;
-          const isDead = meta.pid && !isProcessAlive(meta.pid);
-          if (isStale || isDead) {
+          const stat = import_node_fs.default.statSync(lockPath);
+          if (stat.size === 0 && Date.now() - stat.mtimeMs > staleTimeoutMs) {
             try {
               import_node_fs.default.unlinkSync(lockPath);
               continue;
             } catch {
+            }
+          }
+          const raw = import_node_fs.default.readFileSync(lockPath, "utf-8");
+          if (raw) {
+            const meta = JSON.parse(raw);
+            const isStale = Date.now() - meta.createdAt > staleTimeoutMs;
+            const isDead = meta.pid && !isProcessAlive(meta.pid);
+            if (isStale || isDead) {
+              try {
+                import_node_fs.default.unlinkSync(lockPath);
+                continue;
+              } catch {
+              }
             }
           }
         } catch {
@@ -715,8 +736,7 @@ function acquireSyncLock(lockPath, maxWaitMs = 1500, staleTimeoutMs = 5e3) {
       break;
     }
   }
-  return () => {
-  };
+  return null;
 }
 function atomicRenameWithRetry(tempPath, targetPath, maxRetries = 5) {
   let lastErr;
@@ -759,6 +779,9 @@ var AnchorStore = class {
   withLock(fn) {
     this.ensureDirs();
     const release = acquireSyncLock(this.lockPath);
+    if (!release) {
+      throw new Error("AnchorStore: Unable to acquire state.lock within timeout");
+    }
     try {
       return fn();
     } finally {

@@ -3,7 +3,7 @@ import {
   parseAnchorCommandInput,
   parseQuickNoteInput,
   resolveAnchorTarget
-} from "./chunk-D5VWWXAQ.js";
+} from "./chunk-RXTH6CLC.js";
 export {
   extension_default as default,
   parseAnchorCommandInput,

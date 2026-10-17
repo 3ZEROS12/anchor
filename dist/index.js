@@ -51,7 +51,7 @@ import {
   updateStartupBanner,
   validateAnchorDependencies,
   validateStepDependencies
-} from "./chunk-D5VWWXAQ.js";
+} from "./chunk-RXTH6CLC.js";
 export {
   AnchorDockController,
   AnchorStore,

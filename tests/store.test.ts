@@ -92,6 +92,7 @@ test('AnchorStore - corrupt state recovery & exclusive lockfile with dead PID re
     const lockPath = path.join(tempDir, 'state.lock');
     fs.writeFileSync(lockPath, JSON.stringify({ pid: 999999, createdAt: Date.now() - 10_000 }), 'utf-8');
     const release = acquireSyncLock(lockPath, 500);
+    assert.ok(release, 'acquireSyncLock must acquire lock when existing lock is stale');
     assert.ok(fs.existsSync(lockPath));
     release();
     assert.ok(!fs.existsSync(lockPath));

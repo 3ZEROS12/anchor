@@ -347,7 +347,7 @@ function extractPathsFromText(text) {
 }
 function extractProgressFromText(rawTitle) {
   if (!rawTitle) return { cleanTitle: "" };
-  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*([^\d]+?)(?=\s+\d+\.\s|$)/g));
+  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*(.+?)(?=\s+\d+\.\s*|$)/g));
   if (stepParts.length >= 2) {
     const steps = stepParts.map((m) => m[2].trim().replace(/[;；,，]+$/, "")).filter(Boolean);
     const items = steps.map((subject, idx) => ({
@@ -379,11 +379,10 @@ function extractProgressFromText(rawTitle) {
 function isAnchorTargetingWorkspace(anchor, targetCwd) {
   if (!targetCwd) return true;
   const normTarget = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  const targetBase = import_node_path2.default.basename(normTarget).toLowerCase();
   if (anchor.project && anchor.project !== "global") {
     const normProj = anchor.project.trim().replace(/\\/g, "/").replace(/\/+$/, "");
     if (isSameOrSubPath(normProj, normTarget)) return true;
-    if (import_node_path2.default.basename(normProj).toLowerCase() === targetBase) return true;
+    if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) return true;
   }
   if (anchor.files && anchor.files.length > 0) {
     for (const f of anchor.files) {
@@ -607,29 +606,51 @@ function isProcessAlive(pid) {
 function acquireSyncLock(lockPath, maxWaitMs = 1500, staleTimeoutMs = 5e3) {
   const start = Date.now();
   let attempt = 0;
+  const lockToken = Math.random().toString(36).slice(2) + Date.now().toString(36);
   while (Date.now() - start < maxWaitMs) {
     attempt++;
     try {
       const fd = import_node_fs.default.openSync(lockPath, "wx");
-      import_node_fs.default.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now() }), "utf-8");
+      import_node_fs.default.writeFileSync(fd, JSON.stringify({ pid: process.pid, createdAt: Date.now(), token: lockToken }), "utf-8");
       import_node_fs.default.closeSync(fd);
       return () => {
         try {
-          if (import_node_fs.default.existsSync(lockPath)) import_node_fs.default.unlinkSync(lockPath);
+          if (import_node_fs.default.existsSync(lockPath)) {
+            const raw = import_node_fs.default.readFileSync(lockPath, "utf-8");
+            if (raw) {
+              const meta = JSON.parse(raw);
+              if (meta.token === lockToken) {
+                import_node_fs.default.unlinkSync(lockPath);
+              }
+            } else {
+              import_node_fs.default.unlinkSync(lockPath);
+            }
+          }
         } catch {
         }
       };
     } catch (err) {
       if (err.code === "EEXIST") {
         try {
-          const meta = JSON.parse(import_node_fs.default.readFileSync(lockPath, "utf-8"));
-          const isStale = Date.now() - meta.createdAt > staleTimeoutMs;
-          const isDead = meta.pid && !isProcessAlive(meta.pid);
-          if (isStale || isDead) {
+          const stat = import_node_fs.default.statSync(lockPath);
+          if (stat.size === 0 && Date.now() - stat.mtimeMs > staleTimeoutMs) {
             try {
               import_node_fs.default.unlinkSync(lockPath);
               continue;
             } catch {
+            }
+          }
+          const raw = import_node_fs.default.readFileSync(lockPath, "utf-8");
+          if (raw) {
+            const meta = JSON.parse(raw);
+            const isStale = Date.now() - meta.createdAt > staleTimeoutMs;
+            const isDead = meta.pid && !isProcessAlive(meta.pid);
+            if (isStale || isDead) {
+              try {
+                import_node_fs.default.unlinkSync(lockPath);
+                continue;
+              } catch {
+              }
             }
           }
         } catch {
@@ -640,8 +661,7 @@ function acquireSyncLock(lockPath, maxWaitMs = 1500, staleTimeoutMs = 5e3) {
       break;
     }
   }
-  return () => {
-  };
+  return null;
 }
 function atomicRenameWithRetry(tempPath, targetPath, maxRetries = 5) {
   let lastErr;
@@ -684,6 +704,9 @@ var AnchorStore = class {
   withLock(fn) {
     this.ensureDirs();
     const release = acquireSyncLock(this.lockPath);
+    if (!release) {
+      throw new Error("AnchorStore: Unable to acquire state.lock within timeout");
+    }
     try {
       return fn();
     } finally {
@@ -1705,9 +1728,11 @@ function extension_default(pi) {
     recentSessionFiles.length = 0;
     defaultDockController.resetGraceState();
     sweepQuietNotes(store);
-    const quietForHere = store.list({ status: "sleeping", all: true }).filter((a) => (a.files.length > 0 || a.project && a.project !== "global" || a.cwd) && isAnchorTargetingWorkspace(a, ctx.cwd));
-    for (const q of quietForHere) {
-      store.touch(q.id);
+    const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+    for (const a of activeHere) {
+      if (a.activeForm) {
+        store.update(a.id, { activeForm: void 0 });
+      }
     }
     try {
       const branch = ctx.sessionManager?.getBranch?.();
@@ -1724,6 +1749,13 @@ function extension_default(pi) {
   });
   pi.on("agent_start", async (_event, ctx) => {
     if (defaultDockController.foldCompletedStepsFromPreviousTurn()) {
+      updateStartupBanner(ctx, store);
+    }
+  });
+  pi.on("agent_end", async (_event, ctx) => {
+    const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length > 0 && activeHere[0].activeForm) {
+      store.update(activeHere[0].id, { activeForm: void 0 });
       updateStartupBanner(ctx, store);
     }
   });
@@ -1762,19 +1794,21 @@ function extension_default(pi) {
     if (messageTurns.length <= 1) {
       const snippet = renderColdStartAnchorsContext(store, ctx.cwd);
       if (snippet) {
-        return { systemPrompt: `${event.systemPrompt}
+        const base = event.systemPrompt ? `${event.systemPrompt}
 
-${snippet}` };
+` : "";
+        return { systemPrompt: `${base}${snippet}` };
       }
     } else {
-      const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
       if (activeHere.length > 0) {
         const p = activeHere[0];
         const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
-        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, "")} "${p.title}"${bar}. Keep execution strictly focused on this anchor. Do not perform unrequested refactoring or modify unrelated files.`;
-        return { systemPrompt: `${event.systemPrompt}
+        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, "")} "${p.title}"${bar}. Primary goal for this session. Scope code changes strictly to this objective.`;
+        const base = event.systemPrompt ? `${event.systemPrompt}
 
-${guard}` };
+` : "";
+        return { systemPrompt: `${base}${guard}` };
       }
     }
   });
@@ -1782,7 +1816,7 @@ ${guard}` };
     const lowerTool = String(event.toolName || "").toLowerCase();
     const liveActivity = inferLiveActivityLabel(lowerTool, event.input, ctx.cwd);
     if (liveActivity) {
-      const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
       if (activeHere.length > 0) {
         store.update(activeHere[0].id, { activeForm: liveActivity });
         updateStartupBanner(ctx, store);
@@ -1810,9 +1844,9 @@ ${guard}` };
     if (lowerTool === "bash" || lowerTool === "powershell") {
       const cmd = String(event.input?.command || "");
       if (cmd.includes("git commit")) {
-        const msgMatch = cmd.match(/-m\s+["']([^"']+)["']/);
-        if (msgMatch && msgMatch[1]) {
-          const commitMsg = msgMatch[1];
+        const msgMatch = cmd.match(/(?:-m|-am)\s+(?:"([^"]+)"|'([^']+)')/i);
+        const commitMsg = msgMatch ? msgMatch[1] ?? msgMatch[2] : void 0;
+        if (commitMsg) {
           const candidates = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
           for (const a of candidates) {
             if (matchesCommitMessage(a, [commitMsg]).matched && isAnchorTargetingWorkspace(a, ctx.cwd)) {
@@ -2008,7 +2042,7 @@ ${guard}` };
         return;
       }
       if (parsed.mode === "now") {
-        const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
         if (activeHere.length === 0) {
           ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
           return;
@@ -2135,7 +2169,7 @@ ${guard}` };
   pi.registerCommand("now", {
     description: "Inspect active vibe-coding anchor and live activity pulse (/now)",
     handler: async (_args, ctx) => {
-      const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
       if (activeHere.length === 0) {
         ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
         return;

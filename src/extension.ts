@@ -158,11 +158,12 @@ export default function (pi: ExtensionAPI) {
     defaultDockController.resetGraceState();
     sweepQuietNotes(store);
 
-    const quietForHere = store
-      .list({ status: 'sleeping', all: true })
-      .filter(a => (a.files.length > 0 || (a.project && a.project !== 'global') || a.cwd) && isAnchorTargetingWorkspace(a, ctx.cwd));
-    for (const q of quietForHere) {
-      store.touch(q.id);
+    // Clear stale live activity indicator on cold start
+    const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+    for (const a of activeHere) {
+      if (a.activeForm) {
+        store.update(a.id, { activeForm: undefined });
+      }
     }
 
     // Replay current session branch for any existing `todo` tool snapshot
@@ -183,6 +184,15 @@ export default function (pi: ExtensionAPI) {
   // 1b. Fold completed steps from previous turn on `agent_start` (1-turn strikethrough grace period)
   pi.on('agent_start', async (_event: any, ctx: ExtensionContext) => {
     if (defaultDockController.foldCompletedStepsFromPreviousTurn()) {
+      updateStartupBanner(ctx, store);
+    }
+  });
+
+  // 1c. Clear active live pulse indicator when agent finishes turn and goes idle
+  pi.on('agent_end', async (_event: any, ctx: ExtensionContext) => {
+    const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length > 0 && activeHere[0].activeForm) {
+      store.update(activeHere[0].id, { activeForm: undefined });
       updateStartupBanner(ctx, store);
     }
   });
@@ -229,16 +239,18 @@ export default function (pi: ExtensionAPI) {
     if (messageTurns.length <= 1) {
       const snippet = renderColdStartAnchorsContext(store, ctx.cwd);
       if (snippet) {
-        return { systemPrompt: `${event.systemPrompt}\n\n${snippet}` };
+        const base = event.systemPrompt ? `${event.systemPrompt}\n\n` : '';
+        return { systemPrompt: `${base}${snippet}` };
       }
     } else {
       // Vibe-coding Goal-Drift Guard: tether the model strictly to the active anchor
-      const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+      const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
       if (activeHere.length > 0) {
         const p = activeHere[0];
         const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : '';
-        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, '')} "${p.title}"${bar}. Keep execution strictly focused on this anchor. Do not perform unrequested refactoring or modify unrelated files.`;
-        return { systemPrompt: `${event.systemPrompt}\n\n${guard}` };
+        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, '')} "${p.title}"${bar}. Primary goal for this session. Scope code changes strictly to this objective.`;
+        const base = event.systemPrompt ? `${event.systemPrompt}\n\n` : '';
+        return { systemPrompt: `${base}${guard}` };
       }
     }
   });
@@ -248,7 +260,7 @@ export default function (pi: ExtensionAPI) {
     const lowerTool = String(event.toolName || '').toLowerCase();
     const liveActivity = inferLiveActivityLabel(lowerTool, event.input as any, ctx.cwd);
     if (liveActivity) {
-      const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+      const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
       if (activeHere.length > 0) {
         store.update(activeHere[0].id, { activeForm: liveActivity });
         updateStartupBanner(ctx, store);
@@ -283,13 +295,13 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // (b) Real-time auto-tear on `git commit -m "..."`
+    // (b) Real-time auto-tear on `git commit -m "..."` or `git commit -am "..."` (handles apostrophes inside double quotes)
     if (lowerTool === 'bash' || lowerTool === 'powershell') {
       const cmd = String((event.input as any)?.command || '');
       if (cmd.includes('git commit')) {
-        const msgMatch = cmd.match(/-m\s+["']([^"']+)["']/);
-        if (msgMatch && msgMatch[1]) {
-          const commitMsg = msgMatch[1];
+        const msgMatch = cmd.match(/(?:-m|-am)\s+(?:"([^"]+)"|'([^']+)')/i);
+        const commitMsg = msgMatch ? (msgMatch[1] ?? msgMatch[2]) : undefined;
+        if (commitMsg) {
           const candidates = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active' || a.status === 'sleeping');
           for (const a of candidates) {
             if (matchesCommitMessage(a, [commitMsg]).matched && isAnchorTargetingWorkspace(a, ctx.cwd)) {
@@ -502,7 +514,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (parsed.mode === 'now') {
-        const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+        const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
         if (activeHere.length === 0) {
           ctx.ui.notify('⌖ No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', 'info');
           return;
@@ -640,7 +652,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand('now', {
     description: 'Inspect active vibe-coding anchor and live activity pulse (/now)',
     handler: async (_args: string, ctx: ExtensionCommandContext) => {
-      const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+      const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
       if (activeHere.length === 0) {
         ctx.ui.notify('⌖ No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', 'info');
         return;
