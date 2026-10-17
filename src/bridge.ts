@@ -83,6 +83,20 @@ export function inferLiveActivityLabel(
     }
   }
 
+  if (lower === 'grep') {
+    return 'searching codebase';
+  }
+  if (lower === 'find') {
+    return 'locating files';
+  }
+  if (lower === 'ls') {
+    return 'inspecting directory';
+  }
+  if (lower === 'subagent') {
+    const ag = (input as any).agent;
+    return ag ? `delegating to ${ag}` : 'running subagent';
+  }
+
   if (lower === 'bash' || lower === 'powershell') {
     const cmd = String((input as any).command || '').trim();
     if (!cmd) return undefined;
@@ -94,6 +108,18 @@ export function inferLiveActivityLabel(
     }
     if (/\bgit\s+commit\b/i.test(cmd)) {
       return 'committing changes';
+    }
+    if (/\bgit\s+(?:status|diff|log)\b/i.test(cmd)) {
+      return 'inspecting git status';
+    }
+    if (/\b(?:python|python3|py)\s+/i.test(cmd)) {
+      return 'running python script';
+    }
+    if (/\bcargo\s+/i.test(cmd)) {
+      return 'running cargo';
+    }
+    if (/\btypst\b/i.test(cmd)) {
+      return 'compiling typst';
     }
   }
 

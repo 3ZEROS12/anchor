@@ -55,6 +55,8 @@ Late at night, mid-way through fixing a bug, you spot a second issue in `src/aut
 | Mode / Action | What You Input | What the Engine Does | What You See | Best For |
 | :--- | :--- | :--- | :--- | :--- |
 | **Auto-Todo Checkpoint** | Agent calls `todo` (`2/5` done, then you quit or `/new`) | Mirrors unfinished `todo` snapshot + modified files + `sessionFile`; auto-clears at `5/5` | Next session shows: `⌖ #1 [■■□□ 2/5] Switch token ▸ Add tests (↪)` | Never losing unfinished `todo` lists across terminal restarts |
+| **Vibe-Coding Presence** | Agent runs tools (`edit`, `bash`, `grep`, `subagent`) | Intercepts `tool_call` in real time and updates live dock pulse | Below-editor dock shows live activity: `⌖ #1 [■■□□ 2/4] Refactor auth ▸ ◐ editing auth.ts` | Answering *"Hey, what are you doing right now?"* at a glance |
+| **Goal-Drift Guard** | Turns 2+ of active vibe-coding session | Injects compact 1-line anchor directive into system prompt | LLM stays strictly tethered to the active anchor; avoids unrequested rabbit-hole drift | Preventing runaway refactoring across long multi-turn sessions |
 | **Stick a Note (0ms)** | Type `pin: Fix auth in src/auth.ts` or `/pin ...` | Intercepts via input hook in `0ms`, extracts file paths, and links current `sessionFile` | 1-line strip appears below editor: `⌖ #1 Fix auth (app · auth.ts ↪)` | Capturing a tangent without derailing the current prompt |
 | **Track Multi-Step Work** | Type `/pin Refactor: 1. API 2. Cookie 3. Tests` then `/step 1` | Parses step list and increments `done / total` counter in `~/.anchor/state.json` | Strip updates in place: `⌖ #1 [■■□□ 2/3] Refactor ▸ Tests` | Multi-session features and long-running study goals |
 | **Resume Context (`/back`)** | Run `/back` (or `/anchor` ➔ `↪ Jump to session`) | Invokes Pi's native `ctx.switchSession(note.sessionFile)` | Terminal switches directly back to the original conversation transcript | Picking up a complex task days later with full history |
@@ -96,6 +98,7 @@ All state lives in `~/.anchor/` outside your git repository:
 | **Pi Slash** | `/pin <note>` | Stick a note (supports `[1/4]` or `1. A 2. B 3. C` steps) |
 | **Pi Slash** | `/anchor` | Open interactive sticky note board (tear off, `+1` step, `↪` jump to session, or read details) |
 | **Pi Slash** | `/step 1` | Advance progress bar on note `#1` by `+1` |
+| **Pi Slash** | `/now` (or `/anchor now`) | Inspect active vibe-coding anchor, current step, live tool pulse, and touched files |
 | **Pi Slash** | `/back` (or `/anchor jump 1`) | Teleport Pi back to the conversation session of the latest unfinished note/todo checkpoint |
 | **Pi Slash** | `/done 1` / `/anchor 1` | Tear off note `#1` and archive it |
 | **Pi Slash** | `/anchor undo` | Put back the most recently torn-off note |

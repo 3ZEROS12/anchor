@@ -13,6 +13,7 @@ import {
   sweepQuietNotes
 } from './store.ts';
 import {
+  formatOrigin,
   formatProgressBar,
   hasActiveUI,
   openAnchorDashboard,
@@ -27,7 +28,7 @@ import { inferLiveActivityLabel, replayTodoSnapshotFromBranch } from './bridge.t
 const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
 
 export function parseAnchorCommandInput(raw: string): {
-  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin';
+  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now';
   targetId?: string;
   delta?: number;
   title?: string;
@@ -35,6 +36,9 @@ export function parseAnchorCommandInput(raw: string): {
   const trimmed = (raw || '').trim();
   if (!trimmed || trimmed === 'list' || trimmed === 'ls') {
     return { mode: 'dashboard' };
+  }
+  if (trimmed === 'now' || trimmed === 'what' || trimmed === 'status' || trimmed === 'hey') {
+    return { mode: 'now' };
   }
   if (trimmed === 'undo') {
     return { mode: 'undo' };
@@ -218,7 +222,7 @@ export default function (pi: ExtensionAPI) {
     return { action: 'handled' };
   });
 
-  // 3. Turn 1 Cold-Start Brief (0 tokens on Turn 2+)
+  // 3. Turn 1 Cold-Start Brief & Vibe-Coding Goal-Drift Guard
   pi.on('before_agent_start', async (event: any, ctx: ExtensionContext) => {
     const entries = (ctx as any).sessionManager?.getEntries() || [];
     const messageTurns = entries.filter((e: any) => e.type === 'message');
@@ -226,6 +230,28 @@ export default function (pi: ExtensionAPI) {
       const snippet = renderColdStartAnchorsContext(store, ctx.cwd);
       if (snippet) {
         return { systemPrompt: `${event.systemPrompt}\n\n${snippet}` };
+      }
+    } else {
+      // Vibe-coding Goal-Drift Guard: tether the model strictly to the active anchor
+      const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+      if (activeHere.length > 0) {
+        const p = activeHere[0];
+        const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : '';
+        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, '')} "${p.title}"${bar}. Keep execution strictly focused on this anchor. Do not perform unrequested refactoring or modify unrelated files.`;
+        return { systemPrompt: `${event.systemPrompt}\n\n${guard}` };
+      }
+    }
+  });
+
+  // 3b. Real-time live activity pulse on tool_call (updates dock BEFORE and DURING tool execution)
+  pi.on('tool_call', async (event: any, ctx: ExtensionContext) => {
+    const lowerTool = String(event.toolName || '').toLowerCase();
+    const liveActivity = inferLiveActivityLabel(lowerTool, event.input as any, ctx.cwd);
+    if (liveActivity) {
+      const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+      if (activeHere.length > 0) {
+        store.update(activeHere[0].id, { activeForm: liveActivity });
+        updateStartupBanner(ctx, store);
       }
     }
   });
@@ -475,6 +501,22 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
+      if (parsed.mode === 'now') {
+        const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+        if (activeHere.length === 0) {
+          ctx.ui.notify('⌖ No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', 'info');
+          return;
+        }
+        const p = activeHere[0];
+        const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : '';
+        const origin = formatOrigin(p);
+        const activity = p.activeForm ? ` • Live Pulse: ◐ ${p.activeForm}` : '';
+        const files = p.files && p.files.length > 0 ? ` • Files: ${p.files.slice(0, 3).join(', ')}` : '';
+        const msg = `⌖ Active Anchor #${p.id.replace(/^anc-/, '')}${bar}: "${p.title}" (${origin})${activity}${files}`;
+        ctx.ui.notify(msg, 'info');
+        return;
+      }
+
       if (parsed.mode === 'undo') {
         try {
           const restored = store.undoSettle();
@@ -592,6 +634,24 @@ export default function (pi: ExtensionAPI) {
       const settled = store.settle(resolvedId, { settledBy: 'manual' });
       ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+
+  pi.registerCommand('now', {
+    description: 'Inspect active vibe-coding anchor and live activity pulse (/now)',
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+      if (activeHere.length === 0) {
+        ctx.ui.notify('⌖ No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', 'info');
+        return;
+      }
+      const p = activeHere[0];
+      const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : '';
+      const origin = formatOrigin(p);
+      const activity = p.activeForm ? ` • Live Pulse: ◐ ${p.activeForm}` : '';
+      const files = p.files && p.files.length > 0 ? ` • Files: ${p.files.slice(0, 3).join(', ')}` : '';
+      const msg = `⌖ Active Anchor #${p.id.replace(/^anc-/, '')}${bar}: "${p.title}" (${origin})${activity}${files}`;
+      ctx.ui.notify(msg, 'info');
     }
   });
 

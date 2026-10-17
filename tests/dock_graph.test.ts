@@ -16,6 +16,7 @@ import {
   inferLiveActivityLabel,
   replayTodoSnapshotFromBranch
 } from '../src/bridge.ts';
+import { parseAnchorCommandInput } from '../src/extension.ts';
 import { AnchorDockController } from '../src/dock.ts';
 import type { AnchorStep } from '../src/types.ts';
 
@@ -84,8 +85,22 @@ test('Bridge - replayTodoSnapshotFromBranch, convertTodoTasksToSteps, and inferL
   assert.strictEqual(inferLiveActivityLabel('edit', { path: 'src/auth/jwt.ts' }), 'editing jwt.ts');
   assert.strictEqual(inferLiveActivityLabel('write', { path: 'src/index.ts' }), 'writing index.ts');
   assert.strictEqual(inferLiveActivityLabel('read', { path: 'README.md' }), 'reading README.md');
+  assert.strictEqual(inferLiveActivityLabel('grep', { pattern: 'token' }), 'searching codebase');
+  assert.strictEqual(inferLiveActivityLabel('find', { pattern: '*.ts' }), 'locating files');
+  assert.strictEqual(inferLiveActivityLabel('ls', {}), 'inspecting directory');
+  assert.strictEqual(inferLiveActivityLabel('subagent', { agent: 'oracle' }), 'delegating to oracle');
   assert.strictEqual(inferLiveActivityLabel('bash', { command: 'npm test' }), 'running tests');
   assert.strictEqual(inferLiveActivityLabel('bash', { command: 'npm run build' }), 'building project');
+  assert.strictEqual(inferLiveActivityLabel('bash', { command: 'git status' }), 'inspecting git status');
+  assert.strictEqual(inferLiveActivityLabel('bash', { command: 'python script.py' }), 'running python script');
+  assert.strictEqual(inferLiveActivityLabel('bash', { command: 'cargo check' }), 'running cargo');
+  assert.strictEqual(inferLiveActivityLabel('bash', { command: 'typst compile doc.typ' }), 'compiling typst');
+
+  // Command input: now / what / status / hey
+  assert.strictEqual(parseAnchorCommandInput('now').mode, 'now');
+  assert.strictEqual(parseAnchorCommandInput('what').mode, 'now');
+  assert.strictEqual(parseAnchorCommandInput('status').mode, 'now');
+  assert.strictEqual(parseAnchorCommandInput('hey').mode, 'now');
 });
 
 test('Dock - AnchorDockController renders multi-row Tree Dock, folds completed steps on next turn, and toggles 1-line mode', () => {

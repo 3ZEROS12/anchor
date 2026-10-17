@@ -254,6 +254,19 @@ function inferLiveActivityLabel(toolName, input, _cwd) {
       return `reading ${base}`;
     }
   }
+  if (lower === "grep") {
+    return "searching codebase";
+  }
+  if (lower === "find") {
+    return "locating files";
+  }
+  if (lower === "ls") {
+    return "inspecting directory";
+  }
+  if (lower === "subagent") {
+    const ag = input.agent;
+    return ag ? `delegating to ${ag}` : "running subagent";
+  }
   if (lower === "bash" || lower === "powershell") {
     const cmd = String(input.command || "").trim();
     if (!cmd) return void 0;
@@ -265,6 +278,18 @@ function inferLiveActivityLabel(toolName, input, _cwd) {
     }
     if (/\bgit\s+commit\b/i.test(cmd)) {
       return "committing changes";
+    }
+    if (/\bgit\s+(?:status|diff|log)\b/i.test(cmd)) {
+      return "inspecting git status";
+    }
+    if (/\b(?:python|python3|py)\s+/i.test(cmd)) {
+      return "running python script";
+    }
+    if (/\bcargo\s+/i.test(cmd)) {
+      return "running cargo";
+    }
+    if (/\btypst\b/i.test(cmd)) {
+      return "compiling typst";
     }
   }
   return void 0;
@@ -1581,6 +1606,9 @@ function parseAnchorCommandInput(raw) {
   if (!trimmed || trimmed === "list" || trimmed === "ls") {
     return { mode: "dashboard" };
   }
+  if (trimmed === "now" || trimmed === "what" || trimmed === "status" || trimmed === "hey") {
+    return { mode: "now" };
+  }
   if (trimmed === "undo") {
     return { mode: "undo" };
   }
@@ -1731,6 +1759,27 @@ function extension_default(pi) {
         return { systemPrompt: `${event.systemPrompt}
 
 ${snippet}` };
+      }
+    } else {
+      const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+      if (activeHere.length > 0) {
+        const p = activeHere[0];
+        const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
+        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, "")} "${p.title}"${bar}. Keep execution strictly focused on this anchor. Do not perform unrequested refactoring or modify unrelated files.`;
+        return { systemPrompt: `${event.systemPrompt}
+
+${guard}` };
+      }
+    }
+  });
+  pi.on("tool_call", async (event, ctx) => {
+    const lowerTool = String(event.toolName || "").toLowerCase();
+    const liveActivity = inferLiveActivityLabel(lowerTool, event.input, ctx.cwd);
+    if (liveActivity) {
+      const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+      if (activeHere.length > 0) {
+        store.update(activeHere[0].id, { activeForm: liveActivity });
+        updateStartupBanner(ctx, store);
       }
     }
   });
@@ -1952,6 +2001,21 @@ ${snippet}` };
         await openAnchorDashboard(ctx, store);
         return;
       }
+      if (parsed.mode === "now") {
+        const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
+          return;
+        }
+        const p = activeHere[0];
+        const bar2 = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
+        const origin = formatOrigin(p);
+        const activity = p.activeForm ? ` \u2022 Live Pulse: \u25D0 ${p.activeForm}` : "";
+        const files = p.files && p.files.length > 0 ? ` \u2022 Files: ${p.files.slice(0, 3).join(", ")}` : "";
+        const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar2}: "${p.title}" (${origin})${activity}${files}`;
+        ctx.ui.notify(msg, "info");
+        return;
+      }
       if (parsed.mode === "undo") {
         try {
           const restored = store.undoSettle();
@@ -2060,6 +2124,23 @@ ${snippet}` };
       const settled = store.settle(resolvedId, { settledBy: "manual" });
       ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.registerCommand("now", {
+    description: "Inspect active vibe-coding anchor and live activity pulse (/now)",
+    handler: async (_args, ctx) => {
+      const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+      if (activeHere.length === 0) {
+        ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
+        return;
+      }
+      const p = activeHere[0];
+      const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
+      const origin = formatOrigin(p);
+      const activity = p.activeForm ? ` \u2022 Live Pulse: \u25D0 ${p.activeForm}` : "";
+      const files = p.files && p.files.length > 0 ? ` \u2022 Files: ${p.files.slice(0, 3).join(", ")}` : "";
+      const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar}: "${p.title}" (${origin})${activity}${files}`;
+      ctx.ui.notify(msg, "info");
     }
   });
   pi.registerCommand("anchors", {
