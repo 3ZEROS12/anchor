@@ -38,6 +38,7 @@ import {
   parseQuickNoteInput,
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
+  renderMissionReceipt,
   replayTodoSnapshotFromBranch,
   resolveAnchorTarget,
   selectDockStepLayout,
@@ -51,7 +52,7 @@ import {
   updateStartupBanner,
   validateAnchorDependencies,
   validateStepDependencies
-} from "./chunk-RXTH6CLC.js";
+} from "./chunk-YIJS5EZX.js";
 export {
   AnchorDockController,
   AnchorStore,
@@ -92,6 +93,7 @@ export {
   parseQuickNoteInput,
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
+  renderMissionReceipt,
   replayTodoSnapshotFromBranch,
   resolveAnchorTarget,
   selectDockStepLayout,

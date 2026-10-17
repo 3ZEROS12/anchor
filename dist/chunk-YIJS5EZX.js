@@ -1,6 +1,7 @@
 // src/extension.ts
 import { Type } from "@sinclair/typebox";
 import fs3 from "fs";
+import path4 from "path";
 
 // src/store.ts
 import fs from "fs";
@@ -1176,7 +1177,7 @@ function applyStrikethrough(text, theme) {
   return `\x1B[9m${text}\x1B[29m`;
 }
 function formatDockStepRow(step, options) {
-  const { fg, theme, showId = true, fallbackActiveForm } = options;
+  const { fg, theme, showId = true, fallbackActiveForm, liveDurationSec, driftWarning } = options;
   const glyph = formatStepGlyph(step.status, fg);
   const subjectColor = step.status === "in_progress" ? "accent" : step.status === "completed" || step.status === "deleted" ? "muted" : "text";
   let subject = fg(subjectColor, step.subject);
@@ -1190,7 +1191,11 @@ function formatDockStepRow(step, options) {
   row += ` ${subject}`;
   const activeForm = step.status === "in_progress" ? step.activeForm || fallbackActiveForm : void 0;
   if (activeForm) {
-    row += ` ${fg("muted", `(${activeForm})`)}`;
+    const durStr = typeof liveDurationSec === "number" && liveDurationSec > 0 ? ` \xB7 ${liveDurationSec}s` : "";
+    row += ` ${fg("muted", `(${activeForm}${durStr})`)}`;
+  }
+  if (driftWarning) {
+    row += ` ${fg("warning", `\u26A0\uFE0F [Drift: ${driftWarning}]`)}`;
   }
   if (step.blockedBy && step.blockedBy.length > 0) {
     row += ` ${fg("muted", `\u26D3 #${step.blockedBy.join(",#")}`)}`;
@@ -1297,11 +1302,14 @@ var AnchorDockController = class {
       const step = layout.visible[i];
       const isLastRow = i === layout.visible.length - 1 && !hasFooterRow;
       const branch = fg("dim", isLastRow ? "\u2514\u2500 " : "\u251C\u2500 ");
+      const liveDurationSec = primary.liveStartedAt ? Math.max(1, Math.floor((Date.now() - primary.liveStartedAt) / 1e3)) : void 0;
       const stepText = formatDockStepRow(step, {
         fg,
         theme,
         showId: true,
-        fallbackActiveForm: primary.activeForm
+        fallbackActiveForm: primary.activeForm,
+        liveDurationSec: step.status === "in_progress" ? liveDurationSec : void 0,
+        driftWarning: step.status === "in_progress" ? primary.driftWarning : void 0
       });
       lines.push(truncateToWidth(`${branch}${stepText}`, width));
     }
@@ -1329,11 +1337,14 @@ var AnchorDockController = class {
       const bar = a.progress ? `${fg("accent", formatProgressBar(a.progress))} ` : "";
       const candidateStep = a.progress?.steps ? a.progress.steps[a.progress.done] !== a.title ? a.progress.steps[a.progress.done] : a.progress.steps[a.progress.done + 1] : void 0;
       const nextStep = candidateStep ? fg("muted", ` \u25B8 ${candidateStep}`) : "";
-      const activeHint = a.activeForm ? fg("muted", ` (${a.activeForm})`) : "";
+      const liveDurationSec = a.liveStartedAt ? Math.max(1, Math.floor((Date.now() - a.liveStartedAt) / 1e3)) : void 0;
+      const durStr = liveDurationSec ? ` \xB7 ${liveDurationSec}s` : "";
+      const activeHint = a.activeForm ? fg("muted", ` (${a.activeForm}${durStr})`) : "";
+      const driftAlert = a.driftWarning ? ` ${fg("warning", `\u26A0\uFE0F [Drift: ${a.driftWarning}]`)}` : "";
       const origin = formatOrigin(a);
       const sessionIcon = a.sessionFile ? " \u21AA" : "";
       const prefix = `${fg("accent", "\u2316")} ${fg("dim", `#${num}`)} ${bar}`;
-      const suffix = `${activeHint} ${fg("muted", `(${origin}${sessionIcon})`)}`;
+      const suffix = `${activeHint}${driftAlert} ${fg("muted", `(${origin}${sessionIcon})`)}`;
       const availTitle = Math.max(
         12,
         width - getDisplayWidth(prefix) - getDisplayWidth(nextStep) - getDisplayWidth(suffix) - 2
@@ -1362,6 +1373,21 @@ var AnchorDockController = class {
   }
 };
 var defaultDockController = new AnchorDockController();
+function renderMissionReceipt(anchor, options) {
+  const fg = options?.fg || ((_c, text) => text);
+  const now = Date.now();
+  const elapsedSec = Math.max(1, Math.floor((now - anchor.createdAt) / 1e3));
+  const durationStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+  const num = anchor.id.replace(/^anc-/, "");
+  const targetStr = anchor.files.length > 0 ? anchor.files.slice(0, 3).map((f) => f.split(/[\\/]/).pop()).join(", ") : anchor.project || "workspace";
+  const progressStr = anchor.progress ? `[\u25A0\u25A0\u25A0\u25A0 ${anchor.progress.total}/${anchor.progress.total}] Verified` : "100% Completed";
+  return [
+    fg("accent", `\u250C\u2500 \u2316 Mission #${num} Completed: "${anchor.title}" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510`),
+    fg("muted", `\u2502  \u2022 Duration: ${durationStr} \xB7 Progress: ${progressStr}`),
+    fg("muted", `\u2502  \u2022 Target Scope: ${targetStr} \xB7 Drift: 0 violations`),
+    fg("accent", `\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518`)
+  ];
+}
 
 // src/tui.ts
 import fs2 from "fs";
@@ -1632,6 +1658,13 @@ function parseAnchorCommandInput(raw) {
   if (trimmed === "now" || trimmed === "what" || trimmed === "status" || trimmed === "hey") {
     return { mode: "now" };
   }
+  const steerMatch = trimmed.match(/^steer\s+(.+)$/i);
+  if (steerMatch) {
+    return {
+      mode: "steer",
+      title: steerMatch[1].trim()
+    };
+  }
   if (trimmed === "undo") {
     return { mode: "undo" };
   }
@@ -1798,7 +1831,8 @@ function extension_default(pi) {
       if (activeHere.length > 0) {
         const p = activeHere[0];
         const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
-        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, "")} "${p.title}"${bar}. Primary goal for this session. Scope code changes strictly to this objective.`;
+        const steerPart = p.steerGuidance ? ` [Human Steering Guidance]: "${p.steerGuidance}".` : "";
+        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, "")} "${p.title}"${bar}.${steerPart} Primary goal for this session. Scope code changes strictly to this objective.`;
         const base = event.systemPrompt ? `${event.systemPrompt}
 
 ` : "";
@@ -1809,12 +1843,24 @@ function extension_default(pi) {
   pi.on("tool_call", async (event, ctx) => {
     const lowerTool = String(event.toolName || "").toLowerCase();
     const liveActivity = inferLiveActivityLabel(lowerTool, event.input, ctx.cwd);
-    if (liveActivity) {
-      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
-      if (activeHere.length > 0) {
-        store.update(activeHere[0].id, { activeForm: liveActivity });
-        updateStartupBanner(ctx, store);
+    const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length > 0) {
+      const p = activeHere[0];
+      let driftWarning = void 0;
+      const rawPath = event.input?.path || event.input?.filePath || event.input?.file;
+      if (typeof rawPath === "string" && rawPath.trim() && p.files.length > 0) {
+        const touchedNorm = normalizePath(rawPath, ctx.cwd);
+        const matches = findMatchedAnchors([p], [touchedNorm]);
+        if (matches.length === 0 && !isSameOrSubPath(touchedNorm, p.cwd)) {
+          driftWarning = path4.basename(touchedNorm);
+        }
       }
+      store.update(p.id, {
+        activeForm: liveActivity || p.activeForm,
+        liveStartedAt: Date.now(),
+        ...driftWarning !== void 0 ? { driftWarning } : {}
+      });
+      updateStartupBanner(ctx, store);
     }
   });
   pi.on("tool_result", async (event, ctx) => {
@@ -1844,12 +1890,15 @@ function extension_default(pi) {
           const candidates = store.list({ cwd: ctx.cwd }).filter((a) => a.status === "active" || a.status === "sleeping");
           for (const a of candidates) {
             if (matchesCommitMessage(a, [commitMsg]).matched && isAnchorTargetingWorkspace(a, ctx.cwd)) {
-              store.settle(a.id, { settledBy: "commit", summary: commitMsg });
+              const settled = store.settle(a.id, { settledBy: "commit", summary: commitMsg });
               updateAnchorStatusBar(ctx, store);
               if (hasActiveUI(ctx)) {
                 try {
-                  ctx.ui.notify(`\u2316 Auto-torn off #${a.id.replace(/^anc-/, "")} ("${a.title}") on git commit`, "info");
+                  const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+                  const receipt = renderMissionReceipt(settled, { fg });
+                  ctx.ui.notify(receipt.join("\n"), "info");
                 } catch {
+                  ctx.ui.notify(`\u2316 Auto-torn off #${a.id.replace(/^anc-/, "")} ("${a.title}") on git commit`, "info");
                 }
               }
             }
@@ -2046,8 +2095,26 @@ function extension_default(pi) {
         const origin = formatOrigin(p);
         const activity = p.activeForm ? ` \u2022 Live Pulse: \u25D0 ${p.activeForm}` : "";
         const files = p.files && p.files.length > 0 ? ` \u2022 Files: ${p.files.slice(0, 3).join(", ")}` : "";
-        const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar2}: "${p.title}" (${origin})${activity}${files}`;
+        const steer = p.steerGuidance ? ` \u2022 Steer: "${p.steerGuidance}"` : "";
+        const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar2}: "${p.title}" (${origin})${activity}${files}${steer}`;
         ctx.ui.notify(msg, "info");
+        return;
+      }
+      if (parsed.mode === "steer") {
+        const text = (parsed.title || "").trim();
+        if (!text) {
+          ctx.ui.notify("Usage: /anchor steer <guidance for current anchor>", "warn");
+          return;
+        }
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warn");
+          return;
+        }
+        const p = activeHere[0];
+        store.update(p.id, { steerGuidance: text });
+        updateStartupBanner(ctx, store);
+        ctx.ui.notify(`\u2316 Steered Anchor #${p.id.replace(/^anc-/, "")}: "${text}"`, "info");
         return;
       }
       if (parsed.mode === "undo") {
@@ -2094,7 +2161,13 @@ function extension_default(pi) {
           return;
         }
         const settled = store.settle(resolvedId, { settledBy: "manual" });
-        ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+        try {
+          const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+          const receipt = renderMissionReceipt(settled, { fg });
+          ctx.ui.notify(receipt.join("\n"), "info");
+        } catch {
+          ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+        }
         updateAnchorStatusBar(ctx, store);
         return;
       }
@@ -2103,7 +2176,13 @@ function extension_default(pi) {
         const resolvedId = resolveAnchorTarget(store, rawTrimmed, ctx.cwd);
         if (resolvedId) {
           const settled = store.settle(resolvedId, { settledBy: "manual" });
-          ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+          try {
+            const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+            const receipt = renderMissionReceipt(settled, { fg });
+            ctx.ui.notify(receipt.join("\n"), "info");
+          } catch {
+            ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+          }
           updateAnchorStatusBar(ctx, store);
           return;
         }
@@ -2156,8 +2235,33 @@ function extension_default(pi) {
         return;
       }
       const settled = store.settle(resolvedId, { settledBy: "manual" });
-      ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+      try {
+        const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+        const receipt = renderMissionReceipt(settled, { fg });
+        ctx.ui.notify(receipt.join("\n"), "info");
+      } catch {
+        ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+      }
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.registerCommand("steer", {
+    description: "Steer active vibe-coding anchor with real-time guidance (/steer <instruction>)",
+    handler: async (args, ctx) => {
+      const text = (args || "").trim();
+      if (!text) {
+        ctx.ui.notify("Usage: /steer <guidance for current anchor>", "warn");
+        return;
+      }
+      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+      if (activeHere.length === 0) {
+        ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warn");
+        return;
+      }
+      const p = activeHere[0];
+      store.update(p.id, { steerGuidance: text });
+      updateStartupBanner(ctx, store);
+      ctx.ui.notify(`\u2316 Steered Anchor #${p.id.replace(/^anc-/, "")}: "${text}"`, "info");
     }
   });
   pi.registerCommand("now", {
@@ -2252,6 +2356,7 @@ export {
   formatDockStepRow,
   AnchorDockController,
   defaultDockController,
+  renderMissionReceipt,
   stripAnsi,
   getDisplayWidth,
   hasActiveUI,

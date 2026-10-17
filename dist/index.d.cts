@@ -1,5 +1,5 @@
-import { A as AnchorStep, a as AnchorProgress, D as DockStepLayout, S as StepCounts, b as Anchor, T as TodoTaskItem, c as StepStatus, d as AnchorStore } from './extension-BBLf_o0_.cjs';
-export { e as AnchorEvidence, f as AnchorPriority, g as AnchorStatus, h as AnchorStoreState, C as COMMENT_FORMATS, i as DEFAULT_MAX_DOCK_LINES, M as MS_PER_DAY, Q as QUIET_AFTER_DAYS, j as TouchMatchResult, k as acquireSyncLock, l as atomicRenameWithRetry, m as extractPathsFromText, n as extractProgressFromText, o as findMatchedAnchors, p as getDefaultStorageDir, q as globToRegExp, r as isAnchorTargetingWorkspace, s as isSameOrSubPath, t as makeSafeTaskAnnotation, u as matchAnchorAgainstTouchedFiles, v as matchesCommitMessage, w as normalizePath, x as parseAnchorCommandInput, y as parseQuickNoteInput, z as renderActiveAnchorsContext, B as renderColdStartAnchorsContext, E as resolveAnchorTarget, F as sweepQuietNotes } from './extension-BBLf_o0_.cjs';
+import { A as AnchorStep, a as AnchorProgress, D as DockStepLayout, S as StepCounts, b as Anchor, T as TodoTaskItem, c as StepStatus, d as AnchorStore } from './extension-Bhf89YEH.cjs';
+export { e as AnchorEvidence, f as AnchorPriority, g as AnchorStatus, h as AnchorStoreState, C as COMMENT_FORMATS, i as DEFAULT_MAX_DOCK_LINES, M as MS_PER_DAY, Q as QUIET_AFTER_DAYS, j as TouchMatchResult, k as acquireSyncLock, l as atomicRenameWithRetry, m as extractPathsFromText, n as extractProgressFromText, o as findMatchedAnchors, p as getDefaultStorageDir, q as globToRegExp, r as isAnchorTargetingWorkspace, s as isSameOrSubPath, t as makeSafeTaskAnnotation, u as matchAnchorAgainstTouchedFiles, v as matchesCommitMessage, w as normalizePath, x as parseAnchorCommandInput, y as parseQuickNoteInput, z as renderActiveAnchorsContext, B as renderColdStartAnchorsContext, E as resolveAnchorTarget, F as sweepQuietNotes } from './extension-Bhf89YEH.cjs';
 import { ExtensionContext, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
 
 /**
@@ -72,6 +72,8 @@ declare function formatDockStepRow(step: AnchorStep, options: {
     theme?: any;
     showId?: boolean;
     fallbackActiveForm?: string;
+    liveDurationSec?: number;
+    driftWarning?: string;
 }): string;
 /**
  * Stateful Dock Controller managing:
@@ -106,6 +108,12 @@ declare class AnchorDockController {
     private renderSingleLineStrip;
 }
 declare const defaultDockController: AnchorDockController;
+/**
+ * Render elegant ASCII Mission Completion Receipt upon anchor settlement
+ */
+declare function renderMissionReceipt(anchor: Anchor, options?: {
+    fg?: (color: string, text: string) => string;
+}): string[];
 
 declare function stripAnsi(str: string): string;
 /**
@@ -149,4 +157,4 @@ declare function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore):
  */
 declare function openAnchorDashboard(ctx: ExtensionContext | ExtensionCommandContext, store: AnchorStore): Promise<void>;
 
-export { Anchor, AnchorDockController, AnchorProgress, AnchorStep, AnchorStore, DockStepLayout, STATUS_GLYPH, StepCounts, StepStatus, TodoTaskItem, applyStrikethrough, convertTodoTasksToSteps, defaultDockController, deriveStepBlocks, formatDockStepRow, formatOrigin, formatProgressBar, formatRelativeAge, formatStepGlyph, getDisplayWidth, hasActiveUI, inferLiveActivityLabel, materializeSteps, openAnchorDashboard, padToWidth, replayTodoSnapshotFromBranch, selectDockStepLayout, selectStepCounts, sortAnchorsForDisplay, stripAnsi, syncProgressFromItems, truncateToWidth, updateAnchorStatusBar, updateStartupBanner, validateAnchorDependencies, validateStepDependencies };
+export { Anchor, AnchorDockController, AnchorProgress, AnchorStep, AnchorStore, DockStepLayout, STATUS_GLYPH, StepCounts, StepStatus, TodoTaskItem, applyStrikethrough, convertTodoTasksToSteps, defaultDockController, deriveStepBlocks, formatDockStepRow, formatOrigin, formatProgressBar, formatRelativeAge, formatStepGlyph, getDisplayWidth, hasActiveUI, inferLiveActivityLabel, materializeSteps, openAnchorDashboard, padToWidth, renderMissionReceipt, replayTodoSnapshotFromBranch, selectDockStepLayout, selectStepCounts, sortAnchorsForDisplay, stripAnsi, syncProgressFromItems, truncateToWidth, updateAnchorStatusBar, updateStartupBanner, validateAnchorDependencies, validateStepDependencies };

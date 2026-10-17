@@ -1,6 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
 import { Type } from '@sinclair/typebox';
 import fs from 'node:fs';
+import path from 'node:path';
 import {
   AnchorStore,
   findMatchedAnchors,
@@ -22,13 +23,13 @@ import {
   updateAnchorStatusBar,
   updateStartupBanner
 } from './tui.ts';
-import { defaultDockController } from './dock.ts';
+import { defaultDockController, renderMissionReceipt } from './dock.ts';
 import { inferLiveActivityLabel, replayTodoSnapshotFromBranch } from './bridge.ts';
 
 const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
 
 export function parseAnchorCommandInput(raw: string): {
-  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now';
+  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer';
   targetId?: string;
   delta?: number;
   title?: string;
@@ -39,6 +40,13 @@ export function parseAnchorCommandInput(raw: string): {
   }
   if (trimmed === 'now' || trimmed === 'what' || trimmed === 'status' || trimmed === 'hey') {
     return { mode: 'now' };
+  }
+  const steerMatch = trimmed.match(/^steer\s+(.+)$/i);
+  if (steerMatch) {
+    return {
+      mode: 'steer',
+      title: steerMatch[1].trim()
+    };
   }
   if (trimmed === 'undo') {
     return { mode: 'undo' };
@@ -248,7 +256,8 @@ export default function (pi: ExtensionAPI) {
       if (activeHere.length > 0) {
         const p = activeHere[0];
         const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : '';
-        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, '')} "${p.title}"${bar}. Primary goal for this session. Scope code changes strictly to this objective.`;
+        const steerPart = p.steerGuidance ? ` [Human Steering Guidance]: "${p.steerGuidance}".` : '';
+        const guard = `[Active Anchor Focus]: #${p.id.replace(/^anc-/, '')} "${p.title}"${bar}.${steerPart} Primary goal for this session. Scope code changes strictly to this objective.`;
         const base = event.systemPrompt ? `${event.systemPrompt}\n\n` : '';
         return { systemPrompt: `${base}${guard}` };
       }
@@ -259,12 +268,27 @@ export default function (pi: ExtensionAPI) {
   pi.on('tool_call', async (event: any, ctx: ExtensionContext) => {
     const lowerTool = String(event.toolName || '').toLowerCase();
     const liveActivity = inferLiveActivityLabel(lowerTool, event.input as any, ctx.cwd);
-    if (liveActivity) {
-      const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
-      if (activeHere.length > 0) {
-        store.update(activeHere[0].id, { activeForm: liveActivity });
-        updateStartupBanner(ctx, store);
+    const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length > 0) {
+      const p = activeHere[0];
+      let driftWarning: string | undefined = undefined;
+
+      // Watchdog: detect if tool touches files outside the declared anchor scope
+      const rawPath = (event.input as any)?.path || (event.input as any)?.filePath || (event.input as any)?.file;
+      if (typeof rawPath === 'string' && rawPath.trim() && p.files.length > 0) {
+        const touchedNorm = normalizePath(rawPath, ctx.cwd);
+        const matches = findMatchedAnchors([p], [touchedNorm]);
+        if (matches.length === 0 && !isSameOrSubPath(touchedNorm, p.cwd)) {
+          driftWarning = path.basename(touchedNorm);
+        }
       }
+
+      store.update(p.id, {
+        activeForm: liveActivity || p.activeForm,
+        liveStartedAt: Date.now(),
+        ...(driftWarning !== undefined ? { driftWarning } : {})
+      });
+      updateStartupBanner(ctx, store);
     }
   });
 
@@ -305,12 +329,16 @@ export default function (pi: ExtensionAPI) {
           const candidates = store.list({ cwd: ctx.cwd }).filter(a => a.status === 'active' || a.status === 'sleeping');
           for (const a of candidates) {
             if (matchesCommitMessage(a, [commitMsg]).matched && isAnchorTargetingWorkspace(a, ctx.cwd)) {
-              store.settle(a.id, { settledBy: 'commit', summary: commitMsg });
+              const settled = store.settle(a.id, { settledBy: 'commit', summary: commitMsg });
               updateAnchorStatusBar(ctx, store);
               if (hasActiveUI(ctx)) {
                 try {
+                  const fg = (c: string, t: string) => (ctx.ui as any).theme?.fg ? (ctx.ui as any).theme.fg(c, t) : t;
+                  const receipt = renderMissionReceipt(settled, { fg });
+                  ctx.ui.notify(receipt.join('\n'), 'info');
+                } catch {
                   ctx.ui.notify(`⌖ Auto-torn off #${a.id.replace(/^anc-/, '')} ("${a.title}") on git commit`, 'info');
-                } catch {}
+                }
               }
             }
           }
@@ -524,8 +552,27 @@ export default function (pi: ExtensionAPI) {
         const origin = formatOrigin(p);
         const activity = p.activeForm ? ` • Live Pulse: ◐ ${p.activeForm}` : '';
         const files = p.files && p.files.length > 0 ? ` • Files: ${p.files.slice(0, 3).join(', ')}` : '';
-        const msg = `⌖ Active Anchor #${p.id.replace(/^anc-/, '')}${bar}: "${p.title}" (${origin})${activity}${files}`;
+        const steer = p.steerGuidance ? ` • Steer: "${p.steerGuidance}"` : '';
+        const msg = `⌖ Active Anchor #${p.id.replace(/^anc-/, '')}${bar}: "${p.title}" (${origin})${activity}${files}${steer}`;
         ctx.ui.notify(msg, 'info');
+        return;
+      }
+
+      if (parsed.mode === 'steer') {
+        const text = (parsed.title || '').trim();
+        if (!text) {
+          ctx.ui.notify('Usage: /anchor steer <guidance for current anchor>', 'warn');
+          return;
+        }
+        const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('⌖ No active anchor to steer. Type "pin: <goal>" first!', 'warn');
+          return;
+        }
+        const p = activeHere[0];
+        store.update(p.id, { steerGuidance: text });
+        updateStartupBanner(ctx, store);
+        ctx.ui.notify(`⌖ Steered Anchor #${p.id.replace(/^anc-/, '')}: "${text}"`, 'info');
         return;
       }
 
@@ -577,7 +624,13 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         const settled = store.settle(resolvedId, { settledBy: 'manual' });
-        ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
+        try {
+          const fg = (c: string, t: string) => (ctx.ui as any).theme?.fg ? (ctx.ui as any).theme.fg(c, t) : t;
+          const receipt = renderMissionReceipt(settled, { fg });
+          ctx.ui.notify(receipt.join('\n'), 'info');
+        } catch {
+          ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
+        }
         updateAnchorStatusBar(ctx, store);
         return;
       }
@@ -587,7 +640,13 @@ export default function (pi: ExtensionAPI) {
         const resolvedId = resolveAnchorTarget(store, rawTrimmed, ctx.cwd);
         if (resolvedId) {
           const settled = store.settle(resolvedId, { settledBy: 'manual' });
-          ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
+          try {
+            const fg = (c: string, t: string) => (ctx.ui as any).theme?.fg ? (ctx.ui as any).theme.fg(c, t) : t;
+            const receipt = renderMissionReceipt(settled, { fg });
+            ctx.ui.notify(receipt.join('\n'), 'info');
+          } catch {
+            ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
+          }
           updateAnchorStatusBar(ctx, store);
           return;
         }
@@ -644,8 +703,34 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       const settled = store.settle(resolvedId, { settledBy: 'manual' });
-      ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
+      try {
+        const fg = (c: string, t: string) => (ctx.ui as any).theme?.fg ? (ctx.ui as any).theme.fg(c, t) : t;
+        const receipt = renderMissionReceipt(settled, { fg });
+        ctx.ui.notify(receipt.join('\n'), 'info');
+      } catch {
+        ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
+      }
       updateAnchorStatusBar(ctx, store);
+    }
+  });
+
+  pi.registerCommand('steer', {
+    description: 'Steer active vibe-coding anchor with real-time guidance (/steer <instruction>)',
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const text = (args || '').trim();
+      if (!text) {
+        ctx.ui.notify('Usage: /steer <guidance for current anchor>', 'warn');
+        return;
+      }
+      const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+      if (activeHere.length === 0) {
+        ctx.ui.notify('⌖ No active anchor to steer. Type "pin: <goal>" first!', 'warn');
+        return;
+      }
+      const p = activeHere[0];
+      store.update(p.id, { steerGuidance: text });
+      updateStartupBanner(ctx, store);
+      ctx.ui.notify(`⌖ Steered Anchor #${p.id.replace(/^anc-/, '')}: "${text}"`, 'info');
     }
   });
 

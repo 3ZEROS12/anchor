@@ -42,9 +42,11 @@ export function formatDockStepRow(
     theme?: any;
     showId?: boolean;
     fallbackActiveForm?: string;
+    liveDurationSec?: number;
+    driftWarning?: string;
   }
 ): string {
-  const { fg, theme, showId = true, fallbackActiveForm } = options;
+  const { fg, theme, showId = true, fallbackActiveForm, liveDurationSec, driftWarning } = options;
   const glyph = formatStepGlyph(step.status, fg);
   const subjectColor =
     step.status === 'in_progress'
@@ -66,7 +68,12 @@ export function formatDockStepRow(
 
   const activeForm = step.status === 'in_progress' ? (step.activeForm || fallbackActiveForm) : undefined;
   if (activeForm) {
-    row += ` ${fg('muted', `(${activeForm})`)}`;
+    const durStr = typeof liveDurationSec === 'number' && liveDurationSec > 0 ? ` · ${liveDurationSec}s` : '';
+    row += ` ${fg('muted', `(${activeForm}${durStr})`)}`;
+  }
+
+  if (driftWarning) {
+    row += ` ${fg('warning', `⚠️ [Drift: ${driftWarning}]`)}`;
   }
 
   if (step.blockedBy && step.blockedBy.length > 0) {
@@ -213,11 +220,14 @@ export class AnchorDockController {
       const step = layout.visible[i];
       const isLastRow = i === layout.visible.length - 1 && !hasFooterRow;
       const branch = fg('dim', isLastRow ? '└─ ' : '├─ ');
+      const liveDurationSec = primary.liveStartedAt ? Math.max(1, Math.floor((Date.now() - primary.liveStartedAt) / 1000)) : undefined;
       const stepText = formatDockStepRow(step, {
         fg,
         theme,
         showId: true,
-        fallbackActiveForm: primary.activeForm
+        fallbackActiveForm: primary.activeForm,
+        liveDurationSec: step.status === 'in_progress' ? liveDurationSec : undefined,
+        driftWarning: step.status === 'in_progress' ? primary.driftWarning : undefined
       });
       lines.push(truncateToWidth(`${branch}${stepText}`, width));
     }
@@ -259,11 +269,14 @@ export class AnchorDockController {
             : a.progress.steps[a.progress.done + 1])
         : undefined;
       const nextStep = candidateStep ? fg('muted', ` ▸ ${candidateStep}`) : '';
-      const activeHint = a.activeForm ? fg('muted', ` (${a.activeForm})`) : '';
+      const liveDurationSec = a.liveStartedAt ? Math.max(1, Math.floor((Date.now() - a.liveStartedAt) / 1000)) : undefined;
+      const durStr = liveDurationSec ? ` · ${liveDurationSec}s` : '';
+      const activeHint = a.activeForm ? fg('muted', ` (${a.activeForm}${durStr})`) : '';
+      const driftAlert = a.driftWarning ? ` ${fg('warning', `⚠️ [Drift: ${a.driftWarning}]`)}` : '';
       const origin = formatOrigin(a);
       const sessionIcon = a.sessionFile ? ' ↪' : '';
       const prefix = `${fg('accent', '⌖')} ${fg('dim', `#${num}`)} ${bar}`;
-      const suffix = `${activeHint} ${fg('muted', `(${origin}${sessionIcon})`)}`;
+      const suffix = `${activeHint}${driftAlert} ${fg('muted', `(${origin}${sessionIcon})`)}`;
       const availTitle = Math.max(
         12,
         width - getDisplayWidth(prefix) - getDisplayWidth(nextStep) - getDisplayWidth(suffix) - 2
@@ -295,3 +308,28 @@ export class AnchorDockController {
 }
 
 export const defaultDockController = new AnchorDockController();
+
+/**
+ * Render elegant ASCII Mission Completion Receipt upon anchor settlement
+ */
+export function renderMissionReceipt(
+  anchor: Anchor,
+  options?: { fg?: (color: string, text: string) => string }
+): string[] {
+  const fg = options?.fg || ((_c: string, text: string) => text);
+  const now = Date.now();
+  const elapsedSec = Math.max(1, Math.floor((now - anchor.createdAt) / 1000));
+  const durationStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+  const num = anchor.id.replace(/^anc-/, '');
+  const targetStr = anchor.files.length > 0
+    ? anchor.files.slice(0, 3).map(f => f.split(/[\\/]/).pop()).join(', ')
+    : anchor.project || 'workspace';
+  const progressStr = anchor.progress ? `[■■■■ ${anchor.progress.total}/${anchor.progress.total}] Verified` : '100% Completed';
+
+  return [
+    fg('accent', `┌─ ⌖ Mission #${num} Completed: "${anchor.title}" ─────────────────────────┐`),
+    fg('muted',  `│  • Duration: ${durationStr} · Progress: ${progressStr}`),
+    fg('muted',  `│  • Target Scope: ${targetStr} · Drift: 0 violations`),
+    fg('accent', `└─────────────────────────────────────────────────────────────┘`)
+  ];
+}

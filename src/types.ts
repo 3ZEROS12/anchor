@@ -76,6 +76,12 @@ export interface Anchor {
   tags: string[];
   /** Live present-continuous activity indicator (e.g. 'editing src/auth.ts') */
   activeForm?: string;
+  /** Timestamp when current live tool action started (ms) for flight recorder duration */
+  liveStartedAt?: number;
+  /** Active goal drift warning if tool touched files outside anchor scope */
+  driftWarning?: string;
+  /** Steering guidance appended by human during in-flight vibe-coding */
+  steerGuidance?: string;
   /** Prerequisite anchor IDs (e.g. ['anc-1']) for cross-task sequencing */
   blockedBy?: string[];
   /** Associated Pi conversation session file (.jsonl) for 1-click session teleport (`/back`) */

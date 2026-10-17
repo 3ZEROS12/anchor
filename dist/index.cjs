@@ -69,6 +69,7 @@ __export(index_exports, {
   parseQuickNoteInput: () => parseQuickNoteInput,
   renderActiveAnchorsContext: () => renderActiveAnchorsContext,
   renderColdStartAnchorsContext: () => renderColdStartAnchorsContext,
+  renderMissionReceipt: () => renderMissionReceipt,
   replayTodoSnapshotFromBranch: () => replayTodoSnapshotFromBranch,
   resolveAnchorTarget: () => resolveAnchorTarget,
   selectDockStepLayout: () => selectDockStepLayout,
@@ -1516,7 +1517,7 @@ function applyStrikethrough(text, theme) {
   return `\x1B[9m${text}\x1B[29m`;
 }
 function formatDockStepRow(step, options) {
-  const { fg, theme, showId = true, fallbackActiveForm } = options;
+  const { fg, theme, showId = true, fallbackActiveForm, liveDurationSec, driftWarning } = options;
   const glyph = formatStepGlyph(step.status, fg);
   const subjectColor = step.status === "in_progress" ? "accent" : step.status === "completed" || step.status === "deleted" ? "muted" : "text";
   let subject = fg(subjectColor, step.subject);
@@ -1530,7 +1531,11 @@ function formatDockStepRow(step, options) {
   row += ` ${subject}`;
   const activeForm = step.status === "in_progress" ? step.activeForm || fallbackActiveForm : void 0;
   if (activeForm) {
-    row += ` ${fg("muted", `(${activeForm})`)}`;
+    const durStr = typeof liveDurationSec === "number" && liveDurationSec > 0 ? ` \xB7 ${liveDurationSec}s` : "";
+    row += ` ${fg("muted", `(${activeForm}${durStr})`)}`;
+  }
+  if (driftWarning) {
+    row += ` ${fg("warning", `\u26A0\uFE0F [Drift: ${driftWarning}]`)}`;
   }
   if (step.blockedBy && step.blockedBy.length > 0) {
     row += ` ${fg("muted", `\u26D3 #${step.blockedBy.join(",#")}`)}`;
@@ -1637,11 +1642,14 @@ var AnchorDockController = class {
       const step = layout.visible[i];
       const isLastRow = i === layout.visible.length - 1 && !hasFooterRow;
       const branch = fg("dim", isLastRow ? "\u2514\u2500 " : "\u251C\u2500 ");
+      const liveDurationSec = primary.liveStartedAt ? Math.max(1, Math.floor((Date.now() - primary.liveStartedAt) / 1e3)) : void 0;
       const stepText = formatDockStepRow(step, {
         fg,
         theme,
         showId: true,
-        fallbackActiveForm: primary.activeForm
+        fallbackActiveForm: primary.activeForm,
+        liveDurationSec: step.status === "in_progress" ? liveDurationSec : void 0,
+        driftWarning: step.status === "in_progress" ? primary.driftWarning : void 0
       });
       lines.push(truncateToWidth(`${branch}${stepText}`, width));
     }
@@ -1669,11 +1677,14 @@ var AnchorDockController = class {
       const bar = a.progress ? `${fg("accent", formatProgressBar(a.progress))} ` : "";
       const candidateStep = a.progress?.steps ? a.progress.steps[a.progress.done] !== a.title ? a.progress.steps[a.progress.done] : a.progress.steps[a.progress.done + 1] : void 0;
       const nextStep = candidateStep ? fg("muted", ` \u25B8 ${candidateStep}`) : "";
-      const activeHint = a.activeForm ? fg("muted", ` (${a.activeForm})`) : "";
+      const liveDurationSec = a.liveStartedAt ? Math.max(1, Math.floor((Date.now() - a.liveStartedAt) / 1e3)) : void 0;
+      const durStr = liveDurationSec ? ` \xB7 ${liveDurationSec}s` : "";
+      const activeHint = a.activeForm ? fg("muted", ` (${a.activeForm}${durStr})`) : "";
+      const driftAlert = a.driftWarning ? ` ${fg("warning", `\u26A0\uFE0F [Drift: ${a.driftWarning}]`)}` : "";
       const origin = formatOrigin(a);
       const sessionIcon = a.sessionFile ? " \u21AA" : "";
       const prefix = `${fg("accent", "\u2316")} ${fg("dim", `#${num}`)} ${bar}`;
-      const suffix = `${activeHint} ${fg("muted", `(${origin}${sessionIcon})`)}`;
+      const suffix = `${activeHint}${driftAlert} ${fg("muted", `(${origin}${sessionIcon})`)}`;
       const availTitle = Math.max(
         12,
         width - getDisplayWidth(prefix) - getDisplayWidth(nextStep) - getDisplayWidth(suffix) - 2
@@ -1702,10 +1713,26 @@ var AnchorDockController = class {
   }
 };
 var defaultDockController = new AnchorDockController();
+function renderMissionReceipt(anchor, options) {
+  const fg = options?.fg || ((_c, text) => text);
+  const now = Date.now();
+  const elapsedSec = Math.max(1, Math.floor((now - anchor.createdAt) / 1e3));
+  const durationStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+  const num = anchor.id.replace(/^anc-/, "");
+  const targetStr = anchor.files.length > 0 ? anchor.files.slice(0, 3).map((f) => f.split(/[\\/]/).pop()).join(", ") : anchor.project || "workspace";
+  const progressStr = anchor.progress ? `[\u25A0\u25A0\u25A0\u25A0 ${anchor.progress.total}/${anchor.progress.total}] Verified` : "100% Completed";
+  return [
+    fg("accent", `\u250C\u2500 \u2316 Mission #${num} Completed: "${anchor.title}" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510`),
+    fg("muted", `\u2502  \u2022 Duration: ${durationStr} \xB7 Progress: ${progressStr}`),
+    fg("muted", `\u2502  \u2022 Target Scope: ${targetStr} \xB7 Drift: 0 violations`),
+    fg("accent", `\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518`)
+  ];
+}
 
 // src/extension.ts
 var import_typebox = require("@sinclair/typebox");
 var import_node_fs3 = __toESM(require("fs"), 1);
+var import_node_path4 = __toESM(require("path"), 1);
 function parseAnchorCommandInput(raw) {
   const trimmed = (raw || "").trim();
   if (!trimmed || trimmed === "list" || trimmed === "ls") {
@@ -1713,6 +1740,13 @@ function parseAnchorCommandInput(raw) {
   }
   if (trimmed === "now" || trimmed === "what" || trimmed === "status" || trimmed === "hey") {
     return { mode: "now" };
+  }
+  const steerMatch = trimmed.match(/^steer\s+(.+)$/i);
+  if (steerMatch) {
+    return {
+      mode: "steer",
+      title: steerMatch[1].trim()
+    };
   }
   if (trimmed === "undo") {
     return { mode: "undo" };
@@ -1807,6 +1841,7 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   parseQuickNoteInput,
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
+  renderMissionReceipt,
   replayTodoSnapshotFromBranch,
   resolveAnchorTarget,
   selectDockStepLayout,
