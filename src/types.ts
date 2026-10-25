@@ -33,7 +33,7 @@ export interface AnchorProgress {
 
 export interface AnchorEvidence {
   settledAt?: number;
-  settledBy?: 'commit' | 'manual' | 'todo-complete' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
+  settledBy?: 'commit' | 'manual' | 'todo-complete' | 'one-tap-settlement' | 'manual-command' | 'verification-test' | 'verify';
   commitHash?: string;
   summary?: string;
   touchedFiles?: string[];
@@ -92,6 +92,8 @@ export interface Anchor {
   targetDate?: string;
   /** Priority tier */
   priority?: AnchorPriority;
+  /** Optional pre-flight verification command that auto-settles task if exit code is 0 */
+  verifyCommand?: string;
   /** Settlement metadata when archived */
   evidence?: AnchorEvidence;
 }

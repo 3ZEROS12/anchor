@@ -6,7 +6,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 15 Passed](https://img.shields.io/badge/Tests-15%20通过-22c55e.svg)](tests/store.test.ts)
+[![Tests: 21 Passed](https://img.shields.io/badge/Tests-21%20通过-22c55e.svg)](tests/store.test.ts)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
 
 [English](./README.md) | [日本語](./README_ja.md) | **简体中文**
@@ -120,7 +120,7 @@ Anchor 显式指定 `{ placement: "belowEditor" }` 挂载在输入框下方，�
 
 ```bash
 npm run typecheck  # TypeScript 严格类型检查 (0 错误)
-npm test           # 原生 Node 测试运行器 (15/15 全绿通过)
+npm test           # 原生 Node 测试运行器 (18/18 全绿通过)
 npm run build      # tsup 双格式打包与类型声明生成
 ```
 

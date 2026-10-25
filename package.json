@@ -1,6 +1,6 @@
 {
   "name": "pi-anchor",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Cross-session Task & Todo Dock for Pi — persistent belowEditor tree overlay (✓ strikethrough, ◐ live file activity, ⛓ DAG dependencies, Alt+A fold), auto-saves unfinished todos across restarts, 0ms pin: notes, and /back session teleport.",
   "type": "module",
   "main": "dist/index.js",

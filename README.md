@@ -6,7 +6,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 15 Passed](https://img.shields.io/badge/Tests-15%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 21 Passed](https://img.shields.io/badge/Tests-21%20Passed-22c55e.svg)](tests/store.test.ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
 **English** | [日本語](./README_ja.md) | [简体中文](./README_zh.md)
@@ -120,7 +120,7 @@ In `v0.4` and `v0.5`, I threw away 60% of the codebase and rebuilt Anchor around
 
 ```bash
 npm run typecheck  # Strict tsc --noEmit check (0 errors)
-npm test           # Native Node test runner (15/15 passing)
+npm test           # Native Node test runner (18/18 passing)
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 ```
 

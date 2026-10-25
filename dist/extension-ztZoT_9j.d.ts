@@ -1,4 +1,4 @@
-import { ExtensionAPI } from '@earendil-works/pi-coding-agent';
+import { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 
 /**
  * Anchor v1.0 Domain Contracts
@@ -31,7 +31,7 @@ interface AnchorProgress {
 }
 interface AnchorEvidence {
     settledAt?: number;
-    settledBy?: 'commit' | 'manual' | 'todo-complete' | 'one-tap-settlement' | 'manual-command' | 'verification-test';
+    settledBy?: 'commit' | 'manual' | 'todo-complete' | 'one-tap-settlement' | 'manual-command' | 'verification-test' | 'verify';
     commitHash?: string;
     summary?: string;
     touchedFiles?: string[];
@@ -88,6 +88,8 @@ interface Anchor {
     targetDate?: string;
     /** Priority tier */
     priority?: AnchorPriority;
+    /** Optional pre-flight verification command that auto-settles task if exit code is 0 */
+    verifyCommand?: string;
     /** Settlement metadata when archived */
     evidence?: AnchorEvidence;
 }
@@ -119,54 +121,6 @@ declare const QUIET_AFTER_DAYS = 7;
 declare const MS_PER_DAY = 86400000;
 declare const DEFAULT_MAX_DOCK_LINES = 8;
 
-/**
- * Normalize path separators to forward slashes and strip baseCwd prefix when inside baseCwd
- */
-declare function normalizePath(filePath: string, baseCwd?: string): string;
-/**
- * Safe boundary-aware directory comparison (case-insensitive on Windows)
- */
-declare function isSameOrSubPath(dirA?: string, dirB?: string): boolean;
-/**
- * Convert simple glob pattern (*.ts, src/**\/*.ts) to safe RegExp
- */
-declare function globToRegExp(pattern: string): RegExp;
-/**
- * Clever Touch 1: Automatically spot file or directory paths mentioned inside a sticky note
- * (e.g. "src/auth.ts", "D:/College/优化/notes.md") so the user never has to fill out forms.
- */
-declare function extractPathsFromText(text?: string): string[];
-/**
- * Automatically extract lightweight progress metadata from note text if present:
- * - Explicit ratio: `[2/5]`, `(3/10)`, or standalone `5/30` (where 0 <= done <= total and 2 <= total <= 500)
- * - Numbered inline steps: `1. 抽出接口 2. 替换Cookie 3. 补单测`
- */
-declare function extractProgressFromText(rawTitle: string): {
-    cleanTitle: string;
-    progress?: AnchorProgress;
-};
-/**
- * Check if a sticky note belongs to or targets the given workspace directory
- */
-declare function isAnchorTargetingWorkspace(anchor: Anchor, targetCwd?: string): boolean;
-/**
- * Match touched files against an anchor's file patterns
- */
-declare function matchAnchorAgainstTouchedFiles(anchor: Anchor, touchedFiles: string[]): TouchMatchResult | null;
-declare function findMatchedAnchors(anchors: Anchor[], touchedFiles: string[]): TouchMatchResult[];
-/**
- * Clever Touch 2: Syntax-safe 1-line comment whisper when the AI reads/edits a matching file.
- * Strictly skips JSON, ENV, lockfiles, and binaries so parsers are never broken.
- */
-declare const COMMENT_FORMATS: Record<string, (msg: string) => string>;
-declare function makeSafeTaskAnnotation(filePath: string, anchor: Anchor): string | null;
-/**
- * Clever Touch 3: Match a `git commit -m "..."` message against a sticky note (supports CJK & English)
- */
-declare function matchesCommitMessage(anchor: Anchor, commitMessages: string[]): {
-    matched: boolean;
-    message?: string;
-};
 /**
  * Render ultra-compact Turn-1 sticky note context for the AI.
  * Turn 2+ consumes 0 tokens.
@@ -210,6 +164,7 @@ declare class AnchorStore {
         activeForm?: string;
         sessionFile?: string;
         progress?: AnchorProgress;
+        verifyCommand?: string;
     }): Anchor;
     private findAnchorIndex;
     get(id: string): Anchor | undefined;
@@ -252,6 +207,14 @@ declare class AnchorStore {
      */
     listArchive(limit?: number): Anchor[];
     /**
+     * Search anchors across active, sleeping, and archived tasks.
+     * Matches tokens case-insensitively across id, title, description, project, files, tags, steerGuidance, and progress steps.
+     */
+    search(query: string, options?: {
+        includeArchive?: boolean;
+        limit?: number;
+    }): Anchor[];
+    /**
      * Clever Touch 4 (Todo-Bridge): Automatically mirror intra-session `todo` tool lists
      * into a cross-session checkpoint!
      * - While tasks are in_progress/pending: updates the live `[■■□□ done/total]` checkpoint on disk;
@@ -276,10 +239,11 @@ declare class AnchorStore {
 }
 
 declare function parseAnchorCommandInput(raw: string): {
-    mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer' | 'check';
+    mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer' | 'check' | 'search' | 'history';
     targetId?: string;
     delta?: number;
     title?: string;
+    query?: string;
 };
 /**
  * Detect 0ms human-first quick note prefix in the input box:
@@ -292,6 +256,16 @@ declare function parseQuickNoteInput(text: string): string | null;
  * only when no note with that ID exists. Prevents settling the wrong note when sort order differs from ID order!
  */
 declare function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?: string): string | undefined;
-declare function export_default(pi: ExtensionAPI): void;
+/**
+ * Extract all commit messages from git commit commands:
+ * supports multiple `-m "..."`, `-am "..."`, `--message="..."`, and single quotes `-m '...'`
+ */
+declare function extractGitCommitMessages(cmd: string): string[];
+declare function registerAnchorCommands(pi: ExtensionAPI, store: AnchorStore, createStickyNoteFromUser: (title: string, ctx: ExtensionContext) => any, getSessionFileSafe: (ctx?: ExtensionContext) => string | undefined): void;
 
-export { type AnchorStep as A, renderColdStartAnchorsContext as B, COMMENT_FORMATS as C, type DockStepLayout as D, resolveAnchorTarget as E, sweepQuietNotes as F, export_default as G, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type StepCounts as S, type TodoTaskItem as T, type AnchorProgress as a, type Anchor as b, type StepStatus as c, AnchorStore as d, type AnchorEvidence as e, type AnchorPriority as f, type AnchorStatus as g, type AnchorStoreState as h, DEFAULT_MAX_DOCK_LINES as i, type TouchMatchResult as j, acquireSyncLock as k, atomicRenameWithRetry as l, extractPathsFromText as m, extractProgressFromText as n, findMatchedAnchors as o, getDefaultStorageDir as p, globToRegExp as q, isAnchorTargetingWorkspace as r, isSameOrSubPath as s, makeSafeTaskAnnotation as t, matchAnchorAgainstTouchedFiles as u, matchesCommitMessage as v, normalizePath as w, parseAnchorCommandInput as x, parseQuickNoteInput as y, renderActiveAnchorsContext as z };
+declare const MUTATION_TOOLS: Set<string>;
+
+declare function getSessionFileSafe(ctx?: ExtensionContext): string | undefined;
+declare function export_default(pi: ExtensionAPI, customStore?: AnchorStore): void;
+
+export { type AnchorProgress as A, type DockStepLayout as D, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type StepCounts as S, type TouchMatchResult as T, type Anchor as a, type AnchorStep as b, type TodoTaskItem as c, type StepStatus as d, AnchorStore as e, type AnchorEvidence as f, type AnchorPriority as g, type AnchorStatus as h, type AnchorStoreState as i, DEFAULT_MAX_DOCK_LINES as j, MUTATION_TOOLS as k, acquireSyncLock as l, atomicRenameWithRetry as m, extractGitCommitMessages as n, getDefaultStorageDir as o, getSessionFileSafe as p, parseAnchorCommandInput as q, parseQuickNoteInput as r, registerAnchorCommands as s, renderActiveAnchorsContext as t, renderColdStartAnchorsContext as u, resolveAnchorTarget as v, sweepQuietNotes as w, export_default as x };

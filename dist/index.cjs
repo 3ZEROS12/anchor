@@ -35,6 +35,7 @@ __export(index_exports, {
   COMMENT_FORMATS: () => COMMENT_FORMATS,
   DEFAULT_MAX_DOCK_LINES: () => DEFAULT_MAX_DOCK_LINES,
   MS_PER_DAY: () => MS_PER_DAY,
+  MUTATION_TOOLS: () => MUTATION_TOOLS,
   QUIET_AFTER_DAYS: () => QUIET_AFTER_DAYS,
   STATUS_GLYPH: () => STATUS_GLYPH,
   acquireSyncLock: () => acquireSyncLock,
@@ -43,6 +44,7 @@ __export(index_exports, {
   convertTodoTasksToSteps: () => convertTodoTasksToSteps,
   defaultDockController: () => defaultDockController,
   deriveStepBlocks: () => deriveStepBlocks,
+  extractGitCommitMessages: () => extractGitCommitMessages,
   extractPathsFromText: () => extractPathsFromText,
   extractProgressFromText: () => extractProgressFromText,
   findMatchedAnchors: () => findMatchedAnchors,
@@ -54,6 +56,7 @@ __export(index_exports, {
   formatStepGlyph: () => formatStepGlyph,
   getDefaultStorageDir: () => getDefaultStorageDir,
   getDisplayWidth: () => getDisplayWidth,
+  getSessionFileSafe: () => getSessionFileSafe,
   globToRegExp: () => globToRegExp,
   hasActiveUI: () => hasActiveUI,
   inferLiveActivityLabel: () => inferLiveActivityLabel,
@@ -68,6 +71,7 @@ __export(index_exports, {
   padToWidth: () => padToWidth,
   parseAnchorCommandInput: () => parseAnchorCommandInput,
   parseQuickNoteInput: () => parseQuickNoteInput,
+  registerAnchorCommands: () => registerAnchorCommands,
   renderActiveAnchorsContext: () => renderActiveAnchorsContext,
   renderColdStartAnchorsContext: () => renderColdStartAnchorsContext,
   renderMissionReceipt: () => renderMissionReceipt,
@@ -91,6 +95,248 @@ module.exports = __toCommonJS(index_exports);
 var QUIET_AFTER_DAYS = 7;
 var MS_PER_DAY = 864e5;
 var DEFAULT_MAX_DOCK_LINES = 8;
+
+// src/matcher.ts
+var import_node_path = __toESM(require("path"), 1);
+function normalizePath(filePath, baseCwd) {
+  if (typeof filePath !== "string") return "";
+  let norm = filePath.trim().replace(/\\/g, "/").replace(/^\.\//, "");
+  if (baseCwd && (import_node_path.default.isAbsolute(filePath) || norm.startsWith("/") || /^[a-zA-Z]:\//.test(norm))) {
+    const normBase = baseCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    const lowerNorm = norm.toLowerCase();
+    const lowerBase = normBase.toLowerCase();
+    if (lowerNorm === lowerBase) {
+      norm = "";
+    } else if (lowerNorm.startsWith(lowerBase + "/")) {
+      norm = norm.slice(normBase.length + 1).replace(/^\/+/, "");
+    }
+  }
+  return norm;
+}
+function isSameOrSubPath(dirA, dirB) {
+  if (!dirA || !dirB) return false;
+  const normA = dirA.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const normB = dirB.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  const isWin = process.platform === "win32" || /^[a-zA-Z]:\//.test(normA) || /^[a-zA-Z]:\//.test(normB);
+  const a = isWin ? normA.toLowerCase() : normA;
+  const b = isWin ? normB.toLowerCase() : normB;
+  return a === b || b.startsWith(a + "/") || a.startsWith(b + "/");
+}
+function globToRegExp(pattern) {
+  const collapsed = pattern.slice(0, 512).replace(/\/+(\*\*\/+)+/g, "/**/").replace(/\*{3,}/g, "**");
+  const escaped = collapsed.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\/\*\*\//g, "___GLOB_DIR_SLASH___").replace(/\*\*/g, "___GLOB_STAR_STAR___").replace(/\*/g, "[^/]*").replace(/___GLOB_DIR_SLASH___/g, "(?:/|/(?:[^/]+/)+)").replace(/___GLOB_STAR_STAR___/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+function extractPathsFromText(text) {
+  if (!text) return [];
+  const results = /* @__PURE__ */ new Set();
+  const regex = /(?:[a-zA-Z]:[\\/][^\s"'`，。；！？、,;)>\]]+|(?:\b(?:src|lib|dist|tests|test|docs|scripts|packages|extensions|bin|assets)[\\/][^\s"'`，。；！？、,;)>\]]+)|(?:\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|c|cpp|h|cs|md|json|yaml|yml|toml|html|css|sql|sh)\b))/g;
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const cleaned = normalizePath(match[0].replace(/[.:;,'")\]}>]+$/, ""));
+    if (cleaned && cleaned.length >= 3) {
+      results.add(cleaned);
+    }
+  }
+  return Array.from(results);
+}
+function extractProgressFromText(rawTitle) {
+  if (!rawTitle) return { cleanTitle: "" };
+  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*(.+?)(?=\s+\d+\.\s*|$)/g));
+  if (stepParts.length >= 2) {
+    const steps = stepParts.map((m) => m[2].trim().replace(/[;；,，]+$/, "")).filter(Boolean);
+    const items = steps.map((subject, idx) => ({
+      id: idx + 1,
+      subject,
+      status: idx === 0 ? "in_progress" : "pending"
+    }));
+    const firstMatchIdx = rawTitle.indexOf(stepParts[0][0]);
+    const prefix = rawTitle.slice(0, firstMatchIdx).replace(/[:：\-—\s]+$/, "").trim();
+    return {
+      cleanTitle: prefix || steps.join(" \u2192 "),
+      progress: { done: 0, total: steps.length, steps, items }
+    };
+  }
+  const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\))/);
+  if (ratioMatch) {
+    const done = parseInt(ratioMatch[1] ?? ratioMatch[3], 10);
+    const total = parseInt(ratioMatch[2] ?? ratioMatch[4], 10);
+    if (!isNaN(done) && !isNaN(total) && total >= 2 && total <= 500 && done >= 0 && done <= total) {
+      const stripped = rawTitle.replace(ratioMatch[0], " ").replace(/\s+/g, " ").trim();
+      return {
+        cleanTitle: stripped || rawTitle.trim(),
+        progress: { done, total }
+      };
+    }
+  }
+  return { cleanTitle: rawTitle.trim() };
+}
+function isAnchorTargetingWorkspace(anchor, targetCwd) {
+  if (!targetCwd) return true;
+  const normTarget = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+  if (anchor.project && anchor.project !== "global") {
+    const normProj = anchor.project.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    if (isSameOrSubPath(normProj, normTarget)) return true;
+    if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) return true;
+  }
+  if (anchor.files && anchor.files.length > 0) {
+    for (const f of anchor.files) {
+      const resolvedFile = !import_node_path.default.isAbsolute(f) && !/^[a-zA-Z]:\//.test(f) && anchor.cwd ? `${anchor.cwd.replace(/\\/g, "/").replace(/\/+$/, "")}/${f.replace(/^\/+/, "")}` : f;
+      if (isSameOrSubPath(resolvedFile, normTarget)) return true;
+    }
+  }
+  if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) {
+    return true;
+  }
+  return false;
+}
+function matchAnchorAgainstTouchedFiles(anchor, touchedFiles) {
+  if (!anchor.files || anchor.files.length === 0) return null;
+  const normTouched = touchedFiles.map((f) => normalizePath(f, anchor.cwd)).filter(Boolean);
+  if (normTouched.length === 0) return null;
+  const matchedExact = [];
+  const matchedPrefix = [];
+  for (const touched of normTouched) {
+    for (const pattern of anchor.files) {
+      const normPattern = normalizePath(pattern, anchor.cwd);
+      if (normPattern === touched) {
+        matchedExact.push(touched);
+        break;
+      }
+      if (normPattern.includes("*") && globToRegExp(normPattern).test(touched)) {
+        matchedExact.push(touched);
+        break;
+      }
+      const dirPrefix = normPattern.endsWith("/") ? normPattern : normPattern + "/";
+      if (touched.startsWith(dirPrefix)) {
+        matchedPrefix.push(touched);
+        break;
+      }
+    }
+  }
+  if (matchedExact.length > 0) {
+    return { anchor, score: 1, matchedFiles: Array.from(new Set(matchedExact)), reason: "exact-file" };
+  }
+  if (matchedPrefix.length > 0) {
+    return { anchor, score: 0.85, matchedFiles: Array.from(new Set(matchedPrefix)), reason: "dir-prefix" };
+  }
+  return null;
+}
+function findMatchedAnchors(anchors, touchedFiles) {
+  const results = [];
+  for (const anchor of anchors) {
+    const m = matchAnchorAgainstTouchedFiles(anchor, touchedFiles);
+    if (m) results.push(m);
+  }
+  return results.sort((a, b) => b.score - a.score);
+}
+var COMMENT_FORMATS = {
+  ".ts": (m) => `// ${m}`,
+  ".tsx": (m) => `// ${m}`,
+  ".js": (m) => `// ${m}`,
+  ".jsx": (m) => `// ${m}`,
+  ".mjs": (m) => `// ${m}`,
+  ".cjs": (m) => `// ${m}`,
+  ".go": (m) => `// ${m}`,
+  ".rs": (m) => `// ${m}`,
+  ".c": (m) => `// ${m}`,
+  ".cpp": (m) => `// ${m}`,
+  ".h": (m) => `// ${m}`,
+  ".cs": (m) => `// ${m}`,
+  ".java": (m) => `// ${m}`,
+  ".kt": (m) => `// ${m}`,
+  ".swift": (m) => `// ${m}`,
+  ".dart": (m) => `// ${m}`,
+  ".py": (m) => `# ${m}`,
+  ".rb": (m) => `# ${m}`,
+  ".sh": (m) => `# ${m}`,
+  ".bash": (m) => `# ${m}`,
+  ".yaml": (m) => `# ${m}`,
+  ".yml": (m) => `# ${m}`,
+  ".toml": (m) => `# ${m}`,
+  ".ps1": (m) => `# ${m}`,
+  ".html": (m) => `<!-- ${m} -->`,
+  ".xml": (m) => `<!-- ${m} -->`,
+  ".svg": (m) => `<!-- ${m} -->`,
+  ".vue": (m) => `<!-- ${m} -->`,
+  ".svelte": (m) => `<!-- ${m} -->`,
+  ".css": (m) => `/* ${m} */`,
+  ".scss": (m) => `/* ${m} */`,
+  ".sql": (m) => `-- ${m}`,
+  ".lua": (m) => `-- ${m}`
+};
+function makeSafeTaskAnnotation(filePath, anchor) {
+  const ext = import_node_path.default.extname(filePath).toLowerCase();
+  const fmt = COMMENT_FORMATS[ext];
+  if (!fmt) return null;
+  const num = anchor.id.replace(/^anc-/, "");
+  return "\n\n" + fmt(`\u2316 Note #${num}: ${anchor.title}`);
+}
+var COMMIT_STOP_WORDS = /* @__PURE__ */ new Set([
+  "fix",
+  "feat",
+  "chore",
+  "docs",
+  "test",
+  "tests",
+  "refactor",
+  "style",
+  "perf",
+  "build",
+  "ci",
+  "bug",
+  "issue",
+  "update",
+  "add",
+  "remove",
+  "todo",
+  "note",
+  "task",
+  "the",
+  "and",
+  "for",
+  "with",
+  "\u4FEE\u590D",
+  "\u4F18\u5316",
+  "\u66F4\u65B0",
+  "\u6DFB\u52A0",
+  "\u4FEE\u6539",
+  "\u5B8C\u6210",
+  "\u95EE\u9898",
+  "\u4EFB\u52A1",
+  "\u6A21\u5757",
+  "\u529F\u80FD"
+]);
+function matchesCommitMessage(anchor, commitMessages) {
+  const idLower = anchor.id.toLowerCase();
+  const numId = `#${anchor.id.replace(/^anc-/, "")}`;
+  const title = anchor.title.toLowerCase();
+  let titleTokens = [];
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    try {
+      const seg = new Intl.Segmenter("und", { granularity: "word" });
+      titleTokens = Array.from(seg.segment(title)).filter((s) => s.isWordLike).map((s) => s.segment.trim().toLowerCase()).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
+    } catch {
+      titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
+    }
+  } else {
+    titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
+  }
+  for (const msg of commitMessages) {
+    const msgLower = msg.toLowerCase();
+    if (msgLower.includes(idLower) || new RegExp(`(?:^|\\s|\\()${numId}(?:\\b|\\)|$)`).test(msgLower)) {
+      return { matched: true, message: msg };
+    }
+    if (titleTokens.length > 0) {
+      const hits = titleTokens.filter((tok) => msgLower.includes(tok)).length;
+      const requiredHits = titleTokens.length === 1 ? 1 : 2;
+      if (hits >= requiredHits) {
+        return { matched: true, message: msg };
+      }
+    }
+  }
+  return { matched: false };
+}
 
 // src/graph.ts
 function validateStepDependencies(steps, stepId, newBlockedBy) {
@@ -286,7 +532,7 @@ function selectDockStepLayout(steps, budget, hiddenCompletedIds = /* @__PURE__ *
 }
 
 // src/bridge.ts
-var import_node_path = __toESM(require("path"), 1);
+var import_node_path2 = __toESM(require("path"), 1);
 function replayTodoSnapshotFromBranch(branch) {
   if (!branch || typeof branch[Symbol.iterator] !== "function") return null;
   let latestTasks = null;
@@ -322,7 +568,7 @@ function inferLiveActivityLabel(toolName, input, _cwd) {
   const lower = (toolName || "").toLowerCase();
   const rawPath = input.path || input.filePath || input.file;
   if (typeof rawPath === "string" && rawPath.trim()) {
-    const base = import_node_path.default.basename(rawPath.trim().replace(/\\/g, "/"));
+    const base = import_node_path2.default.basename(rawPath.trim().replace(/\\/g, "/"));
     if (!base) return void 0;
     if (lower === "edit" || lower === "patch" || lower === "apply_diff" || lower === "modify") {
       return `editing ${base}`;
@@ -377,247 +623,8 @@ function inferLiveActivityLabel(toolName, input, _cwd) {
 
 // src/store.ts
 var import_node_fs = __toESM(require("fs"), 1);
-var import_node_path2 = __toESM(require("path"), 1);
+var import_node_path3 = __toESM(require("path"), 1);
 var import_node_os = __toESM(require("os"), 1);
-function normalizePath(filePath, baseCwd) {
-  if (typeof filePath !== "string") return "";
-  let norm = filePath.trim().replace(/\\/g, "/").replace(/^\.\//, "");
-  if (baseCwd && (import_node_path2.default.isAbsolute(filePath) || norm.startsWith("/") || /^[a-zA-Z]:\//.test(norm))) {
-    const normBase = baseCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-    const lowerNorm = norm.toLowerCase();
-    const lowerBase = normBase.toLowerCase();
-    if (lowerNorm === lowerBase) {
-      norm = "";
-    } else if (lowerNorm.startsWith(lowerBase + "/")) {
-      norm = norm.slice(normBase.length + 1).replace(/^\/+/, "");
-    }
-  }
-  return norm;
-}
-function isSameOrSubPath(dirA, dirB) {
-  if (!dirA || !dirB) return false;
-  const normA = dirA.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  const normB = dirB.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  const isWin = process.platform === "win32" || /^[a-zA-Z]:\//.test(normA) || /^[a-zA-Z]:\//.test(normB);
-  const a = isWin ? normA.toLowerCase() : normA;
-  const b = isWin ? normB.toLowerCase() : normB;
-  return a === b || b.startsWith(a + "/") || a.startsWith(b + "/");
-}
-function globToRegExp(pattern) {
-  const collapsed = pattern.slice(0, 512).replace(/\/+(\*\*\/+)+/g, "/**/").replace(/\*{3,}/g, "**");
-  const escaped = collapsed.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\/\*\*\//g, "___GLOB_DIR_SLASH___").replace(/\*\*/g, "___GLOB_STAR_STAR___").replace(/\*/g, "[^/]*").replace(/___GLOB_DIR_SLASH___/g, "(?:/|/(?:[^/]+/)+)").replace(/___GLOB_STAR_STAR___/g, ".*");
-  return new RegExp(`^${escaped}$`);
-}
-function extractPathsFromText(text) {
-  if (!text) return [];
-  const results = /* @__PURE__ */ new Set();
-  const regex = /(?:[a-zA-Z]:[\\/][^\s"'`，。；！？、,;)>\]]+|(?:\b(?:src|lib|dist|tests|test|docs|scripts|packages|extensions|bin|assets)[\\/][^\s"'`，。；！？、,;)>\]]+)|(?:\b[\w.-]+\.(?:ts|tsx|js|jsx|mjs|cjs|py|rs|go|java|c|cpp|h|cs|md|json|yaml|yml|toml|html|css|sql|sh)\b))/g;
-  let match;
-  while ((match = regex.exec(text)) !== null) {
-    const cleaned = normalizePath(match[0].replace(/[.:;,'")\]}>]+$/, ""));
-    if (cleaned && cleaned.length >= 3) {
-      results.add(cleaned);
-    }
-  }
-  return Array.from(results);
-}
-function extractProgressFromText(rawTitle) {
-  if (!rawTitle) return { cleanTitle: "" };
-  const stepParts = Array.from(rawTitle.matchAll(/(?:^|\s)(\d+)\.\s*(.+?)(?=\s+\d+\.\s*|$)/g));
-  if (stepParts.length >= 2) {
-    const steps = stepParts.map((m) => m[2].trim().replace(/[;；,，]+$/, "")).filter(Boolean);
-    const items = steps.map((subject, idx) => ({
-      id: idx + 1,
-      subject,
-      status: idx === 0 ? "in_progress" : "pending"
-    }));
-    const firstMatchIdx = rawTitle.indexOf(stepParts[0][0]);
-    const prefix = rawTitle.slice(0, firstMatchIdx).replace(/[:：\-—\s]+$/, "").trim();
-    return {
-      cleanTitle: prefix || steps.join(" \u2192 "),
-      progress: { done: 0, total: steps.length, steps, items }
-    };
-  }
-  const ratioMatch = rawTitle.match(/(?:\[(\d{1,3})\/(\d{1,3})\]|\((\d{1,3})\/(\d{1,3})\))/);
-  if (ratioMatch) {
-    const done = parseInt(ratioMatch[1] ?? ratioMatch[3], 10);
-    const total = parseInt(ratioMatch[2] ?? ratioMatch[4], 10);
-    if (!isNaN(done) && !isNaN(total) && total >= 2 && total <= 500 && done >= 0 && done <= total) {
-      const stripped = rawTitle.replace(ratioMatch[0], " ").replace(/\s+/g, " ").trim();
-      return {
-        cleanTitle: stripped || rawTitle.trim(),
-        progress: { done, total }
-      };
-    }
-  }
-  return { cleanTitle: rawTitle.trim() };
-}
-function isAnchorTargetingWorkspace(anchor, targetCwd) {
-  if (!targetCwd) return true;
-  const normTarget = targetCwd.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-  if (anchor.project && anchor.project !== "global") {
-    const normProj = anchor.project.trim().replace(/\\/g, "/").replace(/\/+$/, "");
-    if (isSameOrSubPath(normProj, normTarget)) return true;
-    if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) return true;
-  }
-  if (anchor.files && anchor.files.length > 0) {
-    for (const f of anchor.files) {
-      const resolvedFile = !import_node_path2.default.isAbsolute(f) && !/^[a-zA-Z]:\//.test(f) && anchor.cwd ? `${anchor.cwd.replace(/\\/g, "/").replace(/\/+$/, "")}/${f.replace(/^\/+/, "")}` : f;
-      if (isSameOrSubPath(resolvedFile, normTarget)) return true;
-    }
-  }
-  if (anchor.cwd && isSameOrSubPath(anchor.cwd, normTarget)) {
-    return true;
-  }
-  return false;
-}
-function matchAnchorAgainstTouchedFiles(anchor, touchedFiles) {
-  if (!anchor.files || anchor.files.length === 0) return null;
-  const normTouched = touchedFiles.map((f) => normalizePath(f, anchor.cwd)).filter(Boolean);
-  if (normTouched.length === 0) return null;
-  const matchedExact = [];
-  const matchedPrefix = [];
-  for (const touched of normTouched) {
-    for (const pattern of anchor.files) {
-      const normPattern = normalizePath(pattern, anchor.cwd);
-      if (normPattern === touched) {
-        matchedExact.push(touched);
-        break;
-      }
-      if (normPattern.includes("*") && globToRegExp(normPattern).test(touched)) {
-        matchedExact.push(touched);
-        break;
-      }
-      const dirPrefix = normPattern.endsWith("/") ? normPattern : normPattern + "/";
-      if (touched.startsWith(dirPrefix)) {
-        matchedPrefix.push(touched);
-        break;
-      }
-    }
-  }
-  if (matchedExact.length > 0) {
-    return { anchor, score: 1, matchedFiles: Array.from(new Set(matchedExact)), reason: "exact-file" };
-  }
-  if (matchedPrefix.length > 0) {
-    return { anchor, score: 0.85, matchedFiles: Array.from(new Set(matchedPrefix)), reason: "dir-prefix" };
-  }
-  return null;
-}
-function findMatchedAnchors(anchors, touchedFiles) {
-  const results = [];
-  for (const anchor of anchors) {
-    const m = matchAnchorAgainstTouchedFiles(anchor, touchedFiles);
-    if (m) results.push(m);
-  }
-  return results.sort((a, b) => b.score - a.score);
-}
-var COMMENT_FORMATS = {
-  ".ts": (m) => `// ${m}`,
-  ".tsx": (m) => `// ${m}`,
-  ".js": (m) => `// ${m}`,
-  ".jsx": (m) => `// ${m}`,
-  ".mjs": (m) => `// ${m}`,
-  ".cjs": (m) => `// ${m}`,
-  ".go": (m) => `// ${m}`,
-  ".rs": (m) => `// ${m}`,
-  ".c": (m) => `// ${m}`,
-  ".cpp": (m) => `// ${m}`,
-  ".h": (m) => `// ${m}`,
-  ".cs": (m) => `// ${m}`,
-  ".java": (m) => `// ${m}`,
-  ".kt": (m) => `// ${m}`,
-  ".swift": (m) => `// ${m}`,
-  ".dart": (m) => `// ${m}`,
-  ".py": (m) => `# ${m}`,
-  ".rb": (m) => `# ${m}`,
-  ".sh": (m) => `# ${m}`,
-  ".bash": (m) => `# ${m}`,
-  ".yaml": (m) => `# ${m}`,
-  ".yml": (m) => `# ${m}`,
-  ".toml": (m) => `# ${m}`,
-  ".ps1": (m) => `# ${m}`,
-  ".html": (m) => `<!-- ${m} -->`,
-  ".xml": (m) => `<!-- ${m} -->`,
-  ".svg": (m) => `<!-- ${m} -->`,
-  ".vue": (m) => `<!-- ${m} -->`,
-  ".svelte": (m) => `<!-- ${m} -->`,
-  ".css": (m) => `/* ${m} */`,
-  ".scss": (m) => `/* ${m} */`,
-  ".sql": (m) => `-- ${m}`,
-  ".lua": (m) => `-- ${m}`
-};
-function makeSafeTaskAnnotation(filePath, anchor) {
-  const ext = import_node_path2.default.extname(filePath).toLowerCase();
-  const fmt = COMMENT_FORMATS[ext];
-  if (!fmt) return null;
-  const num = anchor.id.replace(/^anc-/, "");
-  return "\n\n" + fmt(`\u2316 Note #${num}: ${anchor.title}`);
-}
-var COMMIT_STOP_WORDS = /* @__PURE__ */ new Set([
-  "fix",
-  "feat",
-  "chore",
-  "docs",
-  "test",
-  "tests",
-  "refactor",
-  "style",
-  "perf",
-  "build",
-  "ci",
-  "bug",
-  "issue",
-  "update",
-  "add",
-  "remove",
-  "todo",
-  "note",
-  "task",
-  "the",
-  "and",
-  "for",
-  "with",
-  "\u4FEE\u590D",
-  "\u4F18\u5316",
-  "\u66F4\u65B0",
-  "\u6DFB\u52A0",
-  "\u4FEE\u6539",
-  "\u5B8C\u6210",
-  "\u95EE\u9898",
-  "\u4EFB\u52A1",
-  "\u6A21\u5757",
-  "\u529F\u80FD"
-]);
-function matchesCommitMessage(anchor, commitMessages) {
-  const idLower = anchor.id.toLowerCase();
-  const numId = `#${anchor.id.replace(/^anc-/, "")}`;
-  const title = anchor.title.toLowerCase();
-  let titleTokens = [];
-  if (typeof Intl !== "undefined" && Intl.Segmenter) {
-    try {
-      const seg = new Intl.Segmenter("und", { granularity: "word" });
-      titleTokens = Array.from(seg.segment(title)).filter((s) => s.isWordLike).map((s) => s.segment.trim().toLowerCase()).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
-    } catch {
-      titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
-    }
-  } else {
-    titleTokens = title.split(/[\s,._\-\/]+/).filter((t) => t.length >= 2 && !COMMIT_STOP_WORDS.has(t));
-  }
-  for (const msg of commitMessages) {
-    const msgLower = msg.toLowerCase();
-    if (msgLower.includes(idLower) || new RegExp(`(?:^|\\s|\\()${numId}(?:\\b|\\)|$)`).test(msgLower)) {
-      return { matched: true, message: msg };
-    }
-    if (titleTokens.length > 0) {
-      const hits = titleTokens.filter((tok) => msgLower.includes(tok)).length;
-      const requiredHits = titleTokens.length === 1 ? 1 : 2;
-      if (hits >= requiredHits) {
-        return { matched: true, message: msg };
-      }
-    }
-  }
-  return { matched: false };
-}
 function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
   let cwd;
   let now = Date.now();
@@ -664,8 +671,8 @@ function sweepQuietNotes(store, now = Date.now()) {
   });
 }
 function getDefaultStorageDir() {
-  if (process.env.ANCHOR_DIR) return import_node_path2.default.resolve(process.env.ANCHOR_DIR);
-  return import_node_path2.default.join(import_node_os.default.homedir(), ".anchor");
+  if (process.env.ANCHOR_DIR) return import_node_path3.default.resolve(process.env.ANCHOR_DIR);
+  return import_node_path3.default.join(import_node_os.default.homedir(), ".anchor");
 }
 function sleepSync(ms) {
   const end = Date.now() + ms;
@@ -768,10 +775,10 @@ var AnchorStore = class {
   lockPath;
   archivePath;
   constructor(storageDir) {
-    this.storageDir = storageDir ? import_node_path2.default.resolve(storageDir) : getDefaultStorageDir();
-    this.statePath = import_node_path2.default.join(this.storageDir, "state.json");
-    this.lockPath = import_node_path2.default.join(this.storageDir, "state.lock");
-    this.archivePath = import_node_path2.default.join(this.storageDir, "archive.jsonl");
+    this.storageDir = storageDir ? import_node_path3.default.resolve(storageDir) : getDefaultStorageDir();
+    this.statePath = import_node_path3.default.join(this.storageDir, "state.json");
+    this.lockPath = import_node_path3.default.join(this.storageDir, "state.lock");
+    this.archivePath = import_node_path3.default.join(this.storageDir, "archive.jsonl");
   }
   ensureDirs() {
     if (!import_node_fs.default.existsSync(this.storageDir)) {
@@ -803,7 +810,7 @@ var AnchorStore = class {
       return parsed;
     } catch {
       try {
-        import_node_fs.default.copyFileSync(this.statePath, import_node_path2.default.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
+        import_node_fs.default.copyFileSync(this.statePath, import_node_path3.default.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
       } catch {
       }
       return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
@@ -844,10 +851,10 @@ var AnchorStore = class {
       if (input.project && (/^[a-zA-Z]:[\\/]/.test(input.project.trim()) || input.project.trim().startsWith("/"))) {
         cwd = normalizePath(input.project.trim());
       } else if (inferredFiles.length > 0 && (/^[a-zA-Z]:\//.test(inferredFiles[0]) || inferredFiles[0].startsWith("/"))) {
-        const firstDir = import_node_path2.default.dirname(inferredFiles[0]);
+        const firstDir = import_node_path3.default.dirname(inferredFiles[0]);
         if (firstDir && firstDir !== ".") cwd = normalizePath(firstDir);
       }
-      const projectName = input.project ? input.project.trim() : cwd ? import_node_path2.default.basename(cwd) : "global";
+      const projectName = input.project ? input.project.trim() : cwd ? import_node_path3.default.basename(cwd) : "global";
       const normBlockedBy = input.blockedBy ? input.blockedBy.map((b) => {
         const c = b.trim().replace(/^#/, "");
         return /^\d+$/.test(c) ? `anc-${parseInt(c, 10)}` : c;
@@ -869,6 +876,7 @@ var AnchorStore = class {
         ...input.activeForm ? { activeForm: input.activeForm.trim() } : {},
         ...normBlockedBy && normBlockedBy.length > 0 ? { blockedBy: normBlockedBy } : {},
         ...input.sessionFile ? { sessionFile: normalizePath(input.sessionFile) } : {},
+        ...input.verifyCommand ? { verifyCommand: input.verifyCommand.trim() } : {},
         ...input.progress || parsedProgress ? { progress: input.progress || parsedProgress } : {}
       };
       state.anchors.push(anchor);
@@ -1072,6 +1080,62 @@ var AnchorStore = class {
     }
   }
   /**
+   * Search anchors across active, sleeping, and archived tasks.
+   * Matches tokens case-insensitively across id, title, description, project, files, tags, steerGuidance, and progress steps.
+   */
+  search(query, options = {}) {
+    const trimmed = (query || "").trim();
+    if (!trimmed) {
+      return this.list({ all: true });
+    }
+    const tokens = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) {
+      return this.list({ all: true });
+    }
+    const candidates = [];
+    const seenIds = /* @__PURE__ */ new Set();
+    const matchesAnchor = (a) => {
+      const numId = `#${a.id.replace(/^anc-/, "")}`;
+      const stepTexts = [
+        ...a.progress?.steps || [],
+        ...a.progress?.items ? a.progress.items.map((i) => i.subject) : []
+      ].join(" ");
+      const haystack = [
+        a.id,
+        numId,
+        a.title,
+        a.description || "",
+        a.project || "",
+        (a.files || []).join(" "),
+        (a.tags || []).join(" "),
+        a.steerGuidance || "",
+        stepTexts
+      ].join(" ").toLowerCase();
+      return tokens.every((tok) => haystack.includes(tok));
+    };
+    const activeSleeping = this.loadState().anchors;
+    const activeSleepingIds = new Set(activeSleeping.map((a) => a.id));
+    for (const a of activeSleeping) {
+      if (matchesAnchor(a)) {
+        candidates.push(a);
+        seenIds.add(a.id);
+      }
+    }
+    if (options.includeArchive !== false) {
+      const archived = this.listArchive(100);
+      for (const a of archived) {
+        if (!seenIds.has(a.id) && !activeSleepingIds.has(a.id)) {
+          if (matchesAnchor(a)) {
+            candidates.push(a);
+            seenIds.add(a.id);
+          }
+        }
+      }
+    }
+    const limit = options.limit || 20;
+    return candidates.slice(0, limit);
+  }
+  /**
    * Clever Touch 4 (Todo-Bridge): Automatically mirror intra-session `todo` tool lists
    * into a cross-session checkpoint!
    * - While tasks are in_progress/pending: updates the live `[■■□□ done/total]` checkpoint on disk;
@@ -1141,7 +1205,7 @@ var AnchorStore = class {
       }
       const id = this.generateId(state);
       const inferredFiles = options.recentFiles && options.recentFiles.length > 0 ? options.recentFiles.map((f) => normalizePath(f)).filter(Boolean) : extractPathsFromText(orderedSteps.join(" "));
-      const projectName = normCwd ? import_node_path2.default.basename(normCwd) : "global";
+      const projectName = normCwd ? import_node_path3.default.basename(normCwd) : "global";
       const created = {
         id,
         title: headline,
@@ -1235,7 +1299,7 @@ var AnchorStore = class {
 
 // src/tui.ts
 var import_node_fs2 = __toESM(require("fs"), 1);
-var import_node_path3 = __toESM(require("path"), 1);
+var import_node_path4 = __toESM(require("path"), 1);
 var ANSI_REGEX = /\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
 function stripAnsi(str) {
   return str.replace(ANSI_REGEX, "");
@@ -1337,7 +1401,7 @@ function formatRelativeAge(timestamp, now = Date.now()) {
 function formatOrigin(anchor) {
   if (typeof anchor === "string") {
     if (!anchor) return "global";
-    return import_node_path3.default.basename(anchor.replace(/\\/g, "/")) || "global";
+    return import_node_path4.default.basename(anchor.replace(/\\/g, "/")) || "global";
   }
   let proj = "global";
   if (anchor.project && anchor.project !== "global") {
@@ -1349,10 +1413,10 @@ function formatOrigin(anchor) {
       proj = normProj;
     }
   } else if (anchor.cwd) {
-    proj = import_node_path3.default.basename(anchor.cwd.replace(/\\/g, "/")) || "global";
+    proj = import_node_path4.default.basename(anchor.cwd.replace(/\\/g, "/")) || "global";
   }
   if (anchor.files && anchor.files.length > 0) {
-    const shortFile = import_node_path3.default.basename(anchor.files[0].replace(/\\/g, "/"));
+    const shortFile = import_node_path4.default.basename(anchor.files[0].replace(/\\/g, "/"));
     if (shortFile && !proj.endsWith(shortFile)) {
       return `${proj} \xB7 ${shortFile}`;
     }
@@ -1500,7 +1564,7 @@ async function openAnchorDashboard(ctx, store) {
       anchor.progress ? `Progress: ${formatProgressBar(anchor.progress)}${anchor.progress.steps ? ` (${anchor.progress.steps.join(" \u2192 ")})` : ""}` : null,
       anchor.description ? `Details: ${anchor.description}` : null,
       anchor.files.length > 0 ? `Files: ${anchor.files.join(", ")}` : null,
-      anchor.sessionFile ? `Session: ${import_node_path3.default.basename(anchor.sessionFile)}` : null,
+      anchor.sessionFile ? `Session: ${import_node_path4.default.basename(anchor.sessionFile)}` : null,
       `Workspace: ${anchor.project || "global"} \xB7 Pinned ${formatRelativeAge(anchor.createdAt)}`
     ].filter(Boolean).join("\n");
     ctx.ui.notify(details, "info");
@@ -1745,10 +1809,8 @@ function renderMissionReceipt(anchor, options) {
   ];
 }
 
-// src/extension.ts
-var import_typebox = require("@sinclair/typebox");
+// src/commands.ts
 var import_node_fs3 = __toESM(require("fs"), 1);
-var import_node_path4 = __toESM(require("path"), 1);
 function parseAnchorCommandInput(raw) {
   const trimmed = (raw || "").trim();
   if (!trimmed || trimmed === "list" || trimmed === "ls") {
@@ -1756,6 +1818,22 @@ function parseAnchorCommandInput(raw) {
   }
   if (trimmed === "now" || trimmed === "what" || trimmed === "status" || trimmed === "hey") {
     return { mode: "now" };
+  }
+  if (/^(?:history|archive|archived)$/i.test(trimmed)) {
+    return { mode: "history" };
+  }
+  const searchMatch = trimmed.match(/^(?:search|find|grep)\s+(.+)$/i);
+  if (searchMatch) {
+    return {
+      mode: "search",
+      query: searchMatch[1].trim()
+    };
+  }
+  if (/^(?:search|find|grep)$/i.test(trimmed)) {
+    return {
+      mode: "search",
+      query: ""
+    };
   }
   const checkMatch = trimmed.match(/^(?:check|mark)\s+(.+)$/i);
   if (checkMatch) {
@@ -1823,6 +1901,357 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   }
   return void 0;
 }
+function extractGitCommitMessages(cmd) {
+  if (!cmd || typeof cmd !== "string") return [];
+  const regex = /(?<=^|\s)(?:-m|-am|--message)\s*=?\s*(?:"([^"]*)"|'([^']*)')/gi;
+  const results = [];
+  let match;
+  while ((match = regex.exec(cmd)) !== null) {
+    const msg = match[1] ?? match[2];
+    if (msg !== void 0) {
+      results.push(msg);
+    }
+  }
+  return results;
+}
+function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionFileSafe2) {
+  pi.registerCommand("anchor", {
+    description: "View, pin, step, jump to session, or tear off sticky notes (/anchor, /anchor step 1, /anchor jump 1, /anchor done 1)",
+    handler: async (args, ctx) => {
+      const parsed = parseAnchorCommandInput(args);
+      if (parsed.mode === "dashboard") {
+        await openAnchorDashboard(ctx, store);
+        return;
+      }
+      if (parsed.mode === "now") {
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
+          return;
+        }
+        const p = activeHere[0];
+        const bar2 = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
+        const origin = formatOrigin(p);
+        const activity = p.activeForm ? ` \u2022 Live Pulse: \u25D0 ${p.activeForm}` : "";
+        const files = p.files && p.files.length > 0 ? ` \u2022 Files: ${p.files.slice(0, 3).join(", ")}` : "";
+        const steer = p.steerGuidance ? ` \u2022 Steer: "${p.steerGuidance}"` : "";
+        const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar2}: "${p.title}" (${origin})${activity}${files}${steer}`;
+        ctx.ui.notify(msg, "info");
+        return;
+      }
+      if (parsed.mode === "history") {
+        const archived = store.listArchive(10);
+        if (archived.length === 0) {
+          ctx.ui.notify("\u2316 No archived notes yet.", "info");
+          return;
+        }
+        const lines = archived.map((a) => {
+          const num = a.id.replace(/^anc-/, "");
+          return `#${num} "${a.title}" (${a.project || "global"} \xB7 ${a.evidence?.settledBy || "settled"})`;
+        });
+        ctx.ui.notify(lines.join("\n"), "info");
+        return;
+      }
+      if (parsed.mode === "search") {
+        const hits = store.search(parsed.query || "");
+        if (hits.length === 0) {
+          ctx.ui.notify(`\u2316 No notes matching "${parsed.query}".`, "info");
+          return;
+        }
+        const lines = hits.map((a) => {
+          const num = a.id.replace(/^anc-/, "");
+          return `[${a.status}] #${num} "${a.title}" (${a.project || "global"})`;
+        });
+        ctx.ui.notify(lines.join("\n"), "info");
+        return;
+      }
+      if (parsed.mode === "steer") {
+        const text = (parsed.title || "").trim();
+        if (!text) {
+          ctx.ui.notify("Usage: /anchor steer <guidance for current anchor>", "warn");
+          return;
+        }
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warn");
+          return;
+        }
+        const p = activeHere[0];
+        store.update(p.id, { steerGuidance: text });
+        updateStartupBanner(ctx, store);
+        ctx.ui.notify(`\u2316 Steered Anchor #${p.id.replace(/^anc-/, "")}: "${text}"`, "info");
+        return;
+      }
+      if (parsed.mode === "undo") {
+        try {
+          const restored = store.undoSettle();
+          ctx.ui.notify(`\u2316 Put back #${restored.id.replace(/^anc-/, "")}: "${restored.title}"`, "info");
+          updateAnchorStatusBar(ctx, store);
+        } catch (err) {
+          ctx.ui.notify(`Undo failed: ${err.message}`, "error");
+        }
+        return;
+      }
+      if (parsed.mode === "fold") {
+        const collapsed = defaultDockController.toggleCollapsed();
+        updateStartupBanner(ctx, store);
+        ctx.ui.notify(`\u2316 Anchor Dock ${collapsed ? "folded to 1-line strip" : "expanded to tree view"} (Alt+A)`, "info");
+        return;
+      }
+      if (parsed.mode === "check" && parsed.targetId) {
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warn");
+          return;
+        }
+        const p = activeHere[0];
+        const stepNum = parseInt(parsed.targetId, 10);
+        if (isNaN(stepNum)) {
+          ctx.ui.notify("Usage: /anchor check <stepNumber> (e.g. /check 2)", "warn");
+          return;
+        }
+        try {
+          store.updateStep(p.id, stepNum, { status: "completed" });
+          ctx.ui.notify(`\u2316 Checked step #${stepNum} on "${p.title}"`, "info");
+          updateStartupBanner(ctx, store);
+        } catch (err) {
+          ctx.ui.notify(`Check step failed: ${err.message}`, "error");
+        }
+        return;
+      }
+      if (parsed.mode === "step" && parsed.targetId) {
+        const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
+        if (!resolvedId) {
+          ctx.ui.notify(`\u2316 Note not found: ${parsed.targetId}`, "error");
+          return;
+        }
+        const { anchor: updated } = store.step(resolvedId, parsed.delta || 1);
+        ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
+        updateAnchorStatusBar(ctx, store);
+        return;
+      }
+      if (parsed.mode === "jump" && parsed.targetId) {
+        const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
+        const note = resolvedId ? store.get(resolvedId) : void 0;
+        if (!note || !note.sessionFile || !import_node_fs3.default.existsSync(note.sessionFile)) {
+          ctx.ui.notify(`\u2316 No saved conversation session found for #${parsed.targetId}`, "error");
+          return;
+        }
+        await ctx.switchSession(note.sessionFile);
+        return;
+      }
+      if (parsed.mode === "settle" && parsed.targetId) {
+        const resolvedId = resolveAnchorTarget(store, parsed.targetId, ctx.cwd);
+        if (!resolvedId) {
+          ctx.ui.notify(`\u2316 Note not found: ${parsed.targetId}`, "error");
+          return;
+        }
+        const settled = store.settle(resolvedId, { settledBy: "manual" });
+        try {
+          const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+          const receipt = renderMissionReceipt(settled, { fg });
+          ctx.ui.notify(receipt.join("\n"), "info");
+        } catch {
+          ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+        }
+        updateAnchorStatusBar(ctx, store);
+        return;
+      }
+      const rawTrimmed = (args || "").trim();
+      if (/^(?:#?anc-\d+|#?\d+)$/i.test(rawTrimmed)) {
+        const resolvedId = resolveAnchorTarget(store, rawTrimmed, ctx.cwd);
+        if (resolvedId) {
+          const settled = store.settle(resolvedId, { settledBy: "manual" });
+          try {
+            const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+            const receipt = renderMissionReceipt(settled, { fg });
+            ctx.ui.notify(receipt.join("\n"), "info");
+          } catch {
+            ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+          }
+          updateAnchorStatusBar(ctx, store);
+          return;
+        }
+      }
+      const anc = createStickyNoteFromUser(parsed.title || rawTrimmed, ctx);
+      const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : "";
+      ctx.ui.notify(`\u2316 Pinned #${anc.id.replace(/^anc-/, "")}${bar}: "${anc.title}"`, "info");
+    }
+  });
+  pi.registerCommand("pin", {
+    description: "Stick a quick note across sessions (e.g. /pin Migrate auth [1/3])",
+    handler: async (args, ctx) => {
+      const text = (args || "").trim();
+      if (!text) {
+        await openAnchorDashboard(ctx, store);
+        return;
+      }
+      const anc = createStickyNoteFromUser(text, ctx);
+      const bar = anc.progress ? ` ${formatProgressBar(anc.progress)}` : "";
+      ctx.ui.notify(`\u2316 Pinned #${anc.id.replace(/^anc-/, "")}${bar}: "${anc.title}"`, "info");
+    }
+  });
+  pi.registerCommand("step", {
+    description: "Advance progress bar on a sticky note (e.g. /step 1)",
+    handler: async (args, ctx) => {
+      const tokens = (args || "").trim().split(/\s+/).filter(Boolean);
+      const target = tokens[0] || "1";
+      const delta = tokens[1] ? parseInt(tokens[1], 10) : 1;
+      const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+      if (!resolvedId) {
+        ctx.ui.notify(`\u2316 Note not found: ${target}`, "error");
+        return;
+      }
+      const { anchor: updated } = store.step(resolvedId, isNaN(delta) ? 1 : delta);
+      ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
+      updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.registerCommand("done", {
+    description: "Tear off a sticky note by number or ID (e.g. /done 1)",
+    handler: async (args, ctx) => {
+      const target = (args || "").trim();
+      if (!target) {
+        await openAnchorDashboard(ctx, store);
+        return;
+      }
+      const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+      if (!resolvedId) {
+        ctx.ui.notify(`\u2316 Note not found: ${target}`, "error");
+        return;
+      }
+      const settled = store.settle(resolvedId, { settledBy: "manual" });
+      try {
+        const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+        const receipt = renderMissionReceipt(settled, { fg });
+        ctx.ui.notify(receipt.join("\n"), "info");
+      } catch {
+        ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+      }
+      updateAnchorStatusBar(ctx, store);
+    }
+  });
+  pi.registerCommand("check", {
+    description: "Mark a step completed on the active anchor/todo dock (e.g. /check 2)",
+    handler: async (args, ctx) => {
+      const target = (args || "").trim().replace(/^#/, "");
+      if (!target) {
+        ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warn");
+        return;
+      }
+      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+      if (activeHere.length === 0) {
+        ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warn");
+        return;
+      }
+      const p = activeHere[0];
+      const stepNum = parseInt(target, 10);
+      if (isNaN(stepNum)) {
+        ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warn");
+        return;
+      }
+      try {
+        store.updateStep(p.id, stepNum, { status: "completed" });
+        ctx.ui.notify(`\u2316 Checked step #${stepNum} on "${p.title}"`, "info");
+        updateStartupBanner(ctx, store);
+      } catch (err) {
+        ctx.ui.notify(`Check step failed: ${err.message}`, "error");
+      }
+    }
+  });
+  pi.registerCommand("todo", {
+    description: "View or manage unified active tasks on the Anchor dock (/todo)",
+    handler: async (_args, ctx) => {
+      await openAnchorDashboard(ctx, store);
+    }
+  });
+  pi.registerCommand("steer", {
+    description: "Steer active vibe-coding anchor with real-time guidance (/steer <instruction>)",
+    handler: async (args, ctx) => {
+      const text = (args || "").trim();
+      if (!text) {
+        ctx.ui.notify("Usage: /steer <guidance for current anchor>", "warn");
+        return;
+      }
+      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+      if (activeHere.length === 0) {
+        ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warn");
+        return;
+      }
+      const p = activeHere[0];
+      store.update(p.id, { steerGuidance: text });
+      updateStartupBanner(ctx, store);
+      ctx.ui.notify(`\u2316 Steered Anchor #${p.id.replace(/^anc-/, "")}: "${text}"`, "info");
+    }
+  });
+  pi.registerCommand("now", {
+    description: "Inspect active vibe-coding anchor and live activity pulse (/now)",
+    handler: async (_args, ctx) => {
+      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+      if (activeHere.length === 0) {
+        ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
+        return;
+      }
+      const p = activeHere[0];
+      const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
+      const origin = formatOrigin(p);
+      const activity = p.activeForm ? ` \u2022 Live Pulse: \u25D0 ${p.activeForm}` : "";
+      const files = p.files && p.files.length > 0 ? ` \u2022 Files: ${p.files.slice(0, 3).join(", ")}` : "";
+      const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar}: "${p.title}" (${origin})${activity}${files}`;
+      ctx.ui.notify(msg, "info");
+    }
+  });
+  pi.registerCommand("anchors", {
+    description: "View sticky notes",
+    handler: async (_args, ctx) => {
+      await openAnchorDashboard(ctx, store);
+    }
+  });
+  pi.registerCommand("back", {
+    description: "Jump back to the conversation session of the latest unfinished note or todo checkpoint (/back [id])",
+    handler: async (args, ctx) => {
+      const targetArg = (args || "").trim();
+      const currentSession = getSessionFileSafe2(ctx);
+      if (targetArg) {
+        const resolvedId = resolveAnchorTarget(store, targetArg, ctx.cwd);
+        const note = resolvedId ? store.get(resolvedId) : void 0;
+        if (!note || !note.sessionFile || !import_node_fs3.default.existsSync(note.sessionFile)) {
+          ctx.ui.notify(`\u2316 No saved session found for #${targetArg}`, "error");
+          return;
+        }
+        await ctx.switchSession(note.sessionFile);
+        return;
+      }
+      const candidates = sortAnchorsForDisplay(
+        store.list({ cwd: ctx.cwd, all: true }).filter((a) => a.status === "active" || a.status === "sleeping"),
+        ctx.cwd
+      );
+      const jumpTarget = candidates.find(
+        (a) => a.sessionFile && import_node_fs3.default.existsSync(a.sessionFile) && (!currentSession || !isSameOrSubPath(a.sessionFile, currentSession))
+      );
+      if (!jumpTarget || !jumpTarget.sessionFile) {
+        ctx.ui.notify("\u2316 No other linked conversation session found to jump back to.", "info");
+        return;
+      }
+      await ctx.switchSession(jumpTarget.sessionFile);
+    }
+  });
+}
+
+// src/extension.ts
+var import_typebox = require("@sinclair/typebox");
+var import_node_child_process = require("child_process");
+var import_node_fs4 = __toESM(require("fs"), 1);
+var import_node_path5 = __toESM(require("path"), 1);
+var MUTATION_TOOLS = /* @__PURE__ */ new Set(["edit", "write", "patch", "apply_diff", "create_file", "modify"]);
+function getSessionFileSafe(ctx) {
+  try {
+    const file = ctx?.sessionManager?.getSessionFile?.();
+    return typeof file === "string" && file.trim() ? file.trim() : void 0;
+  } catch {
+    return void 0;
+  }
+}
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   AnchorDockController,
@@ -1830,6 +2259,7 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   COMMENT_FORMATS,
   DEFAULT_MAX_DOCK_LINES,
   MS_PER_DAY,
+  MUTATION_TOOLS,
   QUIET_AFTER_DAYS,
   STATUS_GLYPH,
   acquireSyncLock,
@@ -1838,6 +2268,7 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   convertTodoTasksToSteps,
   defaultDockController,
   deriveStepBlocks,
+  extractGitCommitMessages,
   extractPathsFromText,
   extractProgressFromText,
   findMatchedAnchors,
@@ -1849,6 +2280,7 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   formatStepGlyph,
   getDefaultStorageDir,
   getDisplayWidth,
+  getSessionFileSafe,
   globToRegExp,
   hasActiveUI,
   inferLiveActivityLabel,
@@ -1863,6 +2295,7 @@ function resolveAnchorTarget(store, idOrIndex, cwd) {
   padToWidth,
   parseAnchorCommandInput,
   parseQuickNoteInput,
+  registerAnchorCommands,
   renderActiveAnchorsContext,
   renderColdStartAnchorsContext,
   renderMissionReceipt,

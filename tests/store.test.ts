@@ -18,6 +18,7 @@ import {
   normalizePath,
   renderColdStartAnchorsContext
 } from '../src/store.ts';
+import * as matcherDirect from '../src/matcher.ts';
 import { MS_PER_DAY } from '../src/types.ts';
 
 function createTempDir(): string {
@@ -119,7 +120,7 @@ test('Clever Touch 1 - smart path extraction and cross-directory workspace bindi
       title: 'College重构前置查阅外部架构参考库',
       description: '必须前置查阅 D:/College/优化/EXTERNAL_ARCHITECTURE_INSPIRATIONS.md。',
       project: 'D:/College/优化',
-      cwd: 'D:/Workspace/X'
+      cwd: 'D:/Workspace/x-pulse'
     });
 
     assert.ok(note.files.includes('D:/College/优化/EXTERNAL_ARCHITECTURE_INSPIRATIONS.md'));
@@ -303,5 +304,109 @@ test('v0.6.0 Auto-Todo Bridge - automatically mirrors unfinished todo snapshots 
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('AnchorStore.search - finds active, sleeping, and settled notes by title, file path, and step text', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+
+    // Active note with steps and file paths
+    const a1 = store.create({
+      title: 'Fix auth login session in src/auth/login.ts: 1. Extract cookie store 2. Verify token',
+      cwd: '/workspace/app',
+      tags: ['security', 'auth']
+    });
+
+    // Another note to settle into archive
+    const a2 = store.create({
+      title: 'Refactor database migrations in db/migrate.ts',
+      description: 'Run schema checks and migrate users',
+      cwd: '/workspace/app'
+    });
+    store.settle(a2.id, { settledBy: 'manual' });
+
+    // Sleeping note
+    const a3 = store.create({
+      title: 'Background telemetry worker in src/telemetry.ts',
+      cwd: '/workspace/app'
+    });
+    store.update(a3.id, { status: 'sleeping' });
+
+    // 1. Search by title token across active
+    const r1 = store.search('login');
+    assert.strictEqual(r1.length, 1);
+    assert.strictEqual(r1[0].id, a1.id);
+
+    // 2. Search by file path
+    const r2 = store.search('src/auth/login.ts');
+    assert.strictEqual(r2.length, 1);
+    assert.strictEqual(r2[0].id, a1.id);
+
+    // 3. Search by step text
+    const r3 = store.search('cookie store');
+    assert.strictEqual(r3.length, 1);
+    assert.strictEqual(r3[0].id, a1.id);
+
+    // 4. Search settled note in archive by title
+    const r4 = store.search('database');
+    assert.strictEqual(r4.length, 1);
+    assert.strictEqual(r4[0].id, a2.id);
+    assert.strictEqual(r4[0].status, 'settled');
+
+    // 5. Search settled note by description
+    const r5 = store.search('schema checks');
+    assert.strictEqual(r5.length, 1);
+    assert.strictEqual(r5[0].id, a2.id);
+
+    // 6. Search settled note by file path
+    const r6 = store.search('db/migrate.ts');
+    assert.strictEqual(r6.length, 1);
+    assert.strictEqual(r6[0].id, a2.id);
+
+    // 7. Search sleeping note
+    const r7 = store.search('telemetry');
+    assert.strictEqual(r7.length, 1);
+    assert.strictEqual(r7[0].id, a3.id);
+
+    // 8. Search with empty query returns all active/sleeping notes
+    const rEmpty = store.search('');
+    assert.strictEqual(rEmpty.length, 2); // a1 (active) and a3 (sleeping)
+
+    // 9. Search with includeArchive: false excludes settled
+    const rNoArchive = store.search('database', { includeArchive: false });
+    assert.strictEqual(rNoArchive.length, 0);
+
+    // 10. Nonexistent query
+    const rNone = store.search('completely_nonexistent_xyz');
+    assert.strictEqual(rNone.length, 0);
+
+    // 11. Limit option
+    const rLimit = store.search('in', { limit: 1 });
+    assert.strictEqual(rLimit.length, 1);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('Architectural Decoupling - pure matcher functions exported from matcher.ts, store.ts, and index.ts', () => {
+  const pureFns = [
+    'normalizePath',
+    'isSameOrSubPath',
+    'globToRegExp',
+    'extractPathsFromText',
+    'extractProgressFromText',
+    'isAnchorTargetingWorkspace',
+    'matchAnchorAgainstTouchedFiles',
+    'findMatchedAnchors',
+    'COMMENT_FORMATS',
+    'makeSafeTaskAnnotation',
+    'matchesCommitMessage'
+  ] as const;
+
+  for (const fn of pureFns) {
+    assert.ok((matcherDirect as any)[fn] !== undefined, `matcher.ts should export ${fn}`);
+  }
+});
+
 
 

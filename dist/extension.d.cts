@@ -1,2 +1,2 @@
 import '@earendil-works/pi-coding-agent';
-export { G as default, x as parseAnchorCommandInput, y as parseQuickNoteInput, E as resolveAnchorTarget } from './extension-D-jGK0pi.cjs';
+export { k as MUTATION_TOOLS, x as default, n as extractGitCommitMessages, p as getSessionFileSafe, q as parseAnchorCommandInput, r as parseQuickNoteInput, v as resolveAnchorTarget } from './extension-ztZoT_9j.cjs';

@@ -1,6 +1,55 @@
-import { A as AnchorStep, a as AnchorProgress, D as DockStepLayout, S as StepCounts, b as Anchor, T as TodoTaskItem, c as StepStatus, d as AnchorStore } from './extension-D-jGK0pi.js';
-export { e as AnchorEvidence, f as AnchorPriority, g as AnchorStatus, h as AnchorStoreState, C as COMMENT_FORMATS, i as DEFAULT_MAX_DOCK_LINES, M as MS_PER_DAY, Q as QUIET_AFTER_DAYS, j as TouchMatchResult, k as acquireSyncLock, l as atomicRenameWithRetry, m as extractPathsFromText, n as extractProgressFromText, o as findMatchedAnchors, p as getDefaultStorageDir, q as globToRegExp, r as isAnchorTargetingWorkspace, s as isSameOrSubPath, t as makeSafeTaskAnnotation, u as matchAnchorAgainstTouchedFiles, v as matchesCommitMessage, w as normalizePath, x as parseAnchorCommandInput, y as parseQuickNoteInput, z as renderActiveAnchorsContext, B as renderColdStartAnchorsContext, E as resolveAnchorTarget, F as sweepQuietNotes } from './extension-D-jGK0pi.js';
+import { A as AnchorProgress, a as Anchor, T as TouchMatchResult, b as AnchorStep, D as DockStepLayout, S as StepCounts, c as TodoTaskItem, d as StepStatus, e as AnchorStore } from './extension-ztZoT_9j.js';
+export { f as AnchorEvidence, g as AnchorPriority, h as AnchorStatus, i as AnchorStoreState, j as DEFAULT_MAX_DOCK_LINES, M as MS_PER_DAY, k as MUTATION_TOOLS, Q as QUIET_AFTER_DAYS, l as acquireSyncLock, m as atomicRenameWithRetry, n as extractGitCommitMessages, o as getDefaultStorageDir, p as getSessionFileSafe, q as parseAnchorCommandInput, r as parseQuickNoteInput, s as registerAnchorCommands, t as renderActiveAnchorsContext, u as renderColdStartAnchorsContext, v as resolveAnchorTarget, w as sweepQuietNotes } from './extension-ztZoT_9j.js';
 import { ExtensionContext, ExtensionCommandContext } from '@earendil-works/pi-coding-agent';
+
+/**
+ * Normalize path separators to forward slashes and strip baseCwd prefix when inside baseCwd
+ */
+declare function normalizePath(filePath: string, baseCwd?: string): string;
+/**
+ * Safe boundary-aware directory comparison (case-insensitive on Windows)
+ */
+declare function isSameOrSubPath(dirA?: string, dirB?: string): boolean;
+/**
+ * Convert simple glob pattern (*.ts, src/**\/*.ts) to safe RegExp
+ */
+declare function globToRegExp(pattern: string): RegExp;
+/**
+ * Clever Touch 1: Automatically spot file or directory paths mentioned inside a sticky note
+ * (e.g. "src/auth.ts", "D:/College/优化/notes.md") so the user never has to fill out forms.
+ */
+declare function extractPathsFromText(text?: string): string[];
+/**
+ * Automatically extract lightweight progress metadata from note text if present:
+ * - Explicit ratio: `[2/5]`, `(3/10)`, or standalone `5/30` (where 0 <= done <= total and 2 <= total <= 500)
+ * - Numbered inline steps: `1. 抽出接口 2. 替换Cookie 3. 补单测`
+ */
+declare function extractProgressFromText(rawTitle: string): {
+    cleanTitle: string;
+    progress?: AnchorProgress;
+};
+/**
+ * Check if a sticky note belongs to or targets the given workspace directory
+ */
+declare function isAnchorTargetingWorkspace(anchor: Anchor, targetCwd?: string): boolean;
+/**
+ * Match touched files against an anchor's file patterns
+ */
+declare function matchAnchorAgainstTouchedFiles(anchor: Anchor, touchedFiles: string[]): TouchMatchResult | null;
+declare function findMatchedAnchors(anchors: Anchor[], touchedFiles: string[]): TouchMatchResult[];
+/**
+ * Clever Touch 2: Syntax-safe 1-line comment whisper when the AI reads/edits a matching file.
+ * Strictly skips JSON, ENV, lockfiles, and binaries so parsers are never broken.
+ */
+declare const COMMENT_FORMATS: Record<string, (msg: string) => string>;
+declare function makeSafeTaskAnnotation(filePath: string, anchor: Anchor): string | null;
+/**
+ * Clever Touch 3: Match a `git commit -m "..."` message against a sticky note (supports CJK & English)
+ */
+declare function matchesCommitMessage(anchor: Anchor, commitMessages: string[]): {
+    matched: boolean;
+    message?: string;
+};
 
 /**
  * Validate whether adding `newBlockedBy` to `stepId` introduces a cycle, self-dependency,
@@ -161,4 +210,4 @@ declare function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore):
  */
 declare function openAnchorDashboard(ctx: ExtensionContext | ExtensionCommandContext, store: AnchorStore): Promise<void>;
 
-export { Anchor, AnchorDockController, AnchorProgress, AnchorStep, AnchorStore, DockStepLayout, STATUS_GLYPH, StepCounts, StepStatus, TodoTaskItem, applyStrikethrough, convertTodoTasksToSteps, defaultDockController, deriveStepBlocks, formatDockStepRow, formatMicroGauge, formatOrigin, formatProgressBar, formatRelativeAge, formatStepGlyph, getDisplayWidth, hasActiveUI, inferLiveActivityLabel, materializeSteps, openAnchorDashboard, padToWidth, renderMissionReceipt, replayTodoSnapshotFromBranch, selectDockStepLayout, selectStepCounts, sortAnchorsForDisplay, stripAnsi, syncProgressFromItems, truncateToWidth, updateAnchorStatusBar, updateStartupBanner, validateAnchorDependencies, validateStepDependencies };
+export { Anchor, AnchorDockController, AnchorProgress, AnchorStep, AnchorStore, COMMENT_FORMATS, DockStepLayout, STATUS_GLYPH, StepCounts, StepStatus, TodoTaskItem, TouchMatchResult, applyStrikethrough, convertTodoTasksToSteps, defaultDockController, deriveStepBlocks, extractPathsFromText, extractProgressFromText, findMatchedAnchors, formatDockStepRow, formatMicroGauge, formatOrigin, formatProgressBar, formatRelativeAge, formatStepGlyph, getDisplayWidth, globToRegExp, hasActiveUI, inferLiveActivityLabel, isAnchorTargetingWorkspace, isSameOrSubPath, makeSafeTaskAnnotation, matchAnchorAgainstTouchedFiles, matchesCommitMessage, materializeSteps, normalizePath, openAnchorDashboard, padToWidth, renderMissionReceipt, replayTodoSnapshotFromBranch, selectDockStepLayout, selectStepCounts, sortAnchorsForDisplay, stripAnsi, syncProgressFromItems, truncateToWidth, updateAnchorStatusBar, updateStartupBanner, validateAnchorDependencies, validateStepDependencies };
