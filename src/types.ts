@@ -128,4 +128,3 @@ export interface DockStepLayout {
 /** 7 days without activity moves a note to quiet mode (still visible in UI, 0 prompt tokens in unrelated workspaces) */
 export const QUIET_AFTER_DAYS = 7;
 export const MS_PER_DAY = 86_400_000;
-export const DEFAULT_MAX_DOCK_LINES = 8;

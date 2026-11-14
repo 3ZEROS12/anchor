@@ -75,7 +75,6 @@ export function renderColdStartAnchorsContext(
   ].join('\n');
 }
 
-export const renderActiveAnchorsContext = renderColdStartAnchorsContext;
 
 /**
  * Transition notes untouched for >7 days to 'sleeping' (quiet mode) so they don't burn Turn-1 tokens
@@ -626,7 +625,14 @@ export class AnchorStore {
       const current = state.anchors[idx];
       const items = materializeSteps(current.progress);
       const stepIdx = items.findIndex(s => s.id === stepId);
-      if (stepIdx === -1) throw new Error(`Step #${stepId} not found in #${current.id}`);
+      if (stepIdx === -1) {
+        const total = current.progress?.total ?? 0;
+        throw new Error(
+          total > 0 && items.length === 0
+            ? `#${current.id} tracks a ${total}-step ratio with no checklist items; use /anchor step ${current.id.replace(/^anc-/, '')} to advance it`
+            : `Step #${stepId} not found in #${current.id}`
+        );
+      }
 
       if (patch.addBlockedBy && patch.addBlockedBy.length > 0) {
         const check = validateStepDependencies(items, stepId, patch.addBlockedBy);
@@ -899,19 +905,27 @@ export class AnchorStore {
       const raw = fs.readFileSync(this.archivePath, 'utf-8');
       const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       let anchor: Anchor | null = null;
+      // Lines that are not a restorable note (foreign records, torn writes) are kept: they
+      // used to be popped and dropped, so one bad line silently destroyed archive history.
+      const preserved: string[] = [];
       while (lines.length > 0 && !anchor) {
         const candidate = lines.pop()!;
         try {
           const parsed = JSON.parse(candidate);
           if (parsed && typeof parsed.id === 'string' && typeof parsed.title === 'string') {
             anchor = parsed;
+          } else {
+            preserved.push(candidate);
           }
-        } catch {}
+        } catch {
+          preserved.push(candidate);
+        }
       }
       if (!anchor) throw new Error('Archive is empty, nothing to undo');
 
+      const kept = [...lines, ...preserved.reverse()];
       const tmpArchive = `${this.archivePath}.${process.pid}.${Date.now()}.tmp`;
-      fs.writeFileSync(tmpArchive, lines.length > 0 ? lines.join('\n') + '\n' : '', 'utf-8');
+      fs.writeFileSync(tmpArchive, kept.length > 0 ? kept.join('\n') + '\n' : '', 'utf-8');
       atomicRenameWithRetry(tmpArchive, this.archivePath);
 
       anchor.status = 'active';

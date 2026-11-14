@@ -6,10 +6,10 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 32 Passed](https://img.shields.io/badge/Tests-32%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 35 Passed](https://img.shields.io/badge/Tests-35%20Passed-22c55e.svg)](tests/store.test.ts)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
 
-[English](./README.md) | [日本語](./README_ja.md) | **简体中文**
+[English](./README.md) | **简体中文**
 
 ```bash
 pi install npm:pi-anchor
@@ -71,8 +71,8 @@ Anchor 显式指定 `{ placement: "belowEditor" }` 挂载在输入框下方，�
 面对 50 列宽度的窄分屏终端，排版函数按 Unicode 东亚字符宽度标准（中文/Emoji 计 2 列，ASCII 计 1 列）动态计算剩余预算：窄屏下自动折叠为 `⌖ 3: #1 [■■□□ 2/4] 重构登录… +2`，并在省略号截断前自动清理未闭合的左括号。
 
 ### 2. 便签常驻显示，会不会每一轮对话都偷偷消耗上下文 Token？
-**第 2 轮起系统提示词消耗为 0 Token。**  
-界面上的便签条是纯本地终端 TUI 渲染组件。仅在会话第 1 轮冷启动时，Anchor 向系统提示词注入一次简短摘要；从第 2 轮起完全静默。只有当 AI 读取或编辑了便签关联的代码文件时，Anchor 才在该文件工具返回结果末尾追加 1 行对应语言的注释（`// ⌖ Note #1: ...`），遇到 `.json`、`.env`、锁文件与二进制文件则严格返回 `null` 跳过。
+**第 2 轮起，只有当前工程存在活跃便签时才会占用 1 行系统提示词。**  
+界面上的便签条是纯本地终端 TUI 渲染组件。仅在会话第 1 轮冷启动时，Anchor 向系统提示词注入一次简短摘要；从第 2 轮起完全静默——但当本工程确有活跃便签时，会补一行 `[Active Anchor Focus]`（编号、标题、进度、人工指导），防止模型跑偏。只有当 AI 读取或编辑了便签关联的代码文件时，Anchor 才在该文件工具返回结果末尾追加 1 行对应语言的注释（`// ⌖ Note #1: ...`），遇到 `.json`、`.env`、锁文件与二进制文件则严格返回 `null` 跳过。
 
 ### 3. 很久没碰的旧便签会丢吗？普通的 `git commit -m "fix bug"` 会不会误撕便签？
 - **7 天转静默，永不自动删数据**：超过 7 天未触碰的便签自动标记为 `quiet`（不在无关工程的首轮提示词里刷存在感），但在 `/anchor` 列表中始终保留，一旦进入对应工程目录即自动唤醒。
@@ -99,13 +99,17 @@ Anchor 显式指定 `{ placement: "belowEditor" }` 挂载在输入框下方，�
 | **Pi 斜杠命令** | `/pin <内容>` | 贴一张新便签（支持写 `[1/4]` 或 `1. A 2. B 3. C` 自动生成进度条） |
 | **Pi 斜杠命令** | `/snap [message]` | 快速创建轻量级 Git WIP 快照（非侵入式 `git stash create`，仅覆盖已跟踪改动，锚定在 `refs/anchor/snap`） |
 | **Pi 斜杠命令** | `/back`（或 `/anchor jump 1`） | 一键切换回最近一条未完成便签/`todo` 断点对应的历史对话 (`switchSession`) |
-| **统一子命令** | `/anchor done 1` / `/done 1` | 按编号 `#1` 直接撕下便签并归档（支持统一子命令或 legacy 0ms 直敲别名） |
+| **统一子命令** | `/anchor done 1` / `/done 1` | 按编号 `#1` 直接撕下便签并归档（`/done` 别名仅在 `ANCHOR_LEGACY_COMMANDS=1` 时注册） |
 | **统一子命令** | `/anchor step 1` / `/step 1` | 将 `#1` 便签的进度条往前推进 `+1` 步 |
 | **统一子命令** | `/anchor check 2` / `/check 2` | 勾选活跃任务面板上的第 2 个步骤为完成 |
 | **统一子命令** | `/anchor now` / `/now` | 即时查看当前活跃锚点、当前步骤、实时工具脉冲与改动文件 |
 | **统一子命令** | `/anchor steer <指导>` | 实时向当前锚点注入调整提示词 |
 | **统一子命令** | `/anchor snap [message]` | 创建 Git WIP 快照存档点 |
 | **统一子命令** | `/anchor undo` | 把刚刚撕下的便签重新贴回原位 |
+| **统一子命令** | `/anchor fold` | 折叠/展开底栏便签条（同 `/anchor compact`、`/anchor toggle`） |
+| **统一子命令** | `/anchor search <关键词>` | 按标题、标签或路径检索活跃与静默便签 |
+| **统一子命令** | `/anchor history` | 按时间倒序查看已归档（撕下）的便签 |
+| **统一子命令** | `/anchor legacy on\|off` | 查看菜单模式；legacy 独立命令在加载时注册，切换需在会话环境里设置 `ANCHOR_LEGACY_COMMANDS=1` |
 | **系统命令行** | `anchor` / `anchor "<内容>"` | 不进 Pi 也能在外部终端查看或贴便签 |
 | **系统命令行** | `anchor step 1` / `anchor done 1` / `anchor undo` | 在外部终端推进进度、撕便签或撤销 |
 ---
@@ -123,7 +127,7 @@ Anchor 显式指定 `{ placement: "belowEditor" }` 挂载在输入框下方，�
 
 ```bash
 npm run typecheck  # TypeScript 严格类型检查 (0 错误)
-npm test           # 原生 Node 测试运行器 (18/18 全绿通过)
+npm test           # 原生 Node 测试运行器 (35/35 全绿通过)
 npm run build      # tsup 双格式打包与类型声明生成
 ```
 

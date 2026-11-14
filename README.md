@@ -6,10 +6,10 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 32 Passed](https://img.shields.io/badge/Tests-32%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 35 Passed](https://img.shields.io/badge/Tests-35%20Passed-22c55e.svg)](tests/store.test.ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
-**English** | [日本語](./README_ja.md) | [简体中文](./README_zh.md)
+**English** | [简体中文](./README_zh.md)
 
 ```bash
 pi install npm:pi-anchor
@@ -71,8 +71,8 @@ Anchor mounts its widget with `{ placement: "belowEditor" }`. Extensions that re
 On narrow terminal splits (such as 50-column tmux panes), the strip measures visual column widths using Unicode East Asian Width rules (CJK/emoji = 2 cells, ASCII = 1 cell) and dynamically folds multiple notes into `⌖ 3: #1 [■■□□ 2/4] Refactor… +2` while stripping unclosed brackets before ellipses.
 
 ### 2. Does keeping sticky notes cost tokens on every turn?
-**Turn 2+ consumes 0 system prompt tokens.**  
-Anchor injects a compact summary of active notes only on Turn 1 of a cold session. From Turn 2 onwards, the system prompt hook returns nothing. When the agent reads or edits a file that matches a note's path or glob (`src/auth/*.ts`), Anchor appends a single syntax-safe comment line (`// ⌖ Note #1: ...`) to that tool result, while returning `null` for `.json`, `.env`, lockfiles, and binaries.
+**Turn 2+ costs 0 tokens unless a note is active in this workspace.**  
+Anchor injects a compact summary of active notes only on Turn 1 of a cold session. From Turn 2 onwards the hook stays silent — except when an active note targets this workspace, where it contributes a single `[Active Anchor Focus]` line (id, title, progress, steering hint) to keep the model on scope. When the agent reads or edits a file that matches a note's path or glob (`src/auth/*.ts`), Anchor appends a single syntax-safe comment line (`// ⌖ Note #1: ...`) to that tool result, while returning `null` for `.json`, `.env`, lockfiles, and binaries.
 
 ### 3. What happens to old notes or accidental `git commit` matches?
 - **7-Day Quiet Mode (Zero Silent Deletion)**: Notes untouched for more than 7 days transition to `sleeping` (`quiet`). They stop appearing in Turn-1 prompts for unrelated workspaces, remain 100% visible in `/anchor`, and wake up automatically when you open their target project.
@@ -99,13 +99,17 @@ All state lives in `~/.anchor/` outside your git repository:
 | **Pi Slash** | `/pin <note>` | Stick a quick note (supports `[1/4]` or `1. A 2. B 3. C` steps) |
 | **Pi Slash** | `/snap [message]` | Create lightweight git WIP checkpoint snapshot (non-destructive; captures tracked changes only, pinned at `refs/anchor/snap`) |
 | **Pi Slash** | `/back` (or `/anchor jump 1`) | Teleport Pi back to the conversation session of latest unfinished note/todo checkpoint |
-| **Unified** | `/anchor done 1` / `/done 1` | Tear off note `#1` and archive it (subcommand or legacy 0ms alias) |
+| **Unified** | `/anchor done 1` / `/done 1` | Tear off note `#1` and archive it (the `/done` alias is registered only with `ANCHOR_LEGACY_COMMANDS=1`) |
 | **Unified** | `/anchor step 1` / `/step 1` | Advance progress bar on note `#1` by `+1` |
 | **Unified** | `/anchor check 2` / `/check 2` | Mark step 2 completed on active task dock |
 | **Unified** | `/anchor now` / `/now` | Inspect active vibe-coding anchor, current step, live tool pulse, and touched files |
 | **Unified** | `/anchor steer <hint>` | Steer active anchor with real-time guidance |
 | **Unified** | `/anchor snap [message]` | Non-destructive git WIP checkpoint snapshot |
 | **Unified** | `/anchor undo` | Put back the most recently torn-off note |
+| **Unified** | `/anchor fold` | Collapse/expand the dock strip (also `/anchor compact`, `/anchor toggle`) |
+| **Unified** | `/anchor search <query>` | Search active and sleeping notes by title, tag, or path |
+| **Unified** | `/anchor history` | List archived (torn-off) notes newest first |
+| **Unified** | `/anchor legacy on\|off` | Report the menu mode; legacy standalone commands are registered at load, so switching needs `ANCHOR_LEGACY_COMMANDS=1` in the session environment |
 | **Terminal CLI** | `anchor` / `anchor "<note>"` | View or stick notes from any shell outside Pi |
 | **Terminal CLI** | `anchor step 1` / `anchor done 1` / `anchor undo` | Advance progress, tear off, or restore notes from the command line |
 ---
@@ -123,7 +127,7 @@ In `v0.4` and `v0.5`, I threw away 60% of the codebase and rebuilt Anchor around
 
 ```bash
 npm run typecheck  # Strict tsc --noEmit check (0 errors)
-npm test           # Native Node test runner (18/18 passing)
+npm test           # Native Node test runner (35/35 passing)
 npm run build      # Dual ESM/CJS compilation via tsup + declaration emit
 ```
 

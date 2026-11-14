@@ -103,6 +103,12 @@ export function parseAnchorCommandInput(raw: string): {
     };
   }
 
+  // Bare action verbs have no target. Falling through pinned a note literally titled
+  // `done` / `steer`; open the dock instead so the note list is one keystroke away.
+  if (/^(?:done|close|settle|rm|step|check|mark|steer|jump|resume|session)$/i.test(trimmed)) {
+    return { mode: 'dashboard' };
+  }
+
   return {
     mode: 'pin',
     title: trimmed
@@ -401,7 +407,7 @@ export function registerAnchorCommands(
       if (parsed.mode === 'legacy') {
         const flag = parsed.title;
         const current = process.env.ANCHOR_LEGACY_COMMANDS === '1';
-        const menu = current ? 'full (10 legacy commands)' : 'decluttered (/anchor, /pin, /snap, /back)';
+        const menu = current ? 'full (11 commands)' : 'decluttered (/anchor, /pin, /snap, /back)';
         if (flag === 'on' || flag === 'off') {
           // Commands are registered once when the extension loads, so switching mid-session
           // cannot add or remove them; the old code only mutated process.env and reported

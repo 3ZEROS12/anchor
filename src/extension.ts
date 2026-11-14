@@ -393,7 +393,6 @@ export default function (pi: ExtensionAPI, customStore?: AnchorStore) {
       project: Type.Optional(Type.String({ description: 'Optional project name or folder' })),
       files: Type.Optional(Type.Array(Type.String(), { description: 'Optional associated file paths' })),
       id: Type.Optional(Type.String({ description: 'Note ID, e.g. anc-1 or 1 (for step/settle)' })),
-      verifyCommand: Type.Optional(Type.String({ description: 'Pre-flight verification command to auto-settle the task' })),
       query: Type.Optional(Type.String({ description: 'Search query for search action' }))
     }),
     renderCall(args: any, theme: any) {
@@ -433,8 +432,9 @@ export default function (pi: ExtensionAPI, customStore?: AnchorStore) {
           project: params.project,
           cwd: ctx.cwd,
           files: params.files?.length ? params.files : (recentSessionFiles[0] ? [recentSessionFiles[0]] : []),
-          sessionFile: getSessionFileSafe(ctx),
-          verifyCommand: params.verifyCommand
+          sessionFile: getSessionFileSafe(ctx)
+          // verifyCommand is deliberately not model-writable: session_start executes it with
+          // no confirmation, so a hallucinated note would become a durable auto-run command.
         });
         updateAnchorStatusBar(ctx, store);
         return {

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { AnchorStore, normalizeAnchor, renderColdStartAnchorsContext } from '../src/store.ts';
-import initExtension, { createGitWipSnapshot } from '../src/extension.ts';
+import initExtension, { createGitWipSnapshot, parseAnchorCommandInput } from '../src/extension.ts';
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 function createTempDir(): string {
@@ -208,6 +208,51 @@ test('legacy toggle - reports the load-time constraint and never mutates the env
   } finally {
     if (previous !== undefined) process.env.ANCHOR_LEGACY_COMMANDS = previous;
     else delete process.env.ANCHOR_LEGACY_COMMANDS;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('command parse - a bare action verb opens the dock instead of pinning a note', () => {
+  for (const verb of ['done', 'steer', 'check', 'jump', 'resume', 'session', 'step']) {
+    assert.deepStrictEqual(parseAnchorCommandInput(verb), { mode: 'dashboard' }, verb);
+  }
+  // Verbs with a target keep their meaning.
+  assert.deepStrictEqual(parseAnchorCommandInput('done 2'), { mode: 'settle', targetId: '2' });
+});
+
+test('check - a ratio-only note explains itself instead of leaking an internal error', () => {
+  const dir = createTempDir();
+  try {
+    const store = new AnchorStore(dir);
+    const note = store.create({ title: 'Ratio task [2/4]', cwd: dir });
+    assert.strictEqual(note.progress?.total, 4);
+
+    assert.throws(
+      () => store.updateStep(note.id, 2, { status: 'completed' }),
+      /no checklist items.*\/anchor step 1/s
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('archive - undoSettle keeps lines it cannot parse', () => {
+  const dir = createTempDir();
+  try {
+    const store = new AnchorStore(dir);
+    const note = store.create({ title: 'Finished task', cwd: dir });
+    store.settle(note.id, { settledBy: 'manual' });
+
+    const archive = fs.readFileSync(store.archivePath, 'utf-8');
+    fs.writeFileSync(store.archivePath, `${archive.trimEnd()}\n{"torn write": tru\n`, 'utf-8');
+
+    const restored = store.undoSettle();
+    assert.strictEqual(restored.id, note.id);
+
+    const after = fs.readFileSync(store.archivePath, 'utf-8');
+    assert.ok(after.includes('{"torn write": tru'), `unparsable line was dropped: ${after}`);
+    assert.ok(!after.includes('Finished task'));
+  } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
