@@ -254,7 +254,6 @@ import os from "os";
 // src/types.ts
 var QUIET_AFTER_DAYS = 7;
 var MS_PER_DAY = 864e5;
-var DEFAULT_MAX_DOCK_LINES = 8;
 
 // src/graph.ts
 function validateStepDependencies(steps, stepId, newBlockedBy) {
@@ -566,7 +565,6 @@ function renderColdStartAnchorsContext(store, cwdOrNow, nowArg) {
     `</sticky-notes>`
   ].join("\n");
 }
-var renderActiveAnchorsContext = renderColdStartAnchorsContext;
 function sweepQuietNotes(store, now = Date.now()) {
   return store.withLock(() => {
     const state = store.loadState();
@@ -694,6 +692,64 @@ function atomicRenameWithRetry(tempPath, targetPath, maxRetries = 5) {
     throw lastErr;
   }
 }
+function normalizeAnchor(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw;
+  const id = typeof r.id === "string" ? r.id.trim() : "";
+  if (!id) return null;
+  const now = Date.now();
+  const num = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  const text = (v, fallback = "") => typeof v === "string" ? v : fallback;
+  const strings = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  const numbers = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "number" && Number.isFinite(x)) : void 0;
+  const status = r.status === "sleeping" || r.status === "settled" ? r.status : "active";
+  const createdAt = num(r.createdAt, now);
+  let progress;
+  if (r.progress && typeof r.progress === "object") {
+    const p = r.progress;
+    const steps = Array.isArray(p.steps) ? strings(p.steps) : void 0;
+    const total = num(p.total, steps?.length ?? 0);
+    progress = {
+      done: Math.max(0, Math.min(num(p.done, 0), total)),
+      total,
+      ...steps ? { steps } : {},
+      ...Array.isArray(p.items) ? {
+        items: p.items.filter((item) => item && typeof item === "object").map((item, index) => ({
+          id: num(item.id, index + 1),
+          subject: text(item.subject, text(item.title, `Step ${index + 1}`)),
+          status: ["pending", "in_progress", "completed", "deleted"].includes(item.status) ? item.status : "pending",
+          ...typeof item.activeForm === "string" ? { activeForm: item.activeForm } : {},
+          ...numbers(item.blockedBy) ? { blockedBy: numbers(item.blockedBy) } : {}
+        }))
+      } : {}
+    };
+  }
+  return {
+    id,
+    title: text(r.title, id),
+    ...typeof r.description === "string" ? { description: r.description } : {},
+    status,
+    ...r.source === "todo-sync" || r.source === "manual" ? { source: r.source } : {},
+    project: text(r.project, "global"),
+    cwd: text(r.cwd),
+    createdAt,
+    updatedAt: num(r.updatedAt, createdAt),
+    lastTouchedAt: num(r.lastTouchedAt, createdAt),
+    files: strings(r.files),
+    tags: strings(r.tags),
+    ...typeof r.activeForm === "string" ? { activeForm: r.activeForm } : {},
+    ...typeof r.liveStartedAt === "number" ? { liveStartedAt: r.liveStartedAt } : {},
+    ...typeof r.driftWarning === "string" ? { driftWarning: r.driftWarning } : {},
+    ...typeof r.steerGuidance === "string" ? { steerGuidance: r.steerGuidance } : {},
+    ...strings(r.blockedBy).length > 0 ? { blockedBy: strings(r.blockedBy) } : {},
+    ...typeof r.sessionFile === "string" ? { sessionFile: r.sessionFile } : {},
+    ...progress ? { progress } : {},
+    ...typeof r.targetDate === "string" ? { targetDate: r.targetDate } : {},
+    ...r.priority === "p0" || r.priority === "p1" || r.priority === "p2" ? { priority: r.priority } : {},
+    ...typeof r.verifyCommand === "string" ? { verifyCommand: r.verifyCommand } : {},
+    ...r.evidence && typeof r.evidence === "object" ? { evidence: r.evidence } : {}
+  };
+}
 var AnchorStore = class {
   storageDir;
   statePath;
@@ -732,7 +788,13 @@ var AnchorStore = class {
       if (!parsed || !Array.isArray(parsed.anchors)) {
         return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
       }
-      return parsed;
+      const anchors = parsed.anchors.map((raw) => normalizeAnchor(raw)).filter((a) => a !== null);
+      return {
+        version: typeof parsed.version === "number" ? parsed.version : 1,
+        anchors,
+        lastSweepAt: typeof parsed.lastSweepAt === "number" ? parsed.lastSweepAt : Date.now(),
+        nextId: typeof parsed.nextId === "number" ? parsed.nextId : void 0
+      };
     } catch {
       try {
         fs.copyFileSync(this.statePath, path3.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
@@ -954,7 +1016,12 @@ var AnchorStore = class {
       const current = state.anchors[idx];
       const items = materializeSteps(current.progress);
       const stepIdx = items.findIndex((s) => s.id === stepId);
-      if (stepIdx === -1) throw new Error(`Step #${stepId} not found in #${current.id}`);
+      if (stepIdx === -1) {
+        const total = current.progress?.total ?? 0;
+        throw new Error(
+          total > 0 && items.length === 0 ? `#${current.id} tracks a ${total}-step ratio with no checklist items; use /anchor step ${current.id.replace(/^anc-/, "")} to advance it` : `Step #${stepId} not found in #${current.id}`
+        );
+      }
       if (patch.addBlockedBy && patch.addBlockedBy.length > 0) {
         const check = validateStepDependencies(items, stepId, patch.addBlockedBy);
         if (!check.valid) throw new Error(check.error);
@@ -1186,19 +1253,24 @@ var AnchorStore = class {
       const raw = fs.readFileSync(this.archivePath, "utf-8");
       const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       let anchor = null;
+      const preserved = [];
       while (lines.length > 0 && !anchor) {
         const candidate = lines.pop();
         try {
           const parsed = JSON.parse(candidate);
           if (parsed && typeof parsed.id === "string" && typeof parsed.title === "string") {
             anchor = parsed;
+          } else {
+            preserved.push(candidate);
           }
         } catch {
+          preserved.push(candidate);
         }
       }
       if (!anchor) throw new Error("Archive is empty, nothing to undo");
+      const kept = [...lines, ...preserved.reverse()];
       const tmpArchive = `${this.archivePath}.${process.pid}.${Date.now()}.tmp`;
-      fs.writeFileSync(tmpArchive, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
+      fs.writeFileSync(tmpArchive, kept.length > 0 ? kept.join("\n") + "\n" : "", "utf-8");
       atomicRenameWithRetry(tmpArchive, this.archivePath);
       anchor.status = "active";
       anchor.updatedAt = Date.now();
@@ -1543,7 +1615,7 @@ function formatProgressBar(progress, cells = 4) {
   const bar = "\u25A0".repeat(finalFilled) + "\u25A1".repeat(Math.max(0, cells - finalFilled));
   return `[${bar} ${done}/${progress.total}]`;
 }
-function formatMicroGauge2(progress, cells = 6) {
+function formatMicroGauge(progress, cells = 6) {
   if (!progress || !progress.total || progress.total < 1) return "";
   const done = Math.max(0, Math.min(progress.total, progress.done || 0));
   if (done >= progress.total) {
@@ -1742,7 +1814,7 @@ async function openAnchorDashboard(ctx, store) {
 }
 
 // src/commands.ts
-import { execSync } from "child_process";
+import { execFileSync } from "child_process";
 import fs3 from "fs";
 function parseAnchorCommandInput(raw) {
   const trimmed = (raw || "").trim();
@@ -1824,6 +1896,9 @@ function parseAnchorCommandInput(raw) {
       targetId: jumpMatch[1].trim().replace(/^#/, "")
     };
   }
+  if (/^(?:done|close|settle|rm|step|check|mark|steer|jump|resume|session)$/i.test(trimmed)) {
+    return { mode: "dashboard" };
+  }
   return {
     mode: "pin",
     title: trimmed
@@ -1863,52 +1938,33 @@ function extractGitCommitMessages(cmd) {
 }
 function createGitWipSnapshot(cwd, message) {
   try {
-    const isGit = execSync("git rev-parse --is-inside-work-tree", {
+    const git = (args, timeout = 3e3) => execFileSync("git", args, {
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf-8",
-      timeout: 3e3
-    }).trim() === "true";
+      timeout
+    }).trim();
+    const isGit = git(["rev-parse", "--is-inside-work-tree"]) === "true";
     if (!isGit) {
       return { success: false, error: "Not inside a git repository" };
     }
     const snapMsg = (message || "").trim() || `anchor-snap-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`;
-    const status = execSync("git status --porcelain", {
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf-8",
-      timeout: 3e3
-    }).trim();
+    const status = git(["status", "--porcelain"]);
     if (!status) {
-      const head = execSync("git rev-parse --short HEAD", {
-        cwd,
-        stdio: ["ignore", "pipe", "ignore"],
-        encoding: "utf-8",
-        timeout: 3e3
-      }).trim();
-      return { success: true, commitHash: head, isClean: true };
+      return { success: true, commitHash: git(["rev-parse", "--short", "HEAD"]), isClean: true };
     }
-    const commitHash = execSync(`git stash create "${snapMsg.replace(/"/g, '\\"')}"`, {
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf-8",
-      timeout: 5e3
-    }).trim();
+    if (!git(["status", "--porcelain", "--untracked-files=no"])) {
+      return {
+        success: false,
+        error: "Only untracked changes present; git stash snapshots tracked modifications only. Stage or commit the new files first."
+      };
+    }
+    const commitHash = git(["stash", "create", snapMsg], 5e3);
     if (!commitHash) {
-      const head = execSync("git rev-parse --short HEAD", {
-        cwd,
-        stdio: ["ignore", "pipe", "ignore"],
-        encoding: "utf-8",
-        timeout: 3e3
-      }).trim();
-      return { success: true, commitHash: head, isClean: true };
+      return { success: false, error: "git stash create returned no commit (nothing tracked to snapshot)" };
     }
     try {
-      execSync(`git update-ref refs/anchor/snap ${commitHash} "anchor snap: ${snapMsg.replace(/"/g, '\\"')}"`, {
-        cwd,
-        stdio: "ignore",
-        timeout: 3e3
-      });
+      git(["update-ref", "-m", `anchor snap: ${snapMsg}`, "refs/anchor/snap", commitHash]);
     } catch {
     }
     return { success: true, commitHash: commitHash.slice(0, 7) };
@@ -2073,15 +2129,15 @@ To restore: git checkout refs/anchor/snap -- .`,
       }
       if (parsed.mode === "legacy") {
         const flag = parsed.title;
-        if (flag === "on") {
-          process.env.ANCHOR_LEGACY_COMMANDS = "1";
-          ctx.ui.notify("\u2316 Legacy standalone commands enabled for next session (ANCHOR_LEGACY_COMMANDS=1)", "info");
-        } else if (flag === "off") {
-          delete process.env.ANCHOR_LEGACY_COMMANDS;
-          ctx.ui.notify("\u2316 Slash command menu decluttered (legacy commands handled via 0ms input intercept)", "info");
+        const current = process.env.ANCHOR_LEGACY_COMMANDS === "1";
+        const menu = current ? "full (11 commands)" : "decluttered (/anchor, /pin, /snap, /back)";
+        if (flag === "on" || flag === "off") {
+          ctx.ui.notify(
+            `\u2316 This session keeps the ${menu} menu. Legacy commands register at load time: run ${flag === "on" ? "export ANCHOR_LEGACY_COMMANDS=1" : "unset ANCHOR_LEGACY_COMMANDS"} before starting the session to change it.`,
+            "info"
+          );
         } else {
-          const current = process.env.ANCHOR_LEGACY_COMMANDS === "1";
-          ctx.ui.notify(`\u2316 Menu mode: ${current ? "full (10 legacy commands)" : "decluttered (/anchor, /pin, /snap, /back)"}. Toggle with /anchor legacy on|off`, "info");
+          ctx.ui.notify(`\u2316 Menu mode: ${menu}. Set ANCHOR_LEGACY_COMMANDS=1 before starting the session to switch.`, "info");
         }
         return;
       }
@@ -2716,7 +2772,6 @@ function extension_default(pi, customStore) {
       project: Type.Optional(Type.String({ description: "Optional project name or folder" })),
       files: Type.Optional(Type.Array(Type.String(), { description: "Optional associated file paths" })),
       id: Type.Optional(Type.String({ description: "Note ID, e.g. anc-1 or 1 (for step/settle)" })),
-      verifyCommand: Type.Optional(Type.String({ description: "Pre-flight verification command to auto-settle the task" })),
       query: Type.Optional(Type.String({ description: "Search query for search action" }))
     }),
     renderCall(args, theme) {
@@ -2757,8 +2812,9 @@ function extension_default(pi, customStore) {
           project: params.project,
           cwd: ctx.cwd,
           files: params.files?.length ? params.files : recentSessionFiles[0] ? [recentSessionFiles[0]] : [],
-          sessionFile: getSessionFileSafe(ctx),
-          verifyCommand: params.verifyCommand
+          sessionFile: getSessionFileSafe(ctx)
+          // verifyCommand is deliberately not model-writable: session_start executes it with
+          // no confirmation, so a hallucinated note would become a durable auto-run command.
         });
         updateAnchorStatusBar(ctx, store);
         return {
@@ -2852,7 +2908,6 @@ export {
   matchesCommitMessage,
   QUIET_AFTER_DAYS,
   MS_PER_DAY,
-  DEFAULT_MAX_DOCK_LINES,
   validateStepDependencies,
   validateAnchorDependencies,
   deriveStepBlocks,
@@ -2864,11 +2919,11 @@ export {
   convertTodoTasksToSteps,
   inferLiveActivityLabel,
   renderColdStartAnchorsContext,
-  renderActiveAnchorsContext,
   sweepQuietNotes,
   getDefaultStorageDir,
   acquireSyncLock,
   atomicRenameWithRetry,
+  normalizeAnchor,
   AnchorStore,
   STATUS_GLYPH,
   formatStepGlyph,
@@ -2883,7 +2938,7 @@ export {
   truncateToWidth,
   padToWidth,
   formatProgressBar,
-  formatMicroGauge2 as formatMicroGauge,
+  formatMicroGauge,
   formatRelativeAge,
   formatOrigin,
   sortAnchorsForDisplay,

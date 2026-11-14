@@ -119,14 +119,12 @@ interface DockStepLayout {
 /** 7 days without activity moves a note to quiet mode (still visible in UI, 0 prompt tokens in unrelated workspaces) */
 declare const QUIET_AFTER_DAYS = 7;
 declare const MS_PER_DAY = 86400000;
-declare const DEFAULT_MAX_DOCK_LINES = 8;
 
 /**
  * Render ultra-compact Turn-1 sticky note context for the AI.
  * Turn 2+ consumes 0 tokens.
  */
 declare function renderColdStartAnchorsContext(store: AnchorStore, cwdOrNow?: string | number, nowArg?: number): string;
-declare const renderActiveAnchorsContext: typeof renderColdStartAnchorsContext;
 /**
  * Transition notes untouched for >7 days to 'sleeping' (quiet mode) so they don't burn Turn-1 tokens
  * in unrelated sessions, while NEVER deleting them.
@@ -137,6 +135,14 @@ declare function sweepQuietNotes(store: AnchorStore, now?: number): {
 declare function getDefaultStorageDir(): string;
 declare function acquireSyncLock(lockPath: string, maxWaitMs?: number, staleTimeoutMs?: number): (() => void) | null;
 declare function atomicRenameWithRetry(tempPath: string, targetPath: string, maxRetries?: number): void;
+/**
+ * Coerces a persisted anchor into the current schema.
+ * Older or hand-edited state files omit `files`/`tags`/timestamps, and every reader
+ * (`list`, cold-start context, dock, mission receipts) dereferences those fields, so a
+ * single partial entry used to throw on load and blank the whole dock.
+ * Returns null for entries that cannot be attributed to a note at all.
+ */
+declare function normalizeAnchor(raw: unknown): Anchor | null;
 declare class AnchorStore {
     readonly storageDir: string;
     readonly statePath: string;
@@ -276,4 +282,4 @@ declare const MUTATION_TOOLS: Set<string>;
 declare function getSessionFileSafe(ctx?: ExtensionContext): string | undefined;
 declare function export_default(pi: ExtensionAPI, customStore?: AnchorStore): void;
 
-export { type AnchorProgress as A, type DockStepLayout as D, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type StepCounts as S, type TouchMatchResult as T, type Anchor as a, type AnchorStep as b, type TodoTaskItem as c, type StepStatus as d, AnchorStore as e, type AnchorEvidence as f, type AnchorPriority as g, type AnchorStatus as h, type AnchorStoreState as i, DEFAULT_MAX_DOCK_LINES as j, MUTATION_TOOLS as k, acquireSyncLock as l, atomicRenameWithRetry as m, createGitWipSnapshot as n, extractGitCommitMessages as o, getDefaultStorageDir as p, getSessionFileSafe as q, parseAnchorCommandInput as r, parseQuickNoteInput as s, registerAnchorCommands as t, renderActiveAnchorsContext as u, renderColdStartAnchorsContext as v, resolveAnchorTarget as w, sweepQuietNotes as x, tryHandleLegacySlashCommand as y, export_default as z };
+export { type AnchorProgress as A, type DockStepLayout as D, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type StepCounts as S, type TouchMatchResult as T, type Anchor as a, type AnchorStep as b, type TodoTaskItem as c, type StepStatus as d, AnchorStore as e, type AnchorEvidence as f, type AnchorPriority as g, type AnchorStatus as h, type AnchorStoreState as i, MUTATION_TOOLS as j, acquireSyncLock as k, atomicRenameWithRetry as l, createGitWipSnapshot as m, extractGitCommitMessages as n, getDefaultStorageDir as o, getSessionFileSafe as p, normalizeAnchor as q, parseAnchorCommandInput as r, parseQuickNoteInput as s, registerAnchorCommands as t, renderColdStartAnchorsContext as u, resolveAnchorTarget as v, sweepQuietNotes as w, tryHandleLegacySlashCommand as x, export_default as y };

@@ -705,6 +705,64 @@ function atomicRenameWithRetry(tempPath, targetPath, maxRetries = 5) {
     throw lastErr;
   }
 }
+function normalizeAnchor(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw;
+  const id = typeof r.id === "string" ? r.id.trim() : "";
+  if (!id) return null;
+  const now = Date.now();
+  const num = (v, fallback) => typeof v === "number" && Number.isFinite(v) ? v : fallback;
+  const text = (v, fallback = "") => typeof v === "string" ? v : fallback;
+  const strings = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "string") : [];
+  const numbers = (v) => Array.isArray(v) ? v.filter((x) => typeof x === "number" && Number.isFinite(x)) : void 0;
+  const status = r.status === "sleeping" || r.status === "settled" ? r.status : "active";
+  const createdAt = num(r.createdAt, now);
+  let progress;
+  if (r.progress && typeof r.progress === "object") {
+    const p = r.progress;
+    const steps = Array.isArray(p.steps) ? strings(p.steps) : void 0;
+    const total = num(p.total, steps?.length ?? 0);
+    progress = {
+      done: Math.max(0, Math.min(num(p.done, 0), total)),
+      total,
+      ...steps ? { steps } : {},
+      ...Array.isArray(p.items) ? {
+        items: p.items.filter((item) => item && typeof item === "object").map((item, index) => ({
+          id: num(item.id, index + 1),
+          subject: text(item.subject, text(item.title, `Step ${index + 1}`)),
+          status: ["pending", "in_progress", "completed", "deleted"].includes(item.status) ? item.status : "pending",
+          ...typeof item.activeForm === "string" ? { activeForm: item.activeForm } : {},
+          ...numbers(item.blockedBy) ? { blockedBy: numbers(item.blockedBy) } : {}
+        }))
+      } : {}
+    };
+  }
+  return {
+    id,
+    title: text(r.title, id),
+    ...typeof r.description === "string" ? { description: r.description } : {},
+    status,
+    ...r.source === "todo-sync" || r.source === "manual" ? { source: r.source } : {},
+    project: text(r.project, "global"),
+    cwd: text(r.cwd),
+    createdAt,
+    updatedAt: num(r.updatedAt, createdAt),
+    lastTouchedAt: num(r.lastTouchedAt, createdAt),
+    files: strings(r.files),
+    tags: strings(r.tags),
+    ...typeof r.activeForm === "string" ? { activeForm: r.activeForm } : {},
+    ...typeof r.liveStartedAt === "number" ? { liveStartedAt: r.liveStartedAt } : {},
+    ...typeof r.driftWarning === "string" ? { driftWarning: r.driftWarning } : {},
+    ...typeof r.steerGuidance === "string" ? { steerGuidance: r.steerGuidance } : {},
+    ...strings(r.blockedBy).length > 0 ? { blockedBy: strings(r.blockedBy) } : {},
+    ...typeof r.sessionFile === "string" ? { sessionFile: r.sessionFile } : {},
+    ...progress ? { progress } : {},
+    ...typeof r.targetDate === "string" ? { targetDate: r.targetDate } : {},
+    ...r.priority === "p0" || r.priority === "p1" || r.priority === "p2" ? { priority: r.priority } : {},
+    ...typeof r.verifyCommand === "string" ? { verifyCommand: r.verifyCommand } : {},
+    ...r.evidence && typeof r.evidence === "object" ? { evidence: r.evidence } : {}
+  };
+}
 var AnchorStore = class {
   storageDir;
   statePath;
@@ -743,7 +801,13 @@ var AnchorStore = class {
       if (!parsed || !Array.isArray(parsed.anchors)) {
         return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
       }
-      return parsed;
+      const anchors = parsed.anchors.map((raw) => normalizeAnchor(raw)).filter((a) => a !== null);
+      return {
+        version: typeof parsed.version === "number" ? parsed.version : 1,
+        anchors,
+        lastSweepAt: typeof parsed.lastSweepAt === "number" ? parsed.lastSweepAt : Date.now(),
+        nextId: typeof parsed.nextId === "number" ? parsed.nextId : void 0
+      };
     } catch {
       try {
         import_node_fs.default.copyFileSync(this.statePath, import_node_path3.default.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
@@ -965,7 +1029,12 @@ var AnchorStore = class {
       const current = state.anchors[idx];
       const items = materializeSteps(current.progress);
       const stepIdx = items.findIndex((s) => s.id === stepId);
-      if (stepIdx === -1) throw new Error(`Step #${stepId} not found in #${current.id}`);
+      if (stepIdx === -1) {
+        const total = current.progress?.total ?? 0;
+        throw new Error(
+          total > 0 && items.length === 0 ? `#${current.id} tracks a ${total}-step ratio with no checklist items; use /anchor step ${current.id.replace(/^anc-/, "")} to advance it` : `Step #${stepId} not found in #${current.id}`
+        );
+      }
       if (patch.addBlockedBy && patch.addBlockedBy.length > 0) {
         const check = validateStepDependencies(items, stepId, patch.addBlockedBy);
         if (!check.valid) throw new Error(check.error);
@@ -1197,19 +1266,24 @@ var AnchorStore = class {
       const raw = import_node_fs.default.readFileSync(this.archivePath, "utf-8");
       const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       let anchor = null;
+      const preserved = [];
       while (lines.length > 0 && !anchor) {
         const candidate = lines.pop();
         try {
           const parsed = JSON.parse(candidate);
           if (parsed && typeof parsed.id === "string" && typeof parsed.title === "string") {
             anchor = parsed;
+          } else {
+            preserved.push(candidate);
           }
         } catch {
+          preserved.push(candidate);
         }
       }
       if (!anchor) throw new Error("Archive is empty, nothing to undo");
+      const kept = [...lines, ...preserved.reverse()];
       const tmpArchive = `${this.archivePath}.${process.pid}.${Date.now()}.tmp`;
-      import_node_fs.default.writeFileSync(tmpArchive, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
+      import_node_fs.default.writeFileSync(tmpArchive, kept.length > 0 ? kept.join("\n") + "\n" : "", "utf-8");
       atomicRenameWithRetry(tmpArchive, this.archivePath);
       anchor.status = "active";
       anchor.updatedAt = Date.now();
@@ -1820,6 +1894,9 @@ function parseAnchorCommandInput(raw) {
       targetId: jumpMatch[1].trim().replace(/^#/, "")
     };
   }
+  if (/^(?:done|close|settle|rm|step|check|mark|steer|jump|resume|session)$/i.test(trimmed)) {
+    return { mode: "dashboard" };
+  }
   return {
     mode: "pin",
     title: trimmed
@@ -1859,52 +1936,33 @@ function extractGitCommitMessages(cmd) {
 }
 function createGitWipSnapshot(cwd, message) {
   try {
-    const isGit = (0, import_node_child_process.execSync)("git rev-parse --is-inside-work-tree", {
+    const git = (args, timeout = 3e3) => (0, import_node_child_process.execFileSync)("git", args, {
       cwd,
       stdio: ["ignore", "pipe", "ignore"],
       encoding: "utf-8",
-      timeout: 3e3
-    }).trim() === "true";
+      timeout
+    }).trim();
+    const isGit = git(["rev-parse", "--is-inside-work-tree"]) === "true";
     if (!isGit) {
       return { success: false, error: "Not inside a git repository" };
     }
     const snapMsg = (message || "").trim() || `anchor-snap-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`;
-    const status = (0, import_node_child_process.execSync)("git status --porcelain", {
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf-8",
-      timeout: 3e3
-    }).trim();
+    const status = git(["status", "--porcelain"]);
     if (!status) {
-      const head = (0, import_node_child_process.execSync)("git rev-parse --short HEAD", {
-        cwd,
-        stdio: ["ignore", "pipe", "ignore"],
-        encoding: "utf-8",
-        timeout: 3e3
-      }).trim();
-      return { success: true, commitHash: head, isClean: true };
+      return { success: true, commitHash: git(["rev-parse", "--short", "HEAD"]), isClean: true };
     }
-    const commitHash = (0, import_node_child_process.execSync)(`git stash create "${snapMsg.replace(/"/g, '\\"')}"`, {
-      cwd,
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf-8",
-      timeout: 5e3
-    }).trim();
+    if (!git(["status", "--porcelain", "--untracked-files=no"])) {
+      return {
+        success: false,
+        error: "Only untracked changes present; git stash snapshots tracked modifications only. Stage or commit the new files first."
+      };
+    }
+    const commitHash = git(["stash", "create", snapMsg], 5e3);
     if (!commitHash) {
-      const head = (0, import_node_child_process.execSync)("git rev-parse --short HEAD", {
-        cwd,
-        stdio: ["ignore", "pipe", "ignore"],
-        encoding: "utf-8",
-        timeout: 3e3
-      }).trim();
-      return { success: true, commitHash: head, isClean: true };
+      return { success: false, error: "git stash create returned no commit (nothing tracked to snapshot)" };
     }
     try {
-      (0, import_node_child_process.execSync)(`git update-ref refs/anchor/snap ${commitHash} "anchor snap: ${snapMsg.replace(/"/g, '\\"')}"`, {
-        cwd,
-        stdio: "ignore",
-        timeout: 3e3
-      });
+      git(["update-ref", "-m", `anchor snap: ${snapMsg}`, "refs/anchor/snap", commitHash]);
     } catch {
     }
     return { success: true, commitHash: commitHash.slice(0, 7) };
@@ -2069,15 +2127,15 @@ To restore: git checkout refs/anchor/snap -- .`,
       }
       if (parsed.mode === "legacy") {
         const flag = parsed.title;
-        if (flag === "on") {
-          process.env.ANCHOR_LEGACY_COMMANDS = "1";
-          ctx.ui.notify("\u2316 Legacy standalone commands enabled for next session (ANCHOR_LEGACY_COMMANDS=1)", "info");
-        } else if (flag === "off") {
-          delete process.env.ANCHOR_LEGACY_COMMANDS;
-          ctx.ui.notify("\u2316 Slash command menu decluttered (legacy commands handled via 0ms input intercept)", "info");
+        const current = process.env.ANCHOR_LEGACY_COMMANDS === "1";
+        const menu = current ? "full (11 commands)" : "decluttered (/anchor, /pin, /snap, /back)";
+        if (flag === "on" || flag === "off") {
+          ctx.ui.notify(
+            `\u2316 This session keeps the ${menu} menu. Legacy commands register at load time: run ${flag === "on" ? "export ANCHOR_LEGACY_COMMANDS=1" : "unset ANCHOR_LEGACY_COMMANDS"} before starting the session to change it.`,
+            "info"
+          );
         } else {
-          const current = process.env.ANCHOR_LEGACY_COMMANDS === "1";
-          ctx.ui.notify(`\u2316 Menu mode: ${current ? "full (10 legacy commands)" : "decluttered (/anchor, /pin, /snap, /back)"}. Toggle with /anchor legacy on|off`, "info");
+          ctx.ui.notify(`\u2316 Menu mode: ${menu}. Set ANCHOR_LEGACY_COMMANDS=1 before starting the session to switch.`, "info");
         }
         return;
       }
@@ -2712,7 +2770,6 @@ function extension_default(pi, customStore) {
       project: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Optional project name or folder" })),
       files: import_typebox.Type.Optional(import_typebox.Type.Array(import_typebox.Type.String(), { description: "Optional associated file paths" })),
       id: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Note ID, e.g. anc-1 or 1 (for step/settle)" })),
-      verifyCommand: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Pre-flight verification command to auto-settle the task" })),
       query: import_typebox.Type.Optional(import_typebox.Type.String({ description: "Search query for search action" }))
     }),
     renderCall(args, theme) {
@@ -2753,8 +2810,9 @@ function extension_default(pi, customStore) {
           project: params.project,
           cwd: ctx.cwd,
           files: params.files?.length ? params.files : recentSessionFiles[0] ? [recentSessionFiles[0]] : [],
-          sessionFile: getSessionFileSafe(ctx),
-          verifyCommand: params.verifyCommand
+          sessionFile: getSessionFileSafe(ctx)
+          // verifyCommand is deliberately not model-writable: session_start executes it with
+          // no confirmation, so a hallucinated note would become a durable auto-run command.
         });
         updateAnchorStatusBar(ctx, store);
         return {
