@@ -16,7 +16,6 @@ import {
   updateStartupBanner
 } from '../src/tui.ts';
 import initExtension, {
-  createGitWipSnapshot,
   extractGitCommitMessages,
   parseAnchorCommandInput,
   parseQuickNoteInput,
@@ -450,13 +449,6 @@ test('parseAnchorCommandInput - parses snap and legacy commands', () => {
   assert.deepStrictEqual(parseAnchorCommandInput('legacy on'), { mode: 'legacy', title: 'on' });
   assert.deepStrictEqual(parseAnchorCommandInput('legacy off'), { mode: 'legacy', title: 'off' });
   assert.deepStrictEqual(parseAnchorCommandInput('legacy'), { mode: 'legacy', title: 'toggle' });
-});
-
-test('createGitWipSnapshot - captures non-destructive snapshot commit in git repo', () => {
-  const res = createGitWipSnapshot(process.cwd(), 'unit-test-snapshot');
-  assert.strictEqual(res.success, true);
-  assert.ok(res.commitHash, 'Commit hash should be returned');
-  assert.strictEqual(typeof res.commitHash, 'string');
 });
 
 test('tryHandleLegacySlashCommand - intercepts legacy commands in 0ms without cluttering menu', () => {

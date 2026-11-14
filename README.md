@@ -6,7 +6,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 33 Passed](https://img.shields.io/badge/Tests-33%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 32 Passed](https://img.shields.io/badge/Tests-32%20Passed-22c55e.svg)](tests/store.test.ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
 **English** | [日本語](./README_ja.md) | [简体中文](./README_zh.md)
