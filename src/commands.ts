@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import { AnchorStore, isSameOrSubPath } from './store.ts';
 import {
@@ -168,12 +168,17 @@ export function createGitWipSnapshot(cwd: string, message?: string): {
   error?: string;
 } {
   try {
-    const isGit = execSync('git rev-parse --is-inside-work-tree', {
-      cwd,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf-8',
-      timeout: 3000
-    }).trim() === 'true';
+    // argv form only: the snapshot message is user text, and a quoted shell string let
+    // `$(…)`, backticks and `$VAR` expand (POSIX) or break out entirely (cmd.exe).
+    const git = (args: string[], timeout = 3000): string =>
+      execFileSync('git', args, {
+        cwd,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf-8',
+        timeout
+      }).trim();
+
+    const isGit = git(['rev-parse', '--is-inside-work-tree']) === 'true';
 
     if (!isGit) {
       return { success: false, error: 'Not inside a git repository' };
@@ -181,46 +186,31 @@ export function createGitWipSnapshot(cwd: string, message?: string): {
 
     const snapMsg = (message || '').trim() || `anchor-snap-${new Date().toISOString().replace(/[:.]/g, '-')}`;
 
-    const status = execSync('git status --porcelain', {
-      cwd,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf-8',
-      timeout: 3000
-    }).trim();
+    const status = git(['status', '--porcelain']);
 
     if (!status) {
-      const head = execSync('git rev-parse --short HEAD', {
-        cwd,
-        stdio: ['ignore', 'pipe', 'ignore'],
-        encoding: 'utf-8',
-        timeout: 3000
-      }).trim();
-      return { success: true, commitHash: head, isClean: true };
+      return { success: true, commitHash: git(['rev-parse', '--short', 'HEAD']), isClean: true };
     }
 
-    const commitHash = execSync(`git stash create "${snapMsg.replace(/"/g, '\\"')}"`, {
-      cwd,
-      stdio: ['ignore', 'pipe', 'ignore'],
-      encoding: 'utf-8',
-      timeout: 5000
-    }).trim();
+    // `git stash create` snapshots tracked modifications only and yields an empty hash when
+    // nothing tracked changed, so an untracked-only tree used to be reported as "clean".
+    if (!git(['status', '--porcelain', '--untracked-files=no'])) {
+      return {
+        success: false,
+        error: 'Only untracked changes present; git stash snapshots tracked modifications only. Stage or commit the new files first.'
+      };
+    }
+
+    const commitHash = git(['stash', 'create', snapMsg], 5000);
 
     if (!commitHash) {
-      const head = execSync('git rev-parse --short HEAD', {
-        cwd,
-        stdio: ['ignore', 'pipe', 'ignore'],
-        encoding: 'utf-8',
-        timeout: 3000
-      }).trim();
-      return { success: true, commitHash: head, isClean: true };
+      return { success: false, error: 'git stash create returned no commit (nothing tracked to snapshot)' };
     }
 
     try {
-      execSync(`git update-ref refs/anchor/snap ${commitHash} "anchor snap: ${snapMsg.replace(/"/g, '\\"')}"`, {
-        cwd,
-        stdio: 'ignore',
-        timeout: 3000
-      });
+      // `git update-ref <ref> <newvalue> [<oldvalue>]` takes no message positionally: the third
+      // argument is the expected old value, so the old call always failed and was swallowed.
+      git(['update-ref', '-m', `anchor snap: ${snapMsg}`, 'refs/anchor/snap', commitHash]);
     } catch {
       // update-ref is non-fatal
     }
@@ -410,15 +400,18 @@ export function registerAnchorCommands(
 
       if (parsed.mode === 'legacy') {
         const flag = parsed.title;
-        if (flag === 'on') {
-          process.env.ANCHOR_LEGACY_COMMANDS = '1';
-          ctx.ui.notify('⌖ Legacy standalone commands enabled for next session (ANCHOR_LEGACY_COMMANDS=1)', 'info');
-        } else if (flag === 'off') {
-          delete process.env.ANCHOR_LEGACY_COMMANDS;
-          ctx.ui.notify('⌖ Slash command menu decluttered (legacy commands handled via 0ms input intercept)', 'info');
+        const current = process.env.ANCHOR_LEGACY_COMMANDS === '1';
+        const menu = current ? 'full (10 legacy commands)' : 'decluttered (/anchor, /pin, /snap, /back)';
+        if (flag === 'on' || flag === 'off') {
+          // Commands are registered once when the extension loads, so switching mid-session
+          // cannot add or remove them; the old code only mutated process.env and reported
+          // success, which was unreachable by design.
+          ctx.ui.notify(
+            `⌖ This session keeps the ${menu} menu. Legacy commands register at load time: run ${flag === 'on' ? 'export ANCHOR_LEGACY_COMMANDS=1' : 'unset ANCHOR_LEGACY_COMMANDS'} before starting the session to change it.`,
+            'info'
+          );
         } else {
-          const current = process.env.ANCHOR_LEGACY_COMMANDS === '1';
-          ctx.ui.notify(`⌖ Menu mode: ${current ? 'full (10 legacy commands)' : 'decluttered (/anchor, /pin, /snap, /back)'}. Toggle with /anchor legacy on|off`, 'info');
+          ctx.ui.notify(`⌖ Menu mode: ${menu}. Set ANCHOR_LEGACY_COMMANDS=1 before starting the session to switch.`, 'info');
         }
         return;
       }

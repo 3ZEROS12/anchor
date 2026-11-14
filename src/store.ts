@@ -203,6 +203,84 @@ export function atomicRenameWithRetry(tempPath: string, targetPath: string, maxR
   }
 }
 
+/**
+ * Coerces a persisted anchor into the current schema.
+ * Older or hand-edited state files omit `files`/`tags`/timestamps, and every reader
+ * (`list`, cold-start context, dock, mission receipts) dereferences those fields, so a
+ * single partial entry used to throw on load and blank the whole dock.
+ * Returns null for entries that cannot be attributed to a note at all.
+ */
+export function normalizeAnchor(raw: unknown): Anchor | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, any>;
+  const id = typeof r.id === 'string' ? r.id.trim() : '';
+  if (!id) return null;
+
+  const now = Date.now();
+  const num = (v: unknown, fallback: number) => (typeof v === 'number' && Number.isFinite(v) ? v : fallback);
+  const text = (v: unknown, fallback = '') => (typeof v === 'string' ? v : fallback);
+  const strings = (v: unknown): string[] =>
+    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  const numbers = (v: unknown): number[] | undefined =>
+    Array.isArray(v) ? v.filter((x): x is number => typeof x === 'number' && Number.isFinite(x)) : undefined;
+
+  const status: AnchorStatus = r.status === 'sleeping' || r.status === 'settled' ? r.status : 'active';
+  const createdAt = num(r.createdAt, now);
+
+  let progress: AnchorProgress | undefined;
+  if (r.progress && typeof r.progress === 'object') {
+    const p = r.progress as Record<string, any>;
+    const steps = Array.isArray(p.steps) ? strings(p.steps) : undefined;
+    const total = num(p.total, steps?.length ?? 0);
+    progress = {
+      done: Math.max(0, Math.min(num(p.done, 0), total)),
+      total,
+      ...(steps ? { steps } : {}),
+      ...(Array.isArray(p.items)
+        ? {
+            items: p.items
+              .filter((item: any) => item && typeof item === 'object')
+              .map((item: any, index: number) => ({
+                id: num(item.id, index + 1),
+                subject: text(item.subject, text(item.title, `Step ${index + 1}`)),
+                status: (['pending', 'in_progress', 'completed', 'deleted'] as StepStatus[]).includes(item.status)
+                  ? (item.status as StepStatus)
+                  : 'pending',
+                ...(typeof item.activeForm === 'string' ? { activeForm: item.activeForm } : {}),
+                ...(numbers(item.blockedBy) ? { blockedBy: numbers(item.blockedBy) } : {}),
+              })),
+          }
+        : {}),
+    };
+  }
+
+  return {
+    id,
+    title: text(r.title, id),
+    ...(typeof r.description === 'string' ? { description: r.description } : {}),
+    status,
+    ...(r.source === 'todo-sync' || r.source === 'manual' ? { source: r.source } : {}),
+    project: text(r.project, 'global'),
+    cwd: text(r.cwd),
+    createdAt,
+    updatedAt: num(r.updatedAt, createdAt),
+    lastTouchedAt: num(r.lastTouchedAt, createdAt),
+    files: strings(r.files),
+    tags: strings(r.tags),
+    ...(typeof r.activeForm === 'string' ? { activeForm: r.activeForm } : {}),
+    ...(typeof r.liveStartedAt === 'number' ? { liveStartedAt: r.liveStartedAt } : {}),
+    ...(typeof r.driftWarning === 'string' ? { driftWarning: r.driftWarning } : {}),
+    ...(typeof r.steerGuidance === 'string' ? { steerGuidance: r.steerGuidance } : {}),
+    ...(strings(r.blockedBy).length > 0 ? { blockedBy: strings(r.blockedBy) } : {}),
+    ...(typeof r.sessionFile === 'string' ? { sessionFile: r.sessionFile } : {}),
+    ...(progress ? { progress } : {}),
+    ...(typeof r.targetDate === 'string' ? { targetDate: r.targetDate } : {}),
+    ...(r.priority === 'p0' || r.priority === 'p1' || r.priority === 'p2' ? { priority: r.priority } : {}),
+    ...(typeof r.verifyCommand === 'string' ? { verifyCommand: r.verifyCommand } : {}),
+    ...(r.evidence && typeof r.evidence === 'object' ? { evidence: r.evidence as AnchorEvidence } : {}),
+  };
+}
+
 export class AnchorStore {
   public readonly storageDir: string;
   public readonly statePath: string;
@@ -245,7 +323,15 @@ export class AnchorStore {
       if (!parsed || !Array.isArray(parsed.anchors)) {
         return { version: 1, anchors: [], lastSweepAt: Date.now(), nextId: 1 };
       }
-      return parsed;
+      const anchors = parsed.anchors
+        .map((raw: unknown) => normalizeAnchor(raw))
+        .filter((a: Anchor | null): a is Anchor => a !== null);
+      return {
+        version: typeof parsed.version === 'number' ? parsed.version : 1,
+        anchors,
+        lastSweepAt: typeof parsed.lastSweepAt === 'number' ? parsed.lastSweepAt : Date.now(),
+        nextId: typeof parsed.nextId === 'number' ? parsed.nextId : undefined,
+      };
     } catch {
       try {
         fs.copyFileSync(this.statePath, path.join(this.storageDir, `state.corrupt.${Date.now()}.json`));
