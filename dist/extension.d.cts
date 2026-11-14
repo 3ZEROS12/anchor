@@ -1,2 +1,2 @@
 import '@earendil-works/pi-coding-agent';
-export { k as MUTATION_TOOLS, x as default, n as extractGitCommitMessages, p as getSessionFileSafe, q as parseAnchorCommandInput, r as parseQuickNoteInput, v as resolveAnchorTarget } from './extension-ztZoT_9j.cjs';
+export { k as MUTATION_TOOLS, n as createGitWipSnapshot, z as default, o as extractGitCommitMessages, q as getSessionFileSafe, r as parseAnchorCommandInput, s as parseQuickNoteInput, w as resolveAnchorTarget, y as tryHandleLegacySlashCommand } from './extension-BQOrAJOJ.cjs';

@@ -31,16 +31,18 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var extension_exports = {};
 __export(extension_exports, {
   MUTATION_TOOLS: () => MUTATION_TOOLS,
+  createGitWipSnapshot: () => createGitWipSnapshot,
   default: () => extension_default,
   extractGitCommitMessages: () => extractGitCommitMessages,
   getSessionFileSafe: () => getSessionFileSafe,
   parseAnchorCommandInput: () => parseAnchorCommandInput,
   parseQuickNoteInput: () => parseQuickNoteInput,
-  resolveAnchorTarget: () => resolveAnchorTarget
+  resolveAnchorTarget: () => resolveAnchorTarget,
+  tryHandleLegacySlashCommand: () => tryHandleLegacySlashCommand
 });
 module.exports = __toCommonJS(extension_exports);
 var import_typebox = require("@sinclair/typebox");
-var import_node_child_process = require("child_process");
+var import_node_child_process2 = require("child_process");
 var import_node_fs4 = __toESM(require("fs"), 1);
 var import_node_path5 = __toESM(require("path"), 1);
 
@@ -596,9 +598,19 @@ function sweepQuietNotes(store, now = Date.now()) {
 }
 function getDefaultStorageDir() {
   if (process.env.ANCHOR_DIR) return import_node_path3.default.resolve(process.env.ANCHOR_DIR);
+  if (process.env.PI_ANCHOR_DIR) return import_node_path3.default.resolve(process.env.PI_ANCHOR_DIR);
   return import_node_path3.default.join(import_node_os.default.homedir(), ".anchor");
 }
+var SLEEP_SAB = typeof SharedArrayBuffer !== "undefined" ? new Int32Array(new SharedArrayBuffer(4)) : null;
 function sleepSync(ms) {
+  if (ms <= 0) return;
+  if (SLEEP_SAB) {
+    try {
+      Atomics.wait(SLEEP_SAB, 0, 0, Math.floor(ms));
+      return;
+    } catch {
+    }
+  }
   const end = Date.now() + ms;
   while (Date.now() < end) {
   }
@@ -1196,7 +1208,9 @@ var AnchorStore = class {
         }
       }
       if (!anchor) throw new Error("Archive is empty, nothing to undo");
-      import_node_fs.default.writeFileSync(this.archivePath, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
+      const tmpArchive = `${this.archivePath}.${process.pid}.${Date.now()}.tmp`;
+      import_node_fs.default.writeFileSync(tmpArchive, lines.length > 0 ? lines.join("\n") + "\n" : "", "utf-8");
+      atomicRenameWithRetry(tmpArchive, this.archivePath);
       anchor.status = "active";
       anchor.updatedAt = Date.now();
       anchor.lastTouchedAt = Date.now();
@@ -1451,11 +1465,16 @@ function renderMissionReceipt(anchor, options) {
   const num = anchor.id.replace(/^anc-/, "");
   const targetStr = anchor.files.length > 0 ? anchor.files.slice(0, 3).map((f) => f.split(/[\\/]/).pop()).join(", ") : anchor.project || "workspace";
   const progressStr = anchor.progress ? `[\u25A0\u25A0\u25A0\u25A0 ${anchor.progress.total}/${anchor.progress.total}] Verified` : "100% Completed";
+  const driftStr = anchor.driftWarning ? `1 (${anchor.driftWarning})` : "0 violations";
+  const clippedTitle = truncateToWidth(anchor.title, 36);
+  const titleBar = `\u250C\u2500 \u2316 Mission #${num} Completed: "${clippedTitle}" `;
+  const boxWidth = Math.max(63, getDisplayWidth(titleBar) + 2);
+  const topFill = "\u2500".repeat(Math.max(1, boxWidth - getDisplayWidth(titleBar) - 1));
   return [
-    fg("accent", `\u250C\u2500 \u2316 Mission #${num} Completed: "${anchor.title}" \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510`),
+    fg("accent", `${titleBar}${topFill}\u2510`),
     fg("muted", `\u2502  \u2022 Duration: ${durationStr} \xB7 Progress: ${progressStr}`),
-    fg("muted", `\u2502  \u2022 Target Scope: ${targetStr} \xB7 Drift: 0 violations`),
-    fg("accent", `\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518`)
+    fg("muted", `\u2502  \u2022 Target Scope: ${targetStr} \xB7 Drift: ${driftStr}`),
+    fg("accent", `\u2514${"\u2500".repeat(Math.max(1, boxWidth - 2))}\u2518`)
   ];
 }
 
@@ -1609,7 +1628,7 @@ function updateStartupBanner(ctx, store) {
       invalidate: () => {
       }
     });
-    const content = ctx.ui?.theme ? factory : factory().render(80);
+    const content = ctx.ui?.theme && process.stdout?.isTTY ? factory : factory().render(process.stdout?.columns || 80);
     ctx.ui.setWidget("anchor-startup", content, { placement: "belowEditor" });
   } catch {
   }
@@ -1719,6 +1738,7 @@ async function openAnchorDashboard(ctx, store) {
 }
 
 // src/commands.ts
+var import_node_child_process = require("child_process");
 var import_node_fs3 = __toESM(require("fs"), 1);
 function parseAnchorCommandInput(raw) {
   const trimmed = (raw || "").trim();
@@ -1730,6 +1750,20 @@ function parseAnchorCommandInput(raw) {
   }
   if (/^(?:history|archive|archived)$/i.test(trimmed)) {
     return { mode: "history" };
+  }
+  const snapMatch = trimmed.match(/^(?:snap|snapshot|checkpoint)(?:\s+(.+))?$/i);
+  if (snapMatch) {
+    return {
+      mode: "snap",
+      snapMessage: (snapMatch[1] || "").trim()
+    };
+  }
+  const legacyMatch = trimmed.match(/^legacy(?:\s+(on|off|toggle))?$/i);
+  if (legacyMatch) {
+    return {
+      mode: "legacy",
+      title: legacyMatch[1]?.trim()?.toLowerCase() || "toggle"
+    };
   }
   const searchMatch = trimmed.match(/^(?:search|find|grep)\s+(.+)$/i);
   if (searchMatch) {
@@ -1823,9 +1857,163 @@ function extractGitCommitMessages(cmd) {
   }
   return results;
 }
+function createGitWipSnapshot(cwd, message) {
+  try {
+    const isGit = (0, import_node_child_process.execSync)("git rev-parse --is-inside-work-tree", {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf-8",
+      timeout: 3e3
+    }).trim() === "true";
+    if (!isGit) {
+      return { success: false, error: "Not inside a git repository" };
+    }
+    const snapMsg = (message || "").trim() || `anchor-snap-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}`;
+    const status = (0, import_node_child_process.execSync)("git status --porcelain", {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf-8",
+      timeout: 3e3
+    }).trim();
+    if (!status) {
+      const head = (0, import_node_child_process.execSync)("git rev-parse --short HEAD", {
+        cwd,
+        stdio: ["ignore", "pipe", "ignore"],
+        encoding: "utf-8",
+        timeout: 3e3
+      }).trim();
+      return { success: true, commitHash: head, isClean: true };
+    }
+    const commitHash = (0, import_node_child_process.execSync)(`git stash create "${snapMsg.replace(/"/g, '\\"')}"`, {
+      cwd,
+      stdio: ["ignore", "pipe", "ignore"],
+      encoding: "utf-8",
+      timeout: 5e3
+    }).trim();
+    if (!commitHash) {
+      const head = (0, import_node_child_process.execSync)("git rev-parse --short HEAD", {
+        cwd,
+        stdio: ["ignore", "pipe", "ignore"],
+        encoding: "utf-8",
+        timeout: 3e3
+      }).trim();
+      return { success: true, commitHash: head, isClean: true };
+    }
+    try {
+      (0, import_node_child_process.execSync)(`git update-ref refs/anchor/snap ${commitHash} "anchor snap: ${snapMsg.replace(/"/g, '\\"')}"`, {
+        cwd,
+        stdio: "ignore",
+        timeout: 3e3
+      });
+    } catch {
+    }
+    return { success: true, commitHash: commitHash.slice(0, 7) };
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+function tryHandleLegacySlashCommand(text, store, ctx) {
+  const trimmed = (text || "").trim();
+  if (!trimmed.startsWith("/")) return false;
+  const parts = trimmed.slice(1).split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+  const rest = parts.slice(1).join(" ").trim();
+  if (cmd === "done") {
+    if (!rest) {
+      openAnchorDashboard(ctx, store);
+      return true;
+    }
+    const resolvedId = resolveAnchorTarget(store, rest, ctx.cwd);
+    if (!resolvedId) {
+      ctx.ui.notify(`\u2316 Note not found: ${rest}`, "error");
+      return true;
+    }
+    const settled = store.settle(resolvedId, { settledBy: "manual" });
+    try {
+      const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+      const receipt = renderMissionReceipt(settled, { fg });
+      ctx.ui.notify(receipt.join("\n"), "info");
+    } catch {
+      ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+    }
+    updateAnchorStatusBar(ctx, store);
+    return true;
+  }
+  if (cmd === "check") {
+    const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length === 0) {
+      ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warning");
+      return true;
+    }
+    const p = activeHere[0];
+    const stepNum = parseInt(rest.replace(/^#/, ""), 10);
+    if (isNaN(stepNum)) {
+      ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warning");
+      return true;
+    }
+    try {
+      store.updateStep(p.id, stepNum, { status: "completed" });
+      ctx.ui.notify(`\u2316 Checked step #${stepNum} on "${p.title}"`, "info");
+      updateStartupBanner(ctx, store);
+    } catch (err) {
+      ctx.ui.notify(`Check step failed: ${err.message}`, "error");
+    }
+    return true;
+  }
+  if (cmd === "step") {
+    const tokens = rest.split(/\s+/).filter(Boolean);
+    const target = tokens[0] || "1";
+    const delta = tokens[1] ? parseInt(tokens[1], 10) : 1;
+    const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+    if (!resolvedId) {
+      ctx.ui.notify(`\u2316 Note not found: ${target}`, "error");
+      return true;
+    }
+    const { anchor: updated } = store.step(resolvedId, isNaN(delta) ? 1 : delta);
+    ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
+    updateAnchorStatusBar(ctx, store);
+    return true;
+  }
+  if (cmd === "steer") {
+    if (!rest) {
+      ctx.ui.notify("Usage: /steer <guidance for current anchor>", "warning");
+      return true;
+    }
+    const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length === 0) {
+      ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warning");
+      return true;
+    }
+    const p = activeHere[0];
+    store.update(p.id, { steerGuidance: rest });
+    updateStartupBanner(ctx, store);
+    ctx.ui.notify(`\u2316 Steered Anchor #${p.id.replace(/^anc-/, "")}: "${rest}"`, "info");
+    return true;
+  }
+  if (cmd === "now") {
+    const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length === 0) {
+      ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
+      return true;
+    }
+    const p = activeHere[0];
+    const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
+    const origin = formatOrigin(p);
+    const activity = p.activeForm ? ` \u2022 Live Pulse: \u25D0 ${p.activeForm}` : "";
+    const files = p.files && p.files.length > 0 ? ` \u2022 Files: ${p.files.slice(0, 3).join(", ")}` : "";
+    const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar}: "${p.title}" (${origin})${activity}${files}`;
+    ctx.ui.notify(msg, "info");
+    return true;
+  }
+  if (cmd === "todo" || cmd === "anchors") {
+    openAnchorDashboard(ctx, store);
+    return true;
+  }
+  return false;
+}
 function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionFileSafe2) {
   pi.registerCommand("anchor", {
-    description: "View, pin, step, jump to session, or tear off sticky notes (/anchor, /anchor step 1, /anchor jump 1, /anchor done 1)",
+    description: "View, pin, step, snap, steer, or tear off tasks (/anchor, /anchor done, /anchor snap, /anchor step, /anchor check)",
     handler: async (args, ctx) => {
       const parsed = parseAnchorCommandInput(args);
       if (parsed.mode === "dashboard") {
@@ -1861,6 +2049,38 @@ function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionF
         ctx.ui.notify(lines.join("\n"), "info");
         return;
       }
+      if (parsed.mode === "snap") {
+        const res = createGitWipSnapshot(ctx.cwd, parsed.snapMessage);
+        if (!res.success) {
+          ctx.ui.notify(`Snap failed: ${res.error}`, "error");
+          return;
+        }
+        if (res.isClean) {
+          ctx.ui.notify(`\u2316 Working tree clean. Snapshot at HEAD commit [${res.commitHash}]`, "info");
+        } else {
+          ctx.ui.notify(
+            `\u2316 Git WIP snapshot saved: [${res.commitHash}] "${parsed.snapMessage || "WIP snapshot"}"
+To diff: git diff refs/anchor/snap
+To restore: git checkout refs/anchor/snap -- .`,
+            "info"
+          );
+        }
+        return;
+      }
+      if (parsed.mode === "legacy") {
+        const flag = parsed.title;
+        if (flag === "on") {
+          process.env.ANCHOR_LEGACY_COMMANDS = "1";
+          ctx.ui.notify("\u2316 Legacy standalone commands enabled for next session (ANCHOR_LEGACY_COMMANDS=1)", "info");
+        } else if (flag === "off") {
+          delete process.env.ANCHOR_LEGACY_COMMANDS;
+          ctx.ui.notify("\u2316 Slash command menu decluttered (legacy commands handled via 0ms input intercept)", "info");
+        } else {
+          const current = process.env.ANCHOR_LEGACY_COMMANDS === "1";
+          ctx.ui.notify(`\u2316 Menu mode: ${current ? "full (10 legacy commands)" : "decluttered (/anchor, /pin, /snap, /back)"}. Toggle with /anchor legacy on|off`, "info");
+        }
+        return;
+      }
       if (parsed.mode === "search") {
         const hits = store.search(parsed.query || "");
         if (hits.length === 0) {
@@ -1877,12 +2097,12 @@ function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionF
       if (parsed.mode === "steer") {
         const text = (parsed.title || "").trim();
         if (!text) {
-          ctx.ui.notify("Usage: /anchor steer <guidance for current anchor>", "warn");
+          ctx.ui.notify("Usage: /anchor steer <guidance for current anchor>", "warning");
           return;
         }
         const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
         if (activeHere.length === 0) {
-          ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warn");
+          ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warning");
           return;
         }
         const p = activeHere[0];
@@ -1910,13 +2130,13 @@ function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionF
       if (parsed.mode === "check" && parsed.targetId) {
         const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
         if (activeHere.length === 0) {
-          ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warn");
+          ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warning");
           return;
         }
         const p = activeHere[0];
         const stepNum = parseInt(parsed.targetId, 10);
         if (isNaN(stepNum)) {
-          ctx.ui.notify("Usage: /anchor check <stepNumber> (e.g. /check 2)", "warn");
+          ctx.ui.notify("Usage: /anchor check <stepNumber> (e.g. /check 2)", "warning");
           return;
         }
         try {
@@ -1946,7 +2166,15 @@ function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionF
           ctx.ui.notify(`\u2316 No saved conversation session found for #${parsed.targetId}`, "error");
           return;
         }
-        await ctx.switchSession(note.sessionFile);
+        if (typeof ctx.switchSession !== "function") {
+          ctx.ui.notify("Session switching is unavailable in this host.", "warning");
+          return;
+        }
+        try {
+          await ctx.switchSession(note.sessionFile);
+        } catch (err) {
+          ctx.ui.notify(`Could not switch session: ${err?.message || err}`, "error");
+        }
         return;
       }
       if (parsed.mode === "settle" && parsed.targetId) {
@@ -2000,122 +2228,144 @@ function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionF
       ctx.ui.notify(`\u2316 Pinned #${anc.id.replace(/^anc-/, "")}${bar}: "${anc.title}"`, "info");
     }
   });
-  pi.registerCommand("step", {
-    description: "Advance progress bar on a sticky note (e.g. /step 1)",
+  pi.registerCommand("snap", {
+    description: "Create lightweight git WIP checkpoint snapshot (/snap [message])",
     handler: async (args, ctx) => {
-      const tokens = (args || "").trim().split(/\s+/).filter(Boolean);
-      const target = tokens[0] || "1";
-      const delta = tokens[1] ? parseInt(tokens[1], 10) : 1;
-      const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
-      if (!resolvedId) {
-        ctx.ui.notify(`\u2316 Note not found: ${target}`, "error");
+      const res = createGitWipSnapshot(ctx.cwd, args);
+      if (!res.success) {
+        ctx.ui.notify(`Snap failed: ${res.error}`, "error");
         return;
       }
-      const { anchor: updated } = store.step(resolvedId, isNaN(delta) ? 1 : delta);
-      ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
-      updateAnchorStatusBar(ctx, store);
+      if (res.isClean) {
+        ctx.ui.notify(`\u2316 Working tree clean. Snapshot at HEAD commit [${res.commitHash}]`, "info");
+      } else {
+        ctx.ui.notify(
+          `\u2316 Git WIP snapshot saved: [${res.commitHash}] "${(args || "").trim() || "WIP snapshot"}"
+To diff: git diff refs/anchor/snap
+To restore: git checkout refs/anchor/snap -- .`,
+          "info"
+        );
+      }
     }
   });
-  pi.registerCommand("done", {
-    description: "Tear off a sticky note by number or ID (e.g. /done 1)",
-    handler: async (args, ctx) => {
-      const target = (args || "").trim();
-      if (!target) {
+  if (process.env.ANCHOR_LEGACY_COMMANDS === "1") {
+    pi.registerCommand("step", {
+      description: "Advance progress bar on a sticky note (e.g. /step 1)",
+      handler: async (args, ctx) => {
+        const tokens = (args || "").trim().split(/\s+/).filter(Boolean);
+        const target = tokens[0] || "1";
+        const delta = tokens[1] ? parseInt(tokens[1], 10) : 1;
+        const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+        if (!resolvedId) {
+          ctx.ui.notify(`\u2316 Note not found: ${target}`, "error");
+          return;
+        }
+        const { anchor: updated } = store.step(resolvedId, isNaN(delta) ? 1 : delta);
+        ctx.ui.notify(`\u2316 Advanced #${updated.id.replace(/^anc-/, "")} to ${formatProgressBar(updated.progress)}`, "info");
+        updateAnchorStatusBar(ctx, store);
+      }
+    });
+    pi.registerCommand("done", {
+      description: "Tear off a sticky note by number or ID (e.g. /done 1)",
+      handler: async (args, ctx) => {
+        const target = (args || "").trim();
+        if (!target) {
+          await openAnchorDashboard(ctx, store);
+          return;
+        }
+        const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+        if (!resolvedId) {
+          ctx.ui.notify(`\u2316 Note not found: ${target}`, "error");
+          return;
+        }
+        const settled = store.settle(resolvedId, { settledBy: "manual" });
+        try {
+          const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
+          const receipt = renderMissionReceipt(settled, { fg });
+          ctx.ui.notify(receipt.join("\n"), "info");
+        } catch {
+          ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
+        }
+        updateAnchorStatusBar(ctx, store);
+      }
+    });
+    pi.registerCommand("check", {
+      description: "Mark a step completed on the active anchor/todo dock (e.g. /check 2)",
+      handler: async (args, ctx) => {
+        const target = (args || "").trim().replace(/^#/, "");
+        if (!target) {
+          ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warning");
+          return;
+        }
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warning");
+          return;
+        }
+        const p = activeHere[0];
+        const stepNum = parseInt(target, 10);
+        if (isNaN(stepNum)) {
+          ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warning");
+          return;
+        }
+        try {
+          store.updateStep(p.id, stepNum, { status: "completed" });
+          ctx.ui.notify(`\u2316 Checked step #${stepNum} on "${p.title}"`, "info");
+          updateStartupBanner(ctx, store);
+        } catch (err) {
+          ctx.ui.notify(`Check step failed: ${err.message}`, "error");
+        }
+      }
+    });
+    pi.registerCommand("todo", {
+      description: "View or manage unified active tasks on the Anchor dock (/todo)",
+      handler: async (_args, ctx) => {
         await openAnchorDashboard(ctx, store);
-        return;
       }
-      const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
-      if (!resolvedId) {
-        ctx.ui.notify(`\u2316 Note not found: ${target}`, "error");
-        return;
-      }
-      const settled = store.settle(resolvedId, { settledBy: "manual" });
-      try {
-        const fg = (c, t) => ctx.ui.theme?.fg ? ctx.ui.theme.fg(c, t) : t;
-        const receipt = renderMissionReceipt(settled, { fg });
-        ctx.ui.notify(receipt.join("\n"), "info");
-      } catch {
-        ctx.ui.notify(`\u2316 Torn off #${settled.id.replace(/^anc-/, "")}: "${settled.title}" (/anchor undo to put back)`, "info");
-      }
-      updateAnchorStatusBar(ctx, store);
-    }
-  });
-  pi.registerCommand("check", {
-    description: "Mark a step completed on the active anchor/todo dock (e.g. /check 2)",
-    handler: async (args, ctx) => {
-      const target = (args || "").trim().replace(/^#/, "");
-      if (!target) {
-        ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warn");
-        return;
-      }
-      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
-      if (activeHere.length === 0) {
-        ctx.ui.notify('\u2316 No active anchor to check steps. Type "pin: <goal>" first!', "warn");
-        return;
-      }
-      const p = activeHere[0];
-      const stepNum = parseInt(target, 10);
-      if (isNaN(stepNum)) {
-        ctx.ui.notify("Usage: /check <stepNumber> (e.g. /check 2)", "warn");
-        return;
-      }
-      try {
-        store.updateStep(p.id, stepNum, { status: "completed" });
-        ctx.ui.notify(`\u2316 Checked step #${stepNum} on "${p.title}"`, "info");
+    });
+    pi.registerCommand("steer", {
+      description: "Steer active vibe-coding anchor with real-time guidance (/steer <instruction>)",
+      handler: async (args, ctx) => {
+        const text = (args || "").trim();
+        if (!text) {
+          ctx.ui.notify("Usage: /steer <guidance for current anchor>", "warning");
+          return;
+        }
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warning");
+          return;
+        }
+        const p = activeHere[0];
+        store.update(p.id, { steerGuidance: text });
         updateStartupBanner(ctx, store);
-      } catch (err) {
-        ctx.ui.notify(`Check step failed: ${err.message}`, "error");
+        ctx.ui.notify(`\u2316 Steered Anchor #${p.id.replace(/^anc-/, "")}: "${text}"`, "info");
       }
-    }
-  });
-  pi.registerCommand("todo", {
-    description: "View or manage unified active tasks on the Anchor dock (/todo)",
-    handler: async (_args, ctx) => {
-      await openAnchorDashboard(ctx, store);
-    }
-  });
-  pi.registerCommand("steer", {
-    description: "Steer active vibe-coding anchor with real-time guidance (/steer <instruction>)",
-    handler: async (args, ctx) => {
-      const text = (args || "").trim();
-      if (!text) {
-        ctx.ui.notify("Usage: /steer <guidance for current anchor>", "warn");
-        return;
+    });
+    pi.registerCommand("now", {
+      description: "Inspect active vibe-coding anchor and live activity pulse (/now)",
+      handler: async (_args, ctx) => {
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
+        if (activeHere.length === 0) {
+          ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
+          return;
+        }
+        const p = activeHere[0];
+        const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
+        const origin = formatOrigin(p);
+        const activity = p.activeForm ? ` \u2022 Live Pulse: \u25D0 ${p.activeForm}` : "";
+        const files = p.files && p.files.length > 0 ? ` \u2022 Files: ${p.files.slice(0, 3).join(", ")}` : "";
+        const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar}: "${p.title}" (${origin})${activity}${files}`;
+        ctx.ui.notify(msg, "info");
       }
-      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
-      if (activeHere.length === 0) {
-        ctx.ui.notify('\u2316 No active anchor to steer. Type "pin: <goal>" first!', "warn");
-        return;
+    });
+    pi.registerCommand("anchors", {
+      description: "View sticky notes",
+      handler: async (_args, ctx) => {
+        await openAnchorDashboard(ctx, store);
       }
-      const p = activeHere[0];
-      store.update(p.id, { steerGuidance: text });
-      updateStartupBanner(ctx, store);
-      ctx.ui.notify(`\u2316 Steered Anchor #${p.id.replace(/^anc-/, "")}: "${text}"`, "info");
-    }
-  });
-  pi.registerCommand("now", {
-    description: "Inspect active vibe-coding anchor and live activity pulse (/now)",
-    handler: async (_args, ctx) => {
-      const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
-      if (activeHere.length === 0) {
-        ctx.ui.notify('\u2316 No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', "info");
-        return;
-      }
-      const p = activeHere[0];
-      const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : "";
-      const origin = formatOrigin(p);
-      const activity = p.activeForm ? ` \u2022 Live Pulse: \u25D0 ${p.activeForm}` : "";
-      const files = p.files && p.files.length > 0 ? ` \u2022 Files: ${p.files.slice(0, 3).join(", ")}` : "";
-      const msg = `\u2316 Active Anchor #${p.id.replace(/^anc-/, "")}${bar}: "${p.title}" (${origin})${activity}${files}`;
-      ctx.ui.notify(msg, "info");
-    }
-  });
-  pi.registerCommand("anchors", {
-    description: "View sticky notes",
-    handler: async (_args, ctx) => {
-      await openAnchorDashboard(ctx, store);
-    }
-  });
+    });
+  }
   pi.registerCommand("back", {
     description: "Jump back to the conversation session of the latest unfinished note or todo checkpoint (/back [id])",
     handler: async (args, ctx) => {
@@ -2128,7 +2378,15 @@ function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionF
           ctx.ui.notify(`\u2316 No saved session found for #${targetArg}`, "error");
           return;
         }
-        await ctx.switchSession(note.sessionFile);
+        if (typeof ctx.switchSession !== "function") {
+          ctx.ui.notify("Session switching is unavailable in this host.", "warning");
+          return;
+        }
+        try {
+          await ctx.switchSession(note.sessionFile);
+        } catch (err) {
+          ctx.ui.notify(`Could not switch session: ${err?.message || err}`, "error");
+        }
         return;
       }
       const candidates = sortAnchorsForDisplay(
@@ -2142,7 +2400,15 @@ function registerAnchorCommands(pi, store, createStickyNoteFromUser, getSessionF
         ctx.ui.notify("\u2316 No other linked conversation session found to jump back to.", "info");
         return;
       }
-      await ctx.switchSession(jumpTarget.sessionFile);
+      if (typeof ctx.switchSession !== "function") {
+        ctx.ui.notify("Session switching is unavailable in this host.", "warning");
+        return;
+      }
+      try {
+        await ctx.switchSession(jumpTarget.sessionFile);
+      } catch (err) {
+        ctx.ui.notify(`Could not switch session: ${err?.message || err}`, "error");
+      }
     }
   });
 }
@@ -2189,15 +2455,15 @@ function extension_default(pi, customStore) {
     sweepQuietNotes(store);
     const activeHere = store.list({ status: "active", cwd: ctx.cwd });
     for (const a of activeHere) {
-      if (a.activeForm) {
-        store.update(a.id, { activeForm: void 0 });
+      if (a.activeForm || a.driftWarning) {
+        store.update(a.id, { activeForm: void 0, driftWarning: void 0 });
       }
     }
     for (const a of activeHere) {
       if (a.verifyCommand && a.verifyCommand.trim()) {
         try {
           const runCwd = [ctx.cwd, a.cwd, process.cwd()].find((dir) => typeof dir === "string" && dir.trim() && import_node_fs4.default.existsSync(dir)) || process.cwd();
-          (0, import_node_child_process.execSync)(a.verifyCommand, {
+          (0, import_node_child_process2.execSync)(a.verifyCommand, {
             cwd: runCwd,
             stdio: "ignore",
             timeout: 5e3
@@ -2236,8 +2502,8 @@ function extension_default(pi, customStore) {
   });
   pi.on("agent_end", async (_event, ctx) => {
     const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
-    if (activeHere.length > 0 && activeHere[0].activeForm) {
-      store.update(activeHere[0].id, { activeForm: void 0 });
+    if (activeHere.length > 0 && (activeHere[0].activeForm || activeHere[0].driftWarning)) {
+      store.update(activeHere[0].id, { activeForm: void 0, driftWarning: void 0 });
       updateStartupBanner(ctx, store);
     }
   });
@@ -2255,7 +2521,11 @@ function extension_default(pi, customStore) {
   }
   pi.on("input", async (event, ctx) => {
     if (event?.source === "extension") return { action: "continue" };
-    const quickNote = parseQuickNoteInput(String(event?.text || ""));
+    const rawText = String(event?.text || "");
+    if (hasActiveUI(ctx) && tryHandleLegacySlashCommand(rawText, store, ctx)) {
+      return { action: "handled" };
+    }
+    const quickNote = parseQuickNoteInput(rawText);
     if (quickNote === null) return { action: "continue" };
     if (!quickNote) {
       if (hasActiveUI(ctx)) {
@@ -2301,7 +2571,7 @@ function extension_default(pi, customStore) {
     const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
     if (activeHere.length > 0) {
       const p = activeHere[0];
-      let driftWarning = void 0;
+      let driftWarning = null;
       if (MUTATION_TOOLS.has(lowerTool)) {
         const rawPath = event.input?.path || event.input?.filePath || event.input?.file;
         if (typeof rawPath === "string" && rawPath.trim() && p.files.length > 0) {
@@ -2309,16 +2579,18 @@ function extension_default(pi, customStore) {
           const matches = findMatchedAnchors([p], [touchedNorm, rawPath]);
           if (matches.length === 0) {
             driftWarning = import_node_path5.default.basename(touchedNorm);
+          } else if (p.driftWarning) {
+            driftWarning = void 0;
           }
         }
       }
       const nextActiveForm = liveActivity || p.activeForm;
-      const nextDrift = driftWarning !== void 0 ? driftWarning : p.driftWarning;
+      const nextDrift = driftWarning !== null ? driftWarning : p.driftWarning;
       if (nextActiveForm !== p.activeForm || nextDrift !== p.driftWarning) {
         store.update(p.id, {
           activeForm: nextActiveForm,
           liveStartedAt: Date.now(),
-          ...driftWarning !== void 0 ? { driftWarning } : {}
+          ...driftWarning !== null ? { driftWarning } : {}
         });
         updateStartupBanner(ctx, store);
       }
@@ -2371,7 +2643,7 @@ function extension_default(pi, customStore) {
     const pathInput = event.input?.path;
     if (typeof pathInput !== "string") {
       if (liveActivity) {
-        const activeHere = store.list({ status: "active", cwd: ctx.cwd });
+        const activeHere = sortAnchorsForDisplay(store.list({ status: "active", cwd: ctx.cwd }), ctx.cwd);
         if (activeHere.length > 0) {
           store.update(activeHere[0].id, { activeForm: liveActivity });
           updateStartupBanner(ctx, store);
@@ -2564,9 +2836,11 @@ function extension_default(pi, customStore) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   MUTATION_TOOLS,
+  createGitWipSnapshot,
   extractGitCommitMessages,
   getSessionFileSafe,
   parseAnchorCommandInput,
   parseQuickNoteInput,
-  resolveAnchorTarget
+  resolveAnchorTarget,
+  tryHandleLegacySlashCommand
 });

@@ -6,7 +6,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI 状态](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 21 Passed](https://img.shields.io/badge/Tests-21%20通过-22c55e.svg)](tests/store.test.ts)
+[![Tests: 26 Passed](https://img.shields.io/badge/Tests-26%20Passed-22c55e.svg)](tests/store.test.ts)
 [![开源协议: MIT](https://img.shields.io/badge/开源协议-MIT-f97316.svg)](LICENSE)
 
 [English](./README.md) | [日本語](./README_ja.md) | **简体中文**
@@ -95,16 +95,19 @@ Anchor 显式指定 `{ placement: "belowEditor" }` 挂载在输入框下方，�
 | 位置 | 输入 / 命令 | 作用说明 |
 | :--- | :--- | :--- |
 | **Pi 输入框直敲** | `便签: <内容>` 或 `pin: <内容>` | **0ms 直接贴便签**（不触发大模型请求，自动绑定当前改过的文件与 Session） |
+| **Pi 斜杠命令** | `/anchor` | 打开统一任务与便签面板（回车可撕便签、推进度 `+1`、`↪` 切回原对话 Session、看详情） |
 | **Pi 斜杠命令** | `/pin <内容>` | 贴一张新便签（支持写 `[1/4]` 或 `1. A 2. B 3. C` 自动生成进度条） |
-| **Pi 斜杠命令** | `/anchor` | 打开交互面板（回车可撕便签、推进度 `+1`、`↪` 切回原对话 Session、看详情） |
-| **Pi 斜杠命令** | `/step 1` | 将 `#1` 便签的进度条往前推进 `+1` 步 |
-| **Pi 斜杠命令** | `/now`（或 `/anchor now`） | 即时查看当前活跃锚点、当前步骤、实时工具脉冲与改动文件 |
+| **Pi 斜杠命令** | `/snap [message]` | 快速创建轻量级 Git WIP 快照（非侵入式 `git stash create`，随时可比对与回滚） |
 | **Pi 斜杠命令** | `/back`（或 `/anchor jump 1`） | 一键切换回最近一条未完成便签/`todo` 断点对应的历史对话 (`switchSession`) |
-| **Pi 斜杠命令** | `/done 1` / `/anchor 1` | 按编号 `#1` 直接撕下便签并归档 |
-| **Pi 斜杠命令** | `/anchor undo` | 把刚刚撕下的便签重新贴回原位 |
+| **统一子命令** | `/anchor done 1` / `/done 1` | 按编号 `#1` 直接撕下便签并归档（支持统一子命令或 legacy 0ms 直敲别名） |
+| **统一子命令** | `/anchor step 1` / `/step 1` | 将 `#1` 便签的进度条往前推进 `+1` 步 |
+| **统一子命令** | `/anchor check 2` / `/check 2` | 勾选活跃任务面板上的第 2 个步骤为完成 |
+| **统一子命令** | `/anchor now` / `/now` | 即时查看当前活跃锚点、当前步骤、实时工具脉冲与改动文件 |
+| **统一子命令** | `/anchor steer <指导>` | 实时向当前锚点注入调整提示词 |
+| **统一子命令** | `/anchor snap [message]` | 创建 Git WIP 快照存档点 |
+| **统一子命令** | `/anchor undo` | 把刚刚撕下的便签重新贴回原位 |
 | **系统命令行** | `anchor` / `anchor "<内容>"` | 不进 Pi 也能在外部终端查看或贴便签 |
 | **系统命令行** | `anchor step 1` / `anchor done 1` / `anchor undo` | 在外部终端推进进度、撕便签或撤销 |
-
 ---
 
 ## Author's Note

@@ -16,10 +16,12 @@ import {
   updateStartupBanner
 } from '../src/tui.ts';
 import initExtension, {
+  createGitWipSnapshot,
   extractGitCommitMessages,
   parseAnchorCommandInput,
   parseQuickNoteInput,
-  resolveAnchorTarget
+  resolveAnchorTarget,
+  tryHandleLegacySlashCommand
 } from '../src/extension.ts';
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
 
@@ -399,6 +401,145 @@ test('parseAnchorCommandInput - parses search and history/archive, and /anchor s
     const histHits = JSON.parse(histToolRes.content[0].text);
     assert.strictEqual(histHits.length, 1);
     assert.strictEqual(histHits[0].id, toSettle.id);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('tool_call & agent_end - driftWarning clears when editing in-scope file or on agent_end', async () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const eventHandlers = new Map<string, Function[]>();
+    const mockPi = {
+      on: (event: string, handler: Function) => {
+        if (!eventHandlers.has(event)) eventHandlers.set(event, []);
+        eventHandlers.get(event)!.push(handler);
+      },
+      registerTool: () => {},
+      registerCommand: () => {},
+      registerShortcut: () => {}
+    } as unknown as ExtensionAPI;
+    initExtension(mockPi, store);
+    const a1 = store.create({ title: 'Auth refactor', cwd: '/workspace/app', files: ['src/auth.ts'] });
+    const mockCtx = { cwd: '/workspace/app', hasUI: false } as unknown as ExtensionContext;
+
+    const toolCall = eventHandlers.get('tool_call')![0];
+    const agentEnd = eventHandlers.get('agent_end')![0];
+
+    await toolCall({ toolName: 'edit', input: { path: 'other/config.json' } }, mockCtx);
+    assert.strictEqual(store.get(a1.id)?.driftWarning, 'config.json');
+
+    await toolCall({ toolName: 'edit', input: { path: 'src/auth.ts' } }, mockCtx);
+    assert.strictEqual(store.get(a1.id)?.driftWarning, undefined);
+
+    await toolCall({ toolName: 'edit', input: { path: 'other/config.json' } }, mockCtx);
+    assert.strictEqual(store.get(a1.id)?.driftWarning, 'config.json');
+    await agentEnd({}, mockCtx);
+    assert.strictEqual(store.get(a1.id)?.driftWarning, undefined);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('parseAnchorCommandInput - parses snap and legacy commands', () => {
+  assert.deepStrictEqual(parseAnchorCommandInput('snap'), { mode: 'snap', snapMessage: '' });
+  assert.deepStrictEqual(parseAnchorCommandInput('snap "before auth refactor"'), { mode: 'snap', snapMessage: '"before auth refactor"' });
+  assert.deepStrictEqual(parseAnchorCommandInput('snapshot my-fix'), { mode: 'snap', snapMessage: 'my-fix' });
+  assert.deepStrictEqual(parseAnchorCommandInput('checkpoint v1'), { mode: 'snap', snapMessage: 'v1' });
+  assert.deepStrictEqual(parseAnchorCommandInput('legacy on'), { mode: 'legacy', title: 'on' });
+  assert.deepStrictEqual(parseAnchorCommandInput('legacy off'), { mode: 'legacy', title: 'off' });
+  assert.deepStrictEqual(parseAnchorCommandInput('legacy'), { mode: 'legacy', title: 'toggle' });
+});
+
+test('createGitWipSnapshot - captures non-destructive snapshot commit in git repo', () => {
+  const res = createGitWipSnapshot(process.cwd(), 'unit-test-snapshot');
+  assert.strictEqual(res.success, true);
+  assert.ok(res.commitHash, 'Commit hash should be returned');
+  assert.strictEqual(typeof res.commitHash, 'string');
+});
+
+test('tryHandleLegacySlashCommand - intercepts legacy commands in 0ms without cluttering menu', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const a = store.create({ title: 'Task to be settled', cwd: '/workspace/test' });
+    let notified: { msg: string; type?: string }[] = [];
+    const mockCtx = {
+      cwd: '/workspace/test',
+      hasUI: true,
+      ui: {
+        notify: (msg: string, type?: string) => { notified.push({ msg, type }); },
+        setStatus: () => {},
+        setWidget: () => {}
+      }
+    } as unknown as ExtensionContext;
+
+    // 1. /done #1
+    const handledDone = tryHandleLegacySlashCommand(`/done #${a.id.replace(/^anc-/, '')}`, store, mockCtx);
+    assert.strictEqual(handledDone, true);
+    assert.strictEqual(store.get(a.id), undefined);
+    assert.ok(store.listArchive().some(x => x.id === a.id));
+
+    // 2. /step on active note
+    const a2 = store.create({ title: 'Multi step [1/3]', cwd: '/workspace/test' });
+    const handledStep = tryHandleLegacySlashCommand(`/step #${a2.id.replace(/^anc-/, '')} 1`, store, mockCtx);
+    assert.strictEqual(handledStep, true);
+    assert.strictEqual(store.get(a2.id)?.progress?.done, 2);
+
+    // 3. /now
+    notified = [];
+    const handledNow = tryHandleLegacySlashCommand('/now', store, mockCtx);
+    assert.strictEqual(handledNow, true);
+    assert.ok(notified.some(n => n.msg.includes('Active Anchor')));
+
+    // 4. Non-command
+    assert.strictEqual(tryHandleLegacySlashCommand('hello world', store, mockCtx), false);
+    assert.strictEqual(tryHandleLegacySlashCommand('/unknown cmd', store, mockCtx), false);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('Command Registration - decluttered to 4 commands by default, 11 commands when ANCHOR_LEGACY_COMMANDS=1', () => {
+  const tempDir = createTempDir();
+  try {
+    const store = new AnchorStore(tempDir);
+    const prev = process.env.ANCHOR_LEGACY_COMMANDS;
+    delete process.env.ANCHOR_LEGACY_COMMANDS;
+
+    // Default decluttered menu
+    const decluttered = new Map<string, any>();
+    const mockPi1 = {
+      on: () => {},
+      registerTool: () => {},
+      registerCommand: (name: string, def: any) => { decluttered.set(name, def); },
+      registerShortcut: () => {}
+    } as unknown as ExtensionAPI;
+    initExtension(mockPi1, store);
+    assert.deepStrictEqual(Array.from(decluttered.keys()).sort(), ['anchor', 'back', 'pin', 'snap']);
+
+    // Legacy expanded menu
+    process.env.ANCHOR_LEGACY_COMMANDS = '1';
+    const expanded = new Map<string, any>();
+    const mockPi2 = {
+      on: () => {},
+      registerTool: () => {},
+      registerCommand: (name: string, def: any) => { expanded.set(name, def); },
+      registerShortcut: () => {}
+    } as unknown as ExtensionAPI;
+    initExtension(mockPi2, store);
+    assert.strictEqual(expanded.size, 11);
+    assert.ok(expanded.has('done'));
+    assert.ok(expanded.has('step'));
+    assert.ok(expanded.has('check'));
+    assert.ok(expanded.has('todo'));
+    assert.ok(expanded.has('steer'));
+    assert.ok(expanded.has('now'));
+    assert.ok(expanded.has('anchors'));
+
+    if (prev !== undefined) process.env.ANCHOR_LEGACY_COMMANDS = prev;
+    else delete process.env.ANCHOR_LEGACY_COMMANDS;
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

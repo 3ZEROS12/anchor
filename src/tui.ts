@@ -247,7 +247,7 @@ export function updateStartupBanner(ctx: ExtensionContext, store: AnchorStore): 
       invalidate: () => {}
     });
 
-    const content = (ctx as any).ui?.theme ? factory : factory().render(80);
+    const content = (ctx as any).ui?.theme && process.stdout?.isTTY ? factory : factory().render(process.stdout?.columns || 80);
     ctx.ui.setWidget('anchor-startup', content as any, { placement: 'belowEditor' });
   } catch {}
 }

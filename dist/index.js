@@ -11,6 +11,7 @@ import {
   applyStrikethrough,
   atomicRenameWithRetry,
   convertTodoTasksToSteps,
+  createGitWipSnapshot,
   defaultDockController,
   deriveStepBlocks,
   extractGitCommitMessages,
@@ -53,11 +54,12 @@ import {
   sweepQuietNotes,
   syncProgressFromItems,
   truncateToWidth,
+  tryHandleLegacySlashCommand,
   updateAnchorStatusBar,
   updateStartupBanner,
   validateAnchorDependencies,
   validateStepDependencies
-} from "./chunk-WAH3BLQ4.js";
+} from "./chunk-2C4G2QH4.js";
 export {
   AnchorDockController,
   AnchorStore,
@@ -71,6 +73,7 @@ export {
   applyStrikethrough,
   atomicRenameWithRetry,
   convertTodoTasksToSteps,
+  createGitWipSnapshot,
   defaultDockController,
   deriveStepBlocks,
   extractGitCommitMessages,
@@ -113,6 +116,7 @@ export {
   sweepQuietNotes,
   syncProgressFromItems,
   truncateToWidth,
+  tryHandleLegacySlashCommand,
   updateAnchorStatusBar,
   updateStartupBanner,
   validateAnchorDependencies,

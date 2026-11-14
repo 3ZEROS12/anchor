@@ -25,20 +25,24 @@ import {
 import { defaultDockController, renderMissionReceipt } from './dock.ts';
 import { inferLiveActivityLabel, replayTodoSnapshotFromBranch } from './bridge.ts';
 import {
+  createGitWipSnapshot,
   extractGitCommitMessages,
   parseAnchorCommandInput,
   parseQuickNoteInput,
   registerAnchorCommands,
-  resolveAnchorTarget
+  resolveAnchorTarget,
+  tryHandleLegacySlashCommand
 } from './commands.ts';
 
 export const MUTATION_TOOLS = new Set(['edit', 'write', 'patch', 'apply_diff', 'create_file', 'modify']);
 
 export {
+  createGitWipSnapshot,
   extractGitCommitMessages,
   parseAnchorCommandInput,
   parseQuickNoteInput,
-  resolveAnchorTarget
+  resolveAnchorTarget,
+  tryHandleLegacySlashCommand
 };
 
 export function getSessionFileSafe(ctx?: ExtensionContext): string | undefined {
@@ -89,8 +93,8 @@ export default function (pi: ExtensionAPI, customStore?: AnchorStore) {
     // Clear stale live activity indicator on cold start
     const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
     for (const a of activeHere) {
-      if (a.activeForm) {
-        store.update(a.id, { activeForm: undefined });
+      if (a.activeForm || a.driftWarning) {
+        store.update(a.id, { activeForm: undefined, driftWarning: undefined });
       }
     }
 
@@ -145,8 +149,8 @@ export default function (pi: ExtensionAPI, customStore?: AnchorStore) {
   // 1c. Clear active live pulse indicator when agent finishes turn and goes idle
   pi.on('agent_end', async (_event: any, ctx: ExtensionContext) => {
     const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
-    if (activeHere.length > 0 && activeHere[0].activeForm) {
-      store.update(activeHere[0].id, { activeForm: undefined });
+    if (activeHere.length > 0 && (activeHere[0].activeForm || activeHere[0].driftWarning)) {
+      store.update(activeHere[0].id, { activeForm: undefined, driftWarning: undefined });
       updateStartupBanner(ctx, store);
     }
   });
@@ -168,7 +172,15 @@ export default function (pi: ExtensionAPI, customStore?: AnchorStore) {
   //    Intercepted in 0ms without triggering an LLM turn or burning a single token.
   pi.on('input', async (event: any, ctx: ExtensionContext) => {
     if (event?.source === 'extension') return { action: 'continue' };
-    const quickNote = parseQuickNoteInput(String(event?.text || ''));
+    const rawText = String(event?.text || '');
+
+    // 1. Intercept legacy standalone slash commands in 0ms without cluttering Pi's / menu
+    if (hasActiveUI(ctx) && tryHandleLegacySlashCommand(rawText, store, ctx)) {
+      return { action: 'handled' };
+    }
+
+    // 2. Human-first quick note `pin: ...` or `便签: ...`
+    const quickNote = parseQuickNoteInput(rawText);
     if (quickNote === null) return { action: 'continue' };
 
     if (!quickNote) {
@@ -217,7 +229,7 @@ export default function (pi: ExtensionAPI, customStore?: AnchorStore) {
     const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
     if (activeHere.length > 0) {
       const p = activeHere[0];
-      let driftWarning: string | undefined = undefined;
+      let driftWarning: string | undefined | null = null;
 
       // Watchdog: detect if tool touches files outside the declared anchor scope (mutating tools only)
       if (MUTATION_TOOLS.has(lowerTool)) {
@@ -227,17 +239,19 @@ export default function (pi: ExtensionAPI, customStore?: AnchorStore) {
           const matches = findMatchedAnchors([p], [touchedNorm, rawPath]);
           if (matches.length === 0) {
             driftWarning = path.basename(touchedNorm);
+          } else if (p.driftWarning) {
+            driftWarning = undefined;
           }
         }
       }
 
       const nextActiveForm = liveActivity || p.activeForm;
-      const nextDrift = driftWarning !== undefined ? driftWarning : p.driftWarning;
+      const nextDrift = driftWarning !== null ? driftWarning : p.driftWarning;
       if (nextActiveForm !== p.activeForm || nextDrift !== p.driftWarning) {
         store.update(p.id, {
           activeForm: nextActiveForm,
           liveStartedAt: Date.now(),
-          ...(driftWarning !== undefined ? { driftWarning } : {})
+          ...(driftWarning !== null ? { driftWarning } : {})
         });
         updateStartupBanner(ctx, store);
       }
@@ -303,7 +317,7 @@ export default function (pi: ExtensionAPI, customStore?: AnchorStore) {
     const pathInput = (event.input as any)?.path;
     if (typeof pathInput !== 'string') {
       if (liveActivity) {
-        const activeHere = store.list({ status: 'active', cwd: ctx.cwd });
+        const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
         if (activeHere.length > 0) {
           store.update(activeHere[0].id, { activeForm: liveActivity });
           updateStartupBanner(ctx, store);

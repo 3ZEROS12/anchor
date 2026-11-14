@@ -6,7 +6,7 @@
 [![npm downloads](https://img.shields.io/npm/dm/pi-anchor?color=22c55e&label=downloads)](https://www.npmjs.com/package/pi-anchor)
 [![GitHub stars](https://img.shields.io/github/stars/3ZEROS12/anchor?style=flat&color=f59e0b)](https://github.com/3ZEROS12/anchor/stargazers)
 [![CI Status](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml/badge.svg)](https://github.com/3ZEROS12/anchor/actions/workflows/ci.yml)
-[![Tests: 21 Passed](https://img.shields.io/badge/Tests-21%20Passed-22c55e.svg)](tests/store.test.ts)
+[![Tests: 26 Passed](https://img.shields.io/badge/Tests-26%20Passed-22c55e.svg)](tests/store.test.ts)
 [![License: MIT](https://img.shields.io/badge/License-MIT-f97316.svg)](LICENSE)
 
 **English** | [日本語](./README_ja.md) | [简体中文](./README_zh.md)
@@ -95,16 +95,19 @@ All state lives in `~/.anchor/` outside your git repository:
 | Where | Input / Command | Description |
 | :--- | :--- | :--- |
 | **Pi Editor** | `pin: <note>` or `便签: <note>` | Stick a note in **0ms** without calling the LLM |
-| **Pi Slash** | `/pin <note>` | Stick a note (supports `[1/4]` or `1. A 2. B 3. C` steps) |
-| **Pi Slash** | `/anchor` | Open interactive sticky note board (tear off, `+1` step, `↪` jump to session, or read details) |
-| **Pi Slash** | `/step 1` | Advance progress bar on note `#1` by `+1` |
-| **Pi Slash** | `/now` (or `/anchor now`) | Inspect active vibe-coding anchor, current step, live tool pulse, and touched files |
-| **Pi Slash** | `/back` (or `/anchor jump 1`) | Teleport Pi back to the conversation session of the latest unfinished note/todo checkpoint |
-| **Pi Slash** | `/done 1` / `/anchor 1` | Tear off note `#1` and archive it |
-| **Pi Slash** | `/anchor undo` | Put back the most recently torn-off note |
+| **Pi Slash** | `/anchor` | Open unified task & sticky note dock (tear off, `+1` step, `↪` jump to session, or read details) |
+| **Pi Slash** | `/pin <note>` | Stick a quick note (supports `[1/4]` or `1. A 2. B 3. C` steps) |
+| **Pi Slash** | `/snap [message]` | Create lightweight git WIP checkpoint snapshot (non-destructive, restore anytime) |
+| **Pi Slash** | `/back` (or `/anchor jump 1`) | Teleport Pi back to the conversation session of latest unfinished note/todo checkpoint |
+| **Unified** | `/anchor done 1` / `/done 1` | Tear off note `#1` and archive it (subcommand or legacy 0ms alias) |
+| **Unified** | `/anchor step 1` / `/step 1` | Advance progress bar on note `#1` by `+1` |
+| **Unified** | `/anchor check 2` / `/check 2` | Mark step 2 completed on active task dock |
+| **Unified** | `/anchor now` / `/now` | Inspect active vibe-coding anchor, current step, live tool pulse, and touched files |
+| **Unified** | `/anchor steer <hint>` | Steer active anchor with real-time guidance |
+| **Unified** | `/anchor snap [message]` | Non-destructive git WIP checkpoint snapshot |
+| **Unified** | `/anchor undo` | Put back the most recently torn-off note |
 | **Terminal CLI** | `anchor` / `anchor "<note>"` | View or stick notes from any shell outside Pi |
 | **Terminal CLI** | `anchor step 1` / `anchor done 1` / `anchor undo` | Advance progress, tear off, or restore notes from the command line |
-
 ---
 
 ## Author's Note

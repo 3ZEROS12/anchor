@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import { AnchorStore, isSameOrSubPath } from './store.ts';
 import {
@@ -12,11 +13,12 @@ import {
 import { defaultDockController, renderMissionReceipt } from './dock.ts';
 
 export function parseAnchorCommandInput(raw: string): {
-  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer' | 'check' | 'search' | 'history';
+  mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer' | 'check' | 'search' | 'history' | 'snap' | 'legacy';
   targetId?: string;
   delta?: number;
   title?: string;
   query?: string;
+  snapMessage?: string;
 } {
   const trimmed = (raw || '').trim();
   if (!trimmed || trimmed === 'list' || trimmed === 'ls') {
@@ -27,6 +29,20 @@ export function parseAnchorCommandInput(raw: string): {
   }
   if (/^(?:history|archive|archived)$/i.test(trimmed)) {
     return { mode: 'history' };
+  }
+  const snapMatch = trimmed.match(/^(?:snap|snapshot|checkpoint)(?:\s+(.+))?$/i);
+  if (snapMatch) {
+    return {
+      mode: 'snap',
+      snapMessage: (snapMatch[1] || '').trim()
+    };
+  }
+  const legacyMatch = trimmed.match(/^legacy(?:\s+(on|off|toggle))?$/i);
+  if (legacyMatch) {
+    return {
+      mode: 'legacy',
+      title: legacyMatch[1]?.trim()?.toLowerCase() || 'toggle'
+    };
   }
   const searchMatch = trimmed.match(/^(?:search|find|grep)\s+(.+)$/i);
   if (searchMatch) {
@@ -145,6 +161,188 @@ export function extractGitCommitMessages(cmd: string): string[] {
   }
   return results;
 }
+export function createGitWipSnapshot(cwd: string, message?: string): {
+  success: boolean;
+  commitHash?: string;
+  isClean?: boolean;
+  error?: string;
+} {
+  try {
+    const isGit = execSync('git rev-parse --is-inside-work-tree', {
+      cwd,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      timeout: 3000
+    }).trim() === 'true';
+
+    if (!isGit) {
+      return { success: false, error: 'Not inside a git repository' };
+    }
+
+    const snapMsg = (message || '').trim() || `anchor-snap-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+
+    const status = execSync('git status --porcelain', {
+      cwd,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      timeout: 3000
+    }).trim();
+
+    if (!status) {
+      const head = execSync('git rev-parse --short HEAD', {
+        cwd,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf-8',
+        timeout: 3000
+      }).trim();
+      return { success: true, commitHash: head, isClean: true };
+    }
+
+    const commitHash = execSync(`git stash create "${snapMsg.replace(/"/g, '\\"')}"`, {
+      cwd,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      encoding: 'utf-8',
+      timeout: 5000
+    }).trim();
+
+    if (!commitHash) {
+      const head = execSync('git rev-parse --short HEAD', {
+        cwd,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        encoding: 'utf-8',
+        timeout: 3000
+      }).trim();
+      return { success: true, commitHash: head, isClean: true };
+    }
+
+    try {
+      execSync(`git update-ref refs/anchor/snap ${commitHash} "anchor snap: ${snapMsg.replace(/"/g, '\\"')}"`, {
+        cwd,
+        stdio: 'ignore',
+        timeout: 3000
+      });
+    } catch {
+      // update-ref is non-fatal
+    }
+
+    return { success: true, commitHash: commitHash.slice(0, 7) };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export function tryHandleLegacySlashCommand(
+  text: string,
+  store: AnchorStore,
+  ctx: ExtensionContext
+): boolean {
+  const trimmed = (text || '').trim();
+  if (!trimmed.startsWith('/')) return false;
+
+  const parts = trimmed.slice(1).split(/\s+/);
+  const cmd = parts[0]?.toLowerCase();
+  const rest = parts.slice(1).join(' ').trim();
+
+  if (cmd === 'done') {
+    if (!rest) {
+      openAnchorDashboard(ctx, store);
+      return true;
+    }
+    const resolvedId = resolveAnchorTarget(store, rest, ctx.cwd);
+    if (!resolvedId) {
+      ctx.ui.notify(`⌖ Note not found: ${rest}`, 'error');
+      return true;
+    }
+    const settled = store.settle(resolvedId, { settledBy: 'manual' });
+    try {
+      const fg = (c: string, t: string) => (ctx.ui as any).theme?.fg ? (ctx.ui as any).theme.fg(c, t) : t;
+      const receipt = renderMissionReceipt(settled, { fg });
+      ctx.ui.notify(receipt.join('\n'), 'info');
+    } catch {
+      ctx.ui.notify(`⌖ Torn off #${settled.id.replace(/^anc-/, '')}: "${settled.title}" (/anchor undo to put back)`, 'info');
+    }
+    updateAnchorStatusBar(ctx, store);
+    return true;
+  }
+
+  if (cmd === 'check') {
+    const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length === 0) {
+      ctx.ui.notify('⌖ No active anchor to check steps. Type "pin: <goal>" first!', 'warning');
+      return true;
+    }
+    const p = activeHere[0];
+    const stepNum = parseInt(rest.replace(/^#/, ''), 10);
+    if (isNaN(stepNum)) {
+      ctx.ui.notify('Usage: /check <stepNumber> (e.g. /check 2)', 'warning');
+      return true;
+    }
+    try {
+      store.updateStep(p.id, stepNum, { status: 'completed' });
+      ctx.ui.notify(`⌖ Checked step #${stepNum} on "${p.title}"`, 'info');
+      updateStartupBanner(ctx, store);
+    } catch (err: any) {
+      ctx.ui.notify(`Check step failed: ${err.message}`, 'error');
+    }
+    return true;
+  }
+
+  if (cmd === 'step') {
+    const tokens = rest.split(/\s+/).filter(Boolean);
+    const target = tokens[0] || '1';
+    const delta = tokens[1] ? parseInt(tokens[1], 10) : 1;
+    const resolvedId = resolveAnchorTarget(store, target, ctx.cwd);
+    if (!resolvedId) {
+      ctx.ui.notify(`⌖ Note not found: ${target}`, 'error');
+      return true;
+    }
+    const { anchor: updated } = store.step(resolvedId, isNaN(delta) ? 1 : delta);
+    ctx.ui.notify(`⌖ Advanced #${updated.id.replace(/^anc-/, '')} to ${formatProgressBar(updated.progress)}`, 'info');
+    updateAnchorStatusBar(ctx, store);
+    return true;
+  }
+
+  if (cmd === 'steer') {
+    if (!rest) {
+      ctx.ui.notify('Usage: /steer <guidance for current anchor>', 'warning');
+      return true;
+    }
+    const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length === 0) {
+      ctx.ui.notify('⌖ No active anchor to steer. Type "pin: <goal>" first!', 'warning');
+      return true;
+    }
+    const p = activeHere[0];
+    store.update(p.id, { steerGuidance: rest });
+    updateStartupBanner(ctx, store);
+    ctx.ui.notify(`⌖ Steered Anchor #${p.id.replace(/^anc-/, '')}: "${rest}"`, 'info');
+    return true;
+  }
+
+  if (cmd === 'now') {
+    const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
+    if (activeHere.length === 0) {
+      ctx.ui.notify('⌖ No active anchor in this workspace. Type "pin: <goal>" to anchor your vibe-coding task!', 'info');
+      return true;
+    }
+    const p = activeHere[0];
+    const bar = p.progress ? ` ${formatProgressBar(p.progress)}` : '';
+    const origin = formatOrigin(p);
+    const activity = p.activeForm ? ` • Live Pulse: ◐ ${p.activeForm}` : '';
+    const files = p.files && p.files.length > 0 ? ` • Files: ${p.files.slice(0, 3).join(', ')}` : '';
+    const msg = `⌖ Active Anchor #${p.id.replace(/^anc-/, '')}${bar}: "${p.title}" (${origin})${activity}${files}`;
+    ctx.ui.notify(msg, 'info');
+    return true;
+  }
+
+  if (cmd === 'todo' || cmd === 'anchors') {
+    openAnchorDashboard(ctx, store);
+    return true;
+  }
+
+  return false;
+}
+
 
 export function registerAnchorCommands(
   pi: ExtensionAPI,
@@ -154,7 +352,7 @@ export function registerAnchorCommands(
 ): void {
   // 6. Slash Commands: /anchor, /pin, /step, /done, /check, /todo, /steer, /now, /anchors, /back
   pi.registerCommand('anchor', {
-    description: 'View, pin, step, jump to session, or tear off sticky notes (/anchor, /anchor step 1, /anchor jump 1, /anchor done 1)',
+    description: 'View, pin, step, snap, steer, or tear off tasks (/anchor, /anchor done, /anchor snap, /anchor step, /anchor check)',
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const parsed = parseAnchorCommandInput(args);
 
@@ -193,6 +391,37 @@ export function registerAnchorCommands(
         ctx.ui.notify(lines.join('\n'), 'info');
         return;
       }
+      if (parsed.mode === 'snap') {
+        const res = createGitWipSnapshot(ctx.cwd, parsed.snapMessage);
+        if (!res.success) {
+          ctx.ui.notify(`Snap failed: ${res.error}`, 'error');
+          return;
+        }
+        if (res.isClean) {
+          ctx.ui.notify(`⌖ Working tree clean. Snapshot at HEAD commit [${res.commitHash}]`, 'info');
+        } else {
+          ctx.ui.notify(
+            `⌖ Git WIP snapshot saved: [${res.commitHash}] "${parsed.snapMessage || 'WIP snapshot'}"\nTo diff: git diff refs/anchor/snap\nTo restore: git checkout refs/anchor/snap -- .`,
+            'info'
+          );
+        }
+        return;
+      }
+
+      if (parsed.mode === 'legacy') {
+        const flag = parsed.title;
+        if (flag === 'on') {
+          process.env.ANCHOR_LEGACY_COMMANDS = '1';
+          ctx.ui.notify('⌖ Legacy standalone commands enabled for next session (ANCHOR_LEGACY_COMMANDS=1)', 'info');
+        } else if (flag === 'off') {
+          delete process.env.ANCHOR_LEGACY_COMMANDS;
+          ctx.ui.notify('⌖ Slash command menu decluttered (legacy commands handled via 0ms input intercept)', 'info');
+        } else {
+          const current = process.env.ANCHOR_LEGACY_COMMANDS === '1';
+          ctx.ui.notify(`⌖ Menu mode: ${current ? 'full (10 legacy commands)' : 'decluttered (/anchor, /pin, /snap, /back)'}. Toggle with /anchor legacy on|off`, 'info');
+        }
+        return;
+      }
 
       if (parsed.mode === 'search') {
         const hits = store.search(parsed.query || '');
@@ -211,12 +440,12 @@ export function registerAnchorCommands(
       if (parsed.mode === 'steer') {
         const text = (parsed.title || '').trim();
         if (!text) {
-          ctx.ui.notify('Usage: /anchor steer <guidance for current anchor>', 'warn');
+          ctx.ui.notify('Usage: /anchor steer <guidance for current anchor>', 'warning');
           return;
         }
         const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
         if (activeHere.length === 0) {
-          ctx.ui.notify('⌖ No active anchor to steer. Type "pin: <goal>" first!', 'warn');
+          ctx.ui.notify('⌖ No active anchor to steer. Type "pin: <goal>" first!', 'warning');
           return;
         }
         const p = activeHere[0];
@@ -247,13 +476,13 @@ export function registerAnchorCommands(
       if (parsed.mode === 'check' && parsed.targetId) {
         const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
         if (activeHere.length === 0) {
-          ctx.ui.notify('⌖ No active anchor to check steps. Type "pin: <goal>" first!', 'warn');
+          ctx.ui.notify('⌖ No active anchor to check steps. Type "pin: <goal>" first!', 'warning');
           return;
         }
         const p = activeHere[0];
         const stepNum = parseInt(parsed.targetId, 10);
         if (isNaN(stepNum)) {
-          ctx.ui.notify('Usage: /anchor check <stepNumber> (e.g. /check 2)', 'warn');
+          ctx.ui.notify('Usage: /anchor check <stepNumber> (e.g. /check 2)', 'warning');
           return;
         }
         try {
@@ -285,7 +514,15 @@ export function registerAnchorCommands(
           ctx.ui.notify(`⌖ No saved conversation session found for #${parsed.targetId}`, 'error');
           return;
         }
-        await ctx.switchSession(note.sessionFile);
+        if (typeof ctx.switchSession !== 'function') {
+          ctx.ui.notify('Session switching is unavailable in this host.', 'warning');
+          return;
+        }
+        try {
+          await ctx.switchSession(note.sessionFile);
+        } catch (err: any) {
+          ctx.ui.notify(`Could not switch session: ${err?.message || err}`, 'error');
+        }
         return;
       }
 
@@ -343,6 +580,26 @@ export function registerAnchorCommands(
       ctx.ui.notify(`⌖ Pinned #${anc.id.replace(/^anc-/, '')}${bar}: "${anc.title}"`, 'info');
     }
   });
+  pi.registerCommand('snap', {
+    description: 'Create lightweight git WIP checkpoint snapshot (/snap [message])',
+    handler: async (args: string, ctx: ExtensionCommandContext) => {
+      const res = createGitWipSnapshot(ctx.cwd, args);
+      if (!res.success) {
+        ctx.ui.notify(`Snap failed: ${res.error}`, 'error');
+        return;
+      }
+      if (res.isClean) {
+        ctx.ui.notify(`⌖ Working tree clean. Snapshot at HEAD commit [${res.commitHash}]`, 'info');
+      } else {
+        ctx.ui.notify(
+          `⌖ Git WIP snapshot saved: [${res.commitHash}] "${(args || '').trim() || 'WIP snapshot'}"\nTo diff: git diff refs/anchor/snap\nTo restore: git checkout refs/anchor/snap -- .`,
+          'info'
+        );
+      }
+    }
+  });
+
+  if (process.env.ANCHOR_LEGACY_COMMANDS === '1') {
 
   pi.registerCommand('step', {
     description: 'Advance progress bar on a sticky note (e.g. /step 1)',
@@ -391,18 +648,18 @@ export function registerAnchorCommands(
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const target = (args || '').trim().replace(/^#/, '');
       if (!target) {
-        ctx.ui.notify('Usage: /check <stepNumber> (e.g. /check 2)', 'warn');
+        ctx.ui.notify('Usage: /check <stepNumber> (e.g. /check 2)', 'warning');
         return;
       }
       const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
       if (activeHere.length === 0) {
-        ctx.ui.notify('⌖ No active anchor to check steps. Type "pin: <goal>" first!', 'warn');
+        ctx.ui.notify('⌖ No active anchor to check steps. Type "pin: <goal>" first!', 'warning');
         return;
       }
       const p = activeHere[0];
       const stepNum = parseInt(target, 10);
       if (isNaN(stepNum)) {
-        ctx.ui.notify('Usage: /check <stepNumber> (e.g. /check 2)', 'warn');
+        ctx.ui.notify('Usage: /check <stepNumber> (e.g. /check 2)', 'warning');
         return;
       }
       try {
@@ -427,12 +684,12 @@ export function registerAnchorCommands(
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       const text = (args || '').trim();
       if (!text) {
-        ctx.ui.notify('Usage: /steer <guidance for current anchor>', 'warn');
+        ctx.ui.notify('Usage: /steer <guidance for current anchor>', 'warning');
         return;
       }
       const activeHere = sortAnchorsForDisplay(store.list({ status: 'active', cwd: ctx.cwd }), ctx.cwd);
       if (activeHere.length === 0) {
-        ctx.ui.notify('⌖ No active anchor to steer. Type "pin: <goal>" first!', 'warn');
+        ctx.ui.notify('⌖ No active anchor to steer. Type "pin: <goal>" first!', 'warning');
         return;
       }
       const p = activeHere[0];
@@ -467,6 +724,8 @@ export function registerAnchorCommands(
     }
   });
 
+  }
+
   // 1-click Session Time-Machine: `/back` (or `/back 1`) jumps straight to the saved session of an unfinished note/todo checkpoint
   pi.registerCommand('back', {
     description: 'Jump back to the conversation session of the latest unfinished note or todo checkpoint (/back [id])',
@@ -481,7 +740,15 @@ export function registerAnchorCommands(
           ctx.ui.notify(`⌖ No saved session found for #${targetArg}`, 'error');
           return;
         }
-        await ctx.switchSession(note.sessionFile);
+        if (typeof ctx.switchSession !== 'function') {
+          ctx.ui.notify('Session switching is unavailable in this host.', 'warning');
+          return;
+        }
+        try {
+          await ctx.switchSession(note.sessionFile);
+        } catch (err: any) {
+          ctx.ui.notify(`Could not switch session: ${err?.message || err}`, 'error');
+        }
         return;
       }
 
@@ -500,7 +767,15 @@ export function registerAnchorCommands(
         return;
       }
 
-      await ctx.switchSession(jumpTarget.sessionFile);
+      if (typeof ctx.switchSession !== 'function') {
+        ctx.ui.notify('Session switching is unavailable in this host.', 'warning');
+        return;
+      }
+      try {
+        await ctx.switchSession(jumpTarget.sessionFile);
+      } catch (err: any) {
+        ctx.ui.notify(`Could not switch session: ${err?.message || err}`, 'error');
+      }
     }
   });
 }

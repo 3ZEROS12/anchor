@@ -1,4 +1,4 @@
-import { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent';
+import { ExtensionContext, ExtensionAPI } from '@earendil-works/pi-coding-agent';
 
 /**
  * Anchor v1.0 Domain Contracts
@@ -239,11 +239,12 @@ declare class AnchorStore {
 }
 
 declare function parseAnchorCommandInput(raw: string): {
-    mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer' | 'check' | 'search' | 'history';
+    mode: 'dashboard' | 'undo' | 'fold' | 'settle' | 'step' | 'jump' | 'pin' | 'now' | 'steer' | 'check' | 'search' | 'history' | 'snap' | 'legacy';
     targetId?: string;
     delta?: number;
     title?: string;
     query?: string;
+    snapMessage?: string;
 };
 /**
  * Detect 0ms human-first quick note prefix in the input box:
@@ -261,6 +262,13 @@ declare function resolveAnchorTarget(store: AnchorStore, idOrIndex: string, cwd?
  * supports multiple `-m "..."`, `-am "..."`, `--message="..."`, and single quotes `-m '...'`
  */
 declare function extractGitCommitMessages(cmd: string): string[];
+declare function createGitWipSnapshot(cwd: string, message?: string): {
+    success: boolean;
+    commitHash?: string;
+    isClean?: boolean;
+    error?: string;
+};
+declare function tryHandleLegacySlashCommand(text: string, store: AnchorStore, ctx: ExtensionContext): boolean;
 declare function registerAnchorCommands(pi: ExtensionAPI, store: AnchorStore, createStickyNoteFromUser: (title: string, ctx: ExtensionContext) => any, getSessionFileSafe: (ctx?: ExtensionContext) => string | undefined): void;
 
 declare const MUTATION_TOOLS: Set<string>;
@@ -268,4 +276,4 @@ declare const MUTATION_TOOLS: Set<string>;
 declare function getSessionFileSafe(ctx?: ExtensionContext): string | undefined;
 declare function export_default(pi: ExtensionAPI, customStore?: AnchorStore): void;
 
-export { type AnchorProgress as A, type DockStepLayout as D, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type StepCounts as S, type TouchMatchResult as T, type Anchor as a, type AnchorStep as b, type TodoTaskItem as c, type StepStatus as d, AnchorStore as e, type AnchorEvidence as f, type AnchorPriority as g, type AnchorStatus as h, type AnchorStoreState as i, DEFAULT_MAX_DOCK_LINES as j, MUTATION_TOOLS as k, acquireSyncLock as l, atomicRenameWithRetry as m, extractGitCommitMessages as n, getDefaultStorageDir as o, getSessionFileSafe as p, parseAnchorCommandInput as q, parseQuickNoteInput as r, registerAnchorCommands as s, renderActiveAnchorsContext as t, renderColdStartAnchorsContext as u, resolveAnchorTarget as v, sweepQuietNotes as w, export_default as x };
+export { type AnchorProgress as A, type DockStepLayout as D, MS_PER_DAY as M, QUIET_AFTER_DAYS as Q, type StepCounts as S, type TouchMatchResult as T, type Anchor as a, type AnchorStep as b, type TodoTaskItem as c, type StepStatus as d, AnchorStore as e, type AnchorEvidence as f, type AnchorPriority as g, type AnchorStatus as h, type AnchorStoreState as i, DEFAULT_MAX_DOCK_LINES as j, MUTATION_TOOLS as k, acquireSyncLock as l, atomicRenameWithRetry as m, createGitWipSnapshot as n, extractGitCommitMessages as o, getDefaultStorageDir as p, getSessionFileSafe as q, parseAnchorCommandInput as r, parseQuickNoteInput as s, registerAnchorCommands as t, renderActiveAnchorsContext as u, renderColdStartAnchorsContext as v, resolveAnchorTarget as w, sweepQuietNotes as x, tryHandleLegacySlashCommand as y, export_default as z };

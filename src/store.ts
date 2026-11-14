@@ -102,14 +102,23 @@ export function sweepQuietNotes(store: AnchorStore, now: number = Date.now()): {
 
 export function getDefaultStorageDir(): string {
   if (process.env.ANCHOR_DIR) return path.resolve(process.env.ANCHOR_DIR);
+  if (process.env.PI_ANCHOR_DIR) return path.resolve(process.env.PI_ANCHOR_DIR);
   return path.join(os.homedir(), '.anchor');
 }
 
+const SLEEP_SAB = typeof SharedArrayBuffer !== 'undefined' ? new Int32Array(new SharedArrayBuffer(4)) : null;
+
 function sleepSync(ms: number): void {
+  if (ms <= 0) return;
+  if (SLEEP_SAB) {
+    try {
+      Atomics.wait(SLEEP_SAB, 0, 0, Math.floor(ms));
+      return;
+    } catch {}
+  }
   const end = Date.now() + ms;
   while (Date.now() < end) {}
 }
-
 function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -815,7 +824,9 @@ export class AnchorStore {
       }
       if (!anchor) throw new Error('Archive is empty, nothing to undo');
 
-      fs.writeFileSync(this.archivePath, lines.length > 0 ? lines.join('\n') + '\n' : '', 'utf-8');
+      const tmpArchive = `${this.archivePath}.${process.pid}.${Date.now()}.tmp`;
+      fs.writeFileSync(tmpArchive, lines.length > 0 ? lines.join('\n') + '\n' : '', 'utf-8');
+      atomicRenameWithRetry(tmpArchive, this.archivePath);
 
       anchor.status = 'active';
       anchor.updatedAt = Date.now();

@@ -325,11 +325,16 @@ export function renderMissionReceipt(
     ? anchor.files.slice(0, 3).map(f => f.split(/[\\/]/).pop()).join(', ')
     : anchor.project || 'workspace';
   const progressStr = anchor.progress ? `[■■■■ ${anchor.progress.total}/${anchor.progress.total}] Verified` : '100% Completed';
+  const driftStr = anchor.driftWarning ? `1 (${anchor.driftWarning})` : '0 violations';
+  const clippedTitle = truncateToWidth(anchor.title, 36);
+  const titleBar = `┌─ ⌖ Mission #${num} Completed: "${clippedTitle}" `;
+  const boxWidth = Math.max(63, getDisplayWidth(titleBar) + 2);
+  const topFill = '─'.repeat(Math.max(1, boxWidth - getDisplayWidth(titleBar) - 1));
 
   return [
-    fg('accent', `┌─ ⌖ Mission #${num} Completed: "${anchor.title}" ─────────────────────────┐`),
+    fg('accent', `${titleBar}${topFill}┐`),
     fg('muted',  `│  • Duration: ${durationStr} · Progress: ${progressStr}`),
-    fg('muted',  `│  • Target Scope: ${targetStr} · Drift: 0 violations`),
-    fg('accent', `└─────────────────────────────────────────────────────────────┘`)
+    fg('muted',  `│  • Target Scope: ${targetStr} · Drift: ${driftStr}`),
+    fg('accent', `└${'─'.repeat(Math.max(1, boxWidth - 2))}┘`)
   ];
 }
